@@ -300,6 +300,7 @@ class add_atoms():
                                                 coords,ghost_coords)
             self.timeframes[frame]['ghost_coords'] = ghost_coords
         return
+    
     @staticmethod
     def serialize_info(info):
         n = len(info)
@@ -356,8 +357,6 @@ class add_atoms():
             
         self.timeframes[frame]['ghost_coords'] = ghost_coords
         return
-    
-
     
     @staticmethod
     def assign_ghost_topol(self,info):
