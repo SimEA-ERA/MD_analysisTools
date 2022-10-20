@@ -2053,6 +2053,7 @@ class Analysis_Confined(Analysis):
         print_time(tf,inspect.currentframe().f_code.co_name)
         #return {t:v[tot_filt] for t,v in dihedrals_t.items()}
         return Ree_t,filt_per_t
+    
     def set_partial_charge(self):
         if not hasattr(self,'partial_charge'):
             self.charge_from_maps()
@@ -2061,6 +2062,7 @@ class Analysis_Confined(Analysis):
                 charge[i] = self.charge_map[ty]
             self.partial_charge = charge
         return
+    
     def calc_chain_dipole_moment_t(self,filters={'all':None},dads=1):
         t0 = perf_counter()
         
