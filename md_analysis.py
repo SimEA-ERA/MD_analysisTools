@@ -1941,12 +1941,12 @@ class Analysis_Confined(Analysis):
         
         args = (dih_ids,dlayers,dih_distr)
         nframes = self.loop_trajectory('dihedral_distribution', args)
-
+        
         dihedral_distr = {k:{lay:np.array(val) for lay,val in dih_distr[k].items()} for k in dih_distr }
         tf = perf_counter() -t0
        
         print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-    
+        return dihedral_distr
     
     def calc_chain_characteristics(self,dmin,dmax,binl):
         
@@ -2006,7 +2006,12 @@ class Analysis_Confined(Analysis):
         
         return chain_cm
 
-   
+    def segs_CM(self,coords,segids):
+        n = segids.shape[0]
+        segcm = np.empty((n,3),dtype=float)
+        numba_CM(coords,segids,self.atom_mass,segcm)
+        return segcm
+            
 
     def calc_dihedrals_t(self,dih_type,
                              dads=0,filters={'all':None}):
@@ -2016,7 +2021,7 @@ class Analysis_Confined(Analysis):
         filt_per_t = dict()
        
         dih_ids = self.dihedrals_ids_per_type[dih_type] #array (ndihs,4)
-        ids1 = dih_ids[:,1] ; ids2 = dih_ids[:,2] 
+        ids1 = dih_ids[:,0] ; ids2 = dih_ids[:,3] 
 
         args = (dih_ids,ids1,ids2,filters,dads,dihedrals_t,filt_per_t)
         
@@ -2142,7 +2147,7 @@ class Analysis_Confined(Analysis):
         print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return dipoles_t,filters_t
      
-    def calc_chainCM_t(self,filters, dads=1,option=''):
+    def calc_chainCM_t(self,filters={'all':None}, dads=1,option=''):
         t0 = perf_counter()
         filters = {'chain_'+k: v for k,v in filters.items()} #Need to modify when considering chains
         
@@ -2152,6 +2157,28 @@ class Analysis_Confined(Analysis):
         args = (filters,dads,vec_t,filt_per_t)
         
         nframes = self.loop_trajectory('chainCM_t'+option, args)
+      
+        filt_per_t = rearrange_dict_keys(filt_per_t)
+        
+        tf = perf_counter() - t0
+        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
+        return vec_t,filt_per_t
+    
+    def calc_segCM_t(self,topol_vector,segbond,
+                     filters={'all':None}, dads=1,option=''):
+        t0 = perf_counter()
+     
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        
+        segmental_ids = self.find_segmental_ids(ids1, ids2, segbond)
+        
+        vec_t = dict()
+        filt_per_t = dict()
+        
+        args = (filters,dads,ids1,ids2,segmental_ids,vec_t,filt_per_t)
+        
+        nframes = self.loop_trajectory('segCM_t'+option, args)
       
         filt_per_t = rearrange_dict_keys(filt_per_t)
         
@@ -2852,7 +2879,7 @@ class coreFunctions():
         if frame ==0 :
             self.time_zero = time
         key = self.get_timekey(time, self.time_zero)
-        dihedrals_t[key] = np.cos(dih_val)
+        dihedrals_t[key] = dih_val
         
         del dih_val #deallocating for safty
         tm = perf_counter()
@@ -2955,6 +2982,32 @@ class coreFunctions():
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
                             chain_cm, part_cm, coords, dads)
+        
+        return 
+    
+    @staticmethod
+    def segCM_t(self,frame,filters,dads,
+                  ids1,ids2,segment_ids,
+                  vec_t,filt_per_t):
+        
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+        time = self.get_time(frame)
+        coords_whole = self.frame_unwrapped_coords(frame)
+        
+        part_cm = self.centerfun( CM( coords_whole[self.particle_filt], 
+                self.atom_mass[self.particle_filt]) )
+        
+        seg_cm = self.segs_CM(coords,segment_ids)
+        
+        if frame==0:
+            self.time_zero=time
+        key = self.get_timekey(time,self.time_zero)
+        
+        vec_t[key] =  chain_cm
+        
+        filt_per_t[key] = Filters.calc_filters(self,filters,
+                            ids1,ids2,coords_whole,part_cm,dads,box)
         
         return 
     
@@ -3414,9 +3467,9 @@ def chain_characteristics_kernel(coords,mass,ch_cm,Gyt):
     
     return Ree2, Rg2,k2,asph,acyl, Rgxx_plus_yy, Rgxx_plus_zz, Rgyy_plus_zz
    
-@jit(nopython=True, fastmath=True)
+@jit(nopython=True, fastmath=True,parallel=True)
 def dihedral_distribution_kernel(dih_ids,coords,dih_val):
-    for i in range(dih_ids.shape[0]):
+    for i in prange(dih_ids.shape[0]):
         r0 = coords[dih_ids[i,0]]
         r1 = coords[dih_ids[i,1]]  
         r2 = coords[dih_ids[i,2]]
@@ -3519,7 +3572,7 @@ def pair_dists_general(coords1,coords2,box,dists):
             dists[i*n2+j] = dist[j]
     return
 
-
+@jit(nopython=True,fastmath=True)
 def CM(coords,mass):
     cm = np.sum(mass*coords.T,axis=1)/mass.sum()
     return cm
@@ -3662,4 +3715,10 @@ def numba_isin(x1,x2,f):
         for x in x2:
             if x1[i] == x: 
                 f[i] = True
+    return
+@jit(nopython=True,fastmath=True,parallel=True)
+def numba_CM(coords,ids,mass,cm):
+    for i in prange(ids.shape[0]):
+        ji = ids[i]
+        cm[i] = CM(coords[ji],mass[ji])
     return
