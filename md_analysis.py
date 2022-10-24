@@ -3004,7 +3004,7 @@ class coreFunctions():
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
         
-        vec_t[key] =  chain_cm
+        vec_t[key] =  seg_cm
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
                             ids1,ids2,coords_whole,part_cm,dads,box)
