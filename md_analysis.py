@@ -70,13 +70,13 @@ def running_average(X,every=1):
 def moving_average(a, n=10) :
     mov = np.empty_like(a)
     
-    n2 = int(n2/2)
+    n2 = int(n/2)
     if n2%2 ==1: n2+=1
     up = a.shape[0]-n2
     for i in range(n2):
         mov[i] = a[:2*i+1].mean()
     for i in range(n2,up):
-        mov[i] = a[i-n2:i+n2+1]
+        mov[i] = a[i-n2:i+n2+1].mean()
     for i in range(up,a.shape[0]):
         j = (a.shape[0]-i)-1
         mov[i] = a[up-j:].mean()
@@ -128,7 +128,26 @@ class Energetic_Analysis():
         data = np.array([line.split() for line in lines[last_legend+1:]],dtype=float)
         self.data = pd.DataFrame(data,columns=columns)
         return
-            
+    def simple_plot(ycols,xcol='time',size = 3.5,dpi = 300, 
+             title='',func=None,
+             xlabel=['time (ps)'],save_figs=False,fname=None,path=None):
+        figsize = (size,size)
+        fig =plt.figure(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=1.5*size)
+        plt.tick_params(direction='in', which='major',length=1.5*size)
+        plt.xlabel('time (ps)',fontsize=size*3)
+        x = self.data[xcol].to_numpy()
+        if func is not None:
+            funcs = globals()[func]
+        for ycol in ycols:
+            y = self.data[ycol].to_numpy()
+            plt.plot(x,y,lab=ycol)
+            if funcs is not None:
+                plt.plot(x,funcs(y),lab ='{} - {}'.format(ycol,func))
+        plt.legend(frameon=False)
+        if save_figs:plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
+        plt.show()
 class Analytical_Expressions():
     @staticmethod
     def KWW(t,A,tc,beta,tww):
