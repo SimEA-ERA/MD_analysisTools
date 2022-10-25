@@ -14,7 +14,7 @@ from pytrr import GroTrrReader
 import pytrr
 from joblib import Parallel, delayed
 import multiprocessing
-
+import pandas as pd
 
 def iterable(arg):
     return (
@@ -57,6 +57,78 @@ def smaller_distance_kernel(d1,d2,c1,c2):
                 d1[i] = d2[j]
     return
 
+@jit(nopython=True,fastmath=True)
+def running_average(X,every=1):
+    n = X.shape[0]
+    xrun_mean = np.zeros(n)
+    for j in range(0,len(X),every):
+        y = X[:j+1]
+        n = y.shape[0]
+        xrun_mean[j] = np.sum(y)/n
+    return xrun_mean
+
+def moving_average(a, n=10) :
+    mov = np.empty_like(a)
+    
+    n2 = int(n2/2)
+    if n2%2 ==1: n2+=1
+    up = a.shape[0]-n2
+    for i in range(n2):
+        mov[i] = a[:2*i+1].mean()
+    for i in range(n2,up):
+        mov[i] = a[i-n2:i+n2+1]
+    for i in range(up,a.shape[0]):
+        j = (a.shape[0]-i)-1
+        mov[i] = a[up-j:].mean()
+        
+    return mov
+
+def block_average(a, n=100) :
+    bv = np.empty(int(a.shape[0]/n),dtype=float)
+    for i in range(bn.shape[0]):
+        x = a[i*n:(i+1)*n]
+        bv[i] = x.mean()
+    return bv
+
+def block_std(a, n=100) :
+    bstd = np.empty(int(a.shape[0]/n),dtype=float)
+    for i in range(bn.shape[0]):
+        x = a[i*n:(i+1)*n]
+        bstd[i] = x.std()
+    return bstd
+
+
+class Energetic_Analysis():
+    
+    def __init__(self,file):
+        self.data_file = file
+        if self.data_file[-4:] =='.xvg':
+            self.xvg_reader()
+        else:
+            raise NotImplementedError('Currently only accepting xvg files')
+    
+    def xvg_reader(self):
+        
+        with open(self.data_file) as f:
+            lines = f.readlines()
+            f.closed
+            
+        columns = ['time']
+        for i,line in enumerate(lines):
+            l = line.split()
+            
+            if l[0]=='@' and l[1][0]=='s' and l[2] =='legend':
+                columns.append(l[3].strip('"'))
+                last_legend = i
+            elif line[0] =='@' or line[0]=='#':
+                continue
+            else:
+                break
+            
+        data = np.array([line.split() for line in lines[last_legend+1:]],dtype=float)
+        self.data = pd.DataFrame(data,columns=columns)
+        return
+            
 class Analytical_Expressions():
     @staticmethod
     def KWW(t,A,tc,beta,tww):
@@ -75,6 +147,7 @@ class Analytical_Expressions():
         A2 = Analytical_Expressions.expDecay(tc,A1,t0) #continuity
         phiup = Analytical_Expressions.KWW(tup,A2,tc,beta,tww)
         return np.concatenate( (phil,phiup) )
+    
 @jitclass
 class Analytical_Functions():
     def __init__(self):
