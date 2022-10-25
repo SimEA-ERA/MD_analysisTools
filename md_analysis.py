@@ -15,6 +15,7 @@ import pytrr
 from joblib import Parallel, delayed
 import multiprocessing
 
+
 def iterable(arg):
     return (
         isinstance(arg, collections.Iterable) 
@@ -742,6 +743,7 @@ class Analysis:
             raise NotImplementedError('give either the type or serial=True if your atom chains are seriarly stored')
         self.EndGroup_args = eargs
         return
+    
     def get_EndGroup_args(self):
         try:
             args = self.EndGroup_args
@@ -759,6 +761,7 @@ class Analysis:
         tf = perf_counter() - t0
         print_time(tf,inspect.currentframe().f_code.co_name)
         return box_var/nframes
+    
     def frame_with_closer_box_tobox(self,target_box):
         mind = 10**9
         with self.traj_opener(*self.traj_opener_args) as ofile:
