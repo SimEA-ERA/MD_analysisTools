@@ -1778,7 +1778,7 @@ class Analysis_Confined(Analysis):
 
         #ads_chains
         ads_chains = np.unique(self.mol_ids[ftrain])
-        check_occurances(ads_chains)
+        #check_occurances(ads_chains)
         fads_chains = np.isin(self.mol_ids,ads_chains)
         args_ads_chain_atoms = np.nonzero(fads_chains)[0]
         
@@ -1885,6 +1885,31 @@ class Analysis_Confined(Analysis):
         
         return ads_chains,args_train,args_tail,args_loop,args_bridge
     
+    def conf_chunks(self,args):
+        
+        list_args = list(args)
+        chunks = []
+        aold = -1
+        
+        while(len(list_args)>0):
+
+            a = list_args[0]
+            assert a != aold,'while loop stuck on argument = {}'.format(a)
+            old_set_a = set()
+            new_set_a = {a}
+                    
+            while new_set_a != old_set_a:
+                old_set_a = new_set_a.copy()
+                for j in old_set_a:
+                    for neib in self.neibs[j]:
+                        if neib in list_args:
+                            new_set_a.add(neib)
+            
+            chunks.append(new_set_a)
+            for i in new_set_a:
+                list_args.remove(i)
+            aold = a    
+        return chunks
     ############### End of Conformation Calculation Supportive Functions #####
     
     ######## Main calculation Functions for structural properties ############      
@@ -2497,7 +2522,40 @@ class Filters():
         nbonds = np.minimum(nbonds1,nbonds2)
         
         return Filters.filtLayers_inclucive(bondlayers,nbonds)
-                          
+
+    @staticmethod
+    def conformationDistribution(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
+        
+        d = self.dfun(coords,cm)
+        ads_chains, args_train, args_tail,\
+        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+       
+        filt = dict()
+        for conf,intervals in fconfs.items():
+            
+            args = locals()['args_'+conf]
+            
+            conf_chunks = self.conf_chunks(args)
+            
+            sizes = np.array([len(chunk) for chunk in conf_chunks])
+            
+            
+            filt['{}:distr'.format(conf)] = sizes
+            
+            for inter in intervals:
+                #print(conf,inter)
+                chunk_int =set()
+                for chunk, size in zip(conf_chunks,sizes):
+                    if inter[0]<=size<inter[1]:
+                        chunk_int = chunk_int | chunk
+                        
+                args_chunk = np.array(list(chunk_int),dtype=int)
+                f = Filters.filt_bothEndsIn(ids1, ids2, args_chunk)
+                
+                filt['{}:{}'.format(conf,inter)] = f
+                
+        return filt
+    
     @staticmethod
     def conformations(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
         #rm = 0.5*(coords[ids1] + coords[ids2])
