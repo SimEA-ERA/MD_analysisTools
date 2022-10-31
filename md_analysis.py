@@ -16,6 +16,21 @@ from joblib import Parallel, delayed
 import multiprocessing
 import pandas as pd
 
+def stay_True(dic):
+    keys = list(dic.keys())
+    stayTrue = {keys[0]:dic[keys[0]]}
+    for i in range(1,len(dic)):
+        stayTrue[keys[i]] = np.logical_and(stayTrue[keys[i-1]],dic[keys[i]])
+    return stayTrue
+
+def become_False(dic):
+    keys = list(dic.keys())
+    bFalse = {keys[0]:dic[keys[0]]}
+    for i in range(1,len(dic)):
+        bFalse[keys[i]] = np.logical_and(bFalse[keys[0]],np.logical_not(dic[keys[i]]))
+    return bFalse
+
+
 def iterable(arg):
     return (
         isinstance(arg, collections.Iterable) 
@@ -3267,6 +3282,47 @@ def tacf_kernel(tacf,nv,x,ft,n):
     return
 
 @jit(nopython=True,fastmath=True,parallel=True)
+def P1_change_kernel(P1,nv,x,ft,n):
+    for i in range(n):
+        ft0 = ft[i]   
+        x0 = x[i]
+        for j in prange(i,n):
+            ftt = ft[j]
+            try:
+                value = costh__kernel_with_filter_change(x0,x[j],ft0,ftt)
+            except:
+                pass
+            else:
+                idx = j-i
+                P1[idx] +=  value
+                nv[idx] += 1
+        
+    for i in prange(n):    
+        P1[i] /= nv[i]
+    return 
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def P1_strict_kernel(P1,nv,x,ft,n):
+    for i in range(n):
+        ft0 = ft[i]   
+        x0 = x[i]
+        for j in prange(i,n):
+            ftt = ft[j]
+            try:
+                value = costh__kernel_with_filter_strict(x0,x[j],ft0,ftt)
+            except:
+                pass
+            else:
+                idx = j-i
+                P1[idx] +=  value
+                nv[idx] += 1
+        
+    for i in prange(n):    
+        P1[i] /= nv[i]
+    return 
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
 def P1_kernel(P1,nv,x,ft,n):
     for i in range(n):
         ft0 = ft[i]   
@@ -3440,6 +3496,31 @@ def var_wfilt_kernel(x,f):
     var = secmoment_wfilt_kernel(x,f) - mean_wfilt_kernel(x,f)**2
     return var
 
+@jit(nopython=True,fastmath=True)#,parallel=True)
+def costh__kernel_with_filter_strict(r1,r2,ft0,ftt):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and ftt[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    ave = tot/mi
+    return ave
+
+@jit(nopython=True,fastmath=True)#,parallel=True)
+def costh__kernel_with_filter_change(r1,r2,ft0,ftt):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and not ftt[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    ave = tot/mi
+    return ave
 
 @jit(nopython=True,fastmath=True)#,parallel=True)
 def costh__kernel_with_filter(r1,r2,ft0):
