@@ -1886,29 +1886,39 @@ class Analysis_Confined(Analysis):
         return ads_chains,args_train,args_tail,args_loop,args_bridge
     
     def conf_chunks(self,args):
-        
-        list_args = list(args)
+        #t0 = perf_counter()
+        set_args = set(args)
         chunks = []
         aold = -1
         
-        while(len(list_args)>0):
+        while(len(set_args)>0):
 
-            a = list_args[0]
-            assert a != aold,'while loop stuck on argument = {}'.format(a)
+            a = set_args.pop()
+            set_args.add(a)
+            #assert a != aold,'while loop stuck on argument = {}'.format(a)
             old_set_a = set()
             new_set_a = {a}
                     
+            new_neibs = new_set_a.copy()
+            
             while new_set_a != old_set_a:
                 old_set_a = new_set_a.copy()
-                for j in old_set_a:
+                
+                for j in new_neibs.copy():
+                    new_neibs = set()
                     for neib in self.neibs[j]:
-                        if neib in list_args:
+                        if neib in set_args:
                             new_set_a.add(neib)
-            
+                            if neib not in old_set_a:
+                                new_neibs.add(neib)
+                
+                
+
             chunks.append(new_set_a)
-            for i in new_set_a:
-                list_args.remove(i)
-            aold = a    
+            set_args.difference_update(new_set_a)
+        
+            #aold = a
+        #print_time(perf_counter()-t0,'conf_chunks')
         return chunks
     ############### End of Conformation Calculation Supportive Functions #####
     
