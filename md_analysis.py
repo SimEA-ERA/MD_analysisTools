@@ -3679,9 +3679,13 @@ def costh_kernel(r1,r2):
     return costh
 
 @jit(nopython=True,fastmath=True)
-def costh__kernel(costh,r1,r2):
-    for i in r1.shape[0]:
-        costh[i] = costh_kernel(r1[i],r2[i])
+def costh__kernel(r1,r2):
+    tot = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        tot += costh_kernel(r1[i],r2[i])
+    ave = tot/float(N)
+    return ave
 
 @jit(nopython=True,fastmath=True)
 def costhsquare__kernel(costh,r1,r2):
