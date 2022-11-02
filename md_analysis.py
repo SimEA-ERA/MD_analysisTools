@@ -15,6 +15,47 @@ import pytrr
 from joblib import Parallel, delayed
 import multiprocessing
 import pandas as pd
+import logging
+import coloredlogs
+
+LOGGING_LEVEL = logging.DEBUG
+
+logger = logging.getLogger(__name__)
+logger.setLevel(LOGGING_LEVEL)
+logFormat = '%(asctime)s\n[ %(levelname)s ]\n[%(filename)s -> %(funcName)s() -> line %(lineno)s]\n%(message)s\n --------'
+formatter = logging.Formatter(logFormat)
+
+logfile_handler = logging.FileHandler('md_analysis.log',mode='w')
+logfile_handler.setFormatter(formatter)
+
+logger.addHandler(logfile_handler)
+
+stream = logging.StreamHandler()
+stream.setLevel(logging.DEBUG)
+stream.setFormatter(formatter)
+
+logger.addHandler(stream)
+
+fieldstyle = {'asctime': {'color': 'magenta'},
+              'levelname': {'bold': True, 'color': 'green'},
+              'filename':{'color':'green'},
+              'funcName':{'color':'green'},
+              'lineno':{'color':'green'}}
+                                   
+levelstyles = {'critical': {'bold': True, 'color': 'red'},
+               'debug': {'color': 'blue'}, 
+               'error': {'color': 'red'}, 
+               'info': {'color':'cyan'},
+               'warning': {'color': 'yellow'}}
+
+coloredlogs.install(level=LOGGING_LEVEL,
+                    logger=logger,
+                    fmt=logFormat,
+                    datefmt='%H:%M:%S',
+                    field_styles=fieldstyle,
+                    level_styles=levelstyles)
+
+
 
 def stay_True(dic):
     keys = list(dic.keys())
@@ -44,7 +85,7 @@ def print_time(tf,name,nf=None):
     else:
         s2 = ' Time/frame --> {:s}\n'.format( readable_time(tf/nf))
     x = '-'*(len(name)+11)
-    print('Function "{:s}"\n{:s} \n{:s} Total time --> {:s}\n{:s}\n{:s}'.format(name,x,s2,s1,x,x))
+    logger.info('Function "{:s}"\n{:s} Total time --> {:s}'.format(name,s2,s1))
 def readable_time(tf):
     hours = int(tf/3600)
     minutes = int((tf-3600*hours)/60)
@@ -248,7 +289,7 @@ class Analytical_Functions():
         naxis = np.cross((rp-r0)/norm2(rp-r0),rrel/norm2(rrel))
         rrot = Analytical_Functions().rotate_around_an_axis(naxis, rrel, theta)
         newth = calc_angle(rp,r0,r0+rrot)
-        #print('th0 = {:6.5f}, new th = {:6.5f} '.format(th0*180/np.pi,newth*180/np.pi))
+        #logger.debug('th0 = {:6.5f}, new th = {:6.5f} '.format(th0*180/np.pi,newth*180/np.pi))
         return rrot,newth
     
     @staticmethod
@@ -261,7 +302,7 @@ class Analytical_Functions():
         s = -np.sign(r01)
         
         rrel = np.array([s[0]*dhalf,s[1]*dhalf,-s[2]*dhalf])
-        #print('theta target = {:4.3f}'.format(theta*180/np.pi))
+        #logger.debug('theta target = {:4.3f}'.format(theta*180/np.pi))
         
         newth = theta +1    
         af = Analytical_Functions()
@@ -1075,7 +1116,7 @@ class Analysis:
         try:
             bonds-=bonds.min()
         except ValueError as e:
-            print('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
+            logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
         tf = perf_counter()
         return  bonds
             
@@ -1182,13 +1223,13 @@ class Analysis:
         try:
             time = self.get_equal_from_string(line.strip(),'t')
         except:
-            print('Warning: in gro file. There is no time info')
+            logger.warning('Warning: in gro file. There is no time info')
             time = 0
         try:
             step = self.get_equal_from_string(line.strip(),'step',int)
         except:
             step = 0
-            print('Warning: in gro file. There is no step info')
+            logger.warning('Warning: in gro file. There is no step info')
         self.timeframes[frame] = {'time':time,'step':step}
         # second line
         natoms = int(ofile.readline().strip())
@@ -1582,7 +1623,7 @@ class Analysis_Confined(Analysis):
        
         else:
             raise Exception('Give particle_name or particle_filt explicitly')
-        print('Number of particle atoms: {:5d}'.format(np.count_nonzero(self.particle_filt)))
+        logger.info('Number of particle atoms: {:5d}'.format(np.count_nonzero(self.particle_filt)))
         return 
     
     def find_pol_filt(self):
@@ -1591,7 +1632,7 @@ class Analysis_Confined(Analysis):
             self.pol_filt = self.mol_names == self.pol_name # it gets a filter form
         else:
             raise Exception('Give mol_name or mol_ids explicitly')
-        print('Number of adsorbent atoms: {:5d}'.format(np.count_nonzero(self.pol_filt)))
+        logger.info('Number of adsorbent atoms: {:5d}'.format(np.count_nonzero(self.pol_filt)))
         return
        
     def translate_particle_in_box_middle(self,coords,box):
@@ -1728,7 +1769,7 @@ class Analysis_Confined(Analysis):
         if ty is str or ty is int:
             ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
 
-        #print('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
+        #logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
         return ids1,ids2
     
     ###############End of General Supportive functions Section#########
@@ -2013,7 +2054,7 @@ class Analysis_Confined(Analysis):
         
         ids1, ids2 = self.find_vector_ids(topol_vector)
         nvectors = ids1.shape[0]
-        print('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
+        logger.info('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
         nlayers = len(d_center)
         costh_fz = [[] for i in range(len(dlayers))]
         costh = np.empty(nvectors,dtype=float)
@@ -2063,7 +2104,7 @@ class Analysis_Confined(Analysis):
         stats['adschains_perc'] = stats['adschains'] / len(self.chain_args)
             
         for k,v in stats.items():
-            print('{:s} = {:4.3f}'.format(k,v))
+            logger.info('{:s} = {:4.3f}'.format(k,v))
         
         tf = perf_counter() -t0
         print_time(tf,inspect.currentframe().f_code.co_name,nframes)
@@ -2446,7 +2487,7 @@ class Analysis_Confined(Analysis):
             #prop_kernel(prop_nump, nv, x_nump, f_nump, nfr)
             prop_kernel(*args)
         except ZeroDivisionError as err:
-            print('Dynamics Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
+            logger.error('Dynamics Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
             return None
         
        
@@ -2458,7 +2499,7 @@ class Analysis_Confined(Analysis):
         tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
-        #print('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
+        #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
         print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "{}'.format(prop))
         return dynamical_property
 
@@ -2560,7 +2601,7 @@ class Filters():
             filt['{}:distr'.format(conf)] = sizes
             
             for inter in intervals:
-                #print(conf,inter)
+                
                 chunk_int =set()
                 for chunk, size in zip(conf_chunks,sizes):
                     if inter[0]<=size<inter[1]:
@@ -3073,7 +3114,7 @@ class coreFunctions():
                                     ids1,ids2,coords,cm,dads,box)
         tf = perf_counter()
         if frame ==1:
-            print('Dihedrals_as_t: Estimate time consuption --> Main: {:2.1f} %, Filters: {:2.1f} %'.format((tm-t0)*100/(tf-t0),(tf-tm)*100/(tf-t0)))
+            logger.info('Dihedrals_as_t: Estimate time consuption --> Main: {:2.1f} %, Filters: {:2.1f} %'.format((tm-t0)*100/(tf-t0),(tf-tm)*100/(tf-t0)))
         return
 
     @staticmethod
@@ -3827,7 +3868,7 @@ def pair_dists(coords,box,dists):
             idx_i-=k
         for j in range(rc.shape[0]):
             dists[idx_i+j] = dist[j]
-    #print(j,int(n*(n-1)/2),dists[-5:])
+    
     return
 @jit(nopython=True,fastmath=True,parallel=True)
 def pair_dists_general(coords1,coords2,box,dists):
