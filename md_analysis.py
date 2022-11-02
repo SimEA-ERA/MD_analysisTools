@@ -661,17 +661,30 @@ class Periodic_image_Functions():
 class Different_Particle_Functions():
     #functions return True for bridge
     @staticmethod
-    def zdir(self,r0,re,dads,CMs):
-        x0=r0[2]
-        xe =re[2]
+    def core_zyx_dir(d,r0,re,dads,CMs):
+        x0=r0[d]
+        xe =re[d]
         for i in range(CMs.shape[0]):
             for j in range(i+1,CMs.shape[0]):
-                cmi = CMs[i][2] ; cmj = CMs[j][2]
+                cmi = CMs[i][d] ; cmj = CMs[j][d]
                 if abs(cmi-cmj)>dads: # if it is indeed a different particle
                     if (abs(cmi-x0)<dads and abs(cmj-xe)<dads) or \
                         (abs(cmi-xe)<dads and abs(cmj-x0)<dads):
                             return False
         return True
+    
+    @staticmethod
+    def zdir(self,r0,re,dads,CMs):
+        d = 2
+        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
+    @staticmethod
+    def ydir(self,r0,re,dads,CMs):
+        d = 1
+        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
+    @staticmethod
+    def xdir(self,r0,re,dads,CMs):
+        d = 0
+        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
    
 
 
@@ -1736,7 +1749,7 @@ class Analysis_Confined(Analysis):
     
     @staticmethod
     def get_layers(dads,dmax,binl):
-        bins = np.arange(dads,dmax,binl)
+        bins = np.arange(dads,dmax+binl,binl)
         dlayers = [(0,dads)]
         nbins = len(bins)-1
         for i in range(0,nbins):
