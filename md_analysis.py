@@ -14,6 +14,22 @@ from pytrr import GroTrrReader
 import pytrr
 from joblib import Parallel, delayed
 import multiprocessing
+import pandas as pd
+
+def stay_True(dic):
+    keys = list(dic.keys())
+    stayTrue = {keys[0]:dic[keys[0]]}
+    for i in range(1,len(dic)):
+        stayTrue[keys[i]] = np.logical_and(stayTrue[keys[i-1]],dic[keys[i]])
+    return stayTrue
+
+def become_False(dic):
+    keys = list(dic.keys())
+    bFalse = {keys[0]:dic[keys[0]]}
+    for i in range(1,len(dic)):
+        bFalse[keys[i]] = np.logical_and(bFalse[keys[0]],np.logical_not(dic[keys[i]]))
+    return bFalse
+
 
 def iterable(arg):
     return (
@@ -56,6 +72,97 @@ def smaller_distance_kernel(d1,d2,c1,c2):
                 d1[i] = d2[j]
     return
 
+@jit(nopython=True,fastmath=True)
+def running_average(X,every=1):
+    n = X.shape[0]
+    xrun_mean = np.zeros(n)
+    for j in range(0,len(X),every):
+        y = X[:j+1]
+        n = y.shape[0]
+        xrun_mean[j] = np.sum(y)/n
+    return xrun_mean
+
+def moving_average(a, n=10) :
+    mov = np.empty_like(a)
+    
+    n2 = int(n/2)
+    if n2%2 ==1: n2+=1
+    up = a.shape[0]-n2
+    for i in range(n2):
+        mov[i] = a[:2*i+1].mean()
+    for i in range(n2,up):
+        mov[i] = a[i-n2:i+n2+1].mean()
+    for i in range(up,a.shape[0]):
+        j = (a.shape[0]-i)-1
+        mov[i] = a[up-j:].mean()
+        
+    return mov
+
+def block_average(a, n=100) :
+    bv = np.empty(int(a.shape[0]/n),dtype=float)
+    for i in range(bn.shape[0]):
+        x = a[i*n:(i+1)*n]
+        bv[i] = x.mean()
+    return bv
+
+def block_std(a, n=100) :
+    bstd = np.empty(int(a.shape[0]/n),dtype=float)
+    for i in range(bn.shape[0]):
+        x = a[i*n:(i+1)*n]
+        bstd[i] = x.std()
+    return bstd
+
+
+class Energetic_Analysis():
+    
+    def __init__(self,file):
+        self.data_file = file
+        if self.data_file[-4:] =='.xvg':
+            self.xvg_reader()
+        else:
+            raise NotImplementedError('Currently only accepting xvg files')
+    
+    def xvg_reader(self):
+        
+        with open(self.data_file) as f:
+            lines = f.readlines()
+            f.closed
+            
+        columns = ['time']
+        for i,line in enumerate(lines):
+            l = line.split()
+            
+            if l[0]=='@' and l[1][0]=='s' and l[2] =='legend':
+                columns.append(l[3].strip('"'))
+                last_legend = i
+            elif line[0] =='@' or line[0]=='#':
+                continue
+            else:
+                break
+            
+        data = np.array([line.split() for line in lines[last_legend+1:]],dtype=float)
+        self.data = pd.DataFrame(data,columns=columns)
+        return
+    def simple_plot(ycols,xcol='time',size = 3.5,dpi = 300, 
+             title='',func=None,
+             xlabel=['time (ps)'],save_figs=False,fname=None,path=None):
+        figsize = (size,size)
+        fig =plt.figure(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=1.5*size)
+        plt.tick_params(direction='in', which='major',length=1.5*size)
+        plt.xlabel('time (ps)',fontsize=size*3)
+        x = self.data[xcol].to_numpy()
+        if func is not None:
+            funcs = globals()[func]
+        for ycol in ycols:
+            y = self.data[ycol].to_numpy()
+            plt.plot(x,y,lab=ycol)
+            if funcs is not None:
+                plt.plot(x,funcs(y),lab ='{} - {}'.format(ycol,func))
+        plt.legend(frameon=False)
+        if save_figs:plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
+        plt.show()
 class Analytical_Expressions():
     @staticmethod
     def KWW(t,A,tc,beta,tww):
@@ -74,6 +181,7 @@ class Analytical_Expressions():
         A2 = Analytical_Expressions.expDecay(tc,A1,t0) #continuity
         phiup = Analytical_Expressions.KWW(tup,A2,tc,beta,tww)
         return np.concatenate( (phil,phiup) )
+    
 @jitclass
 class Analytical_Functions():
     def __init__(self):
@@ -300,6 +408,7 @@ class add_atoms():
                                                 coords,ghost_coords)
             self.timeframes[frame]['ghost_coords'] = ghost_coords
         return
+    
     @staticmethod
     def serialize_info(info):
         n = len(info)
@@ -356,8 +465,6 @@ class add_atoms():
             
         self.timeframes[frame]['ghost_coords'] = ghost_coords
         return
-    
-
     
     @staticmethod
     def assign_ghost_topol(self,info):
@@ -743,6 +850,7 @@ class Analysis:
             raise NotImplementedError('give either the type or serial=True if your atom chains are seriarly stored')
         self.EndGroup_args = eargs
         return
+    
     def get_EndGroup_args(self):
         try:
             args = self.EndGroup_args
@@ -760,7 +868,8 @@ class Analysis:
         tf = perf_counter() - t0
         print_time(tf,inspect.currentframe().f_code.co_name)
         return box_var/nframes
-    def frame_with_closer_box_tobox(self,target_box):
+    
+    def frame_closer_tobox(self,target_box):
         mind = 10**9
         with self.traj_opener(*self.traj_opener_args) as ofile:
             t0 = perf_counter()
@@ -1070,9 +1179,16 @@ class Analysis:
         if len(l)==0:
             return False
         #first line
-        time = self.get_equal_from_string(line.strip(),'t')
-        step = self.get_equal_from_string(line.strip(),'step',int)
-            
+        try:
+            time = self.get_equal_from_string(line.strip(),'t')
+        except:
+            print('Warning: in gro file. There is no time info')
+            time = 0
+        try:
+            step = self.get_equal_from_string(line.strip(),'step',int)
+        except:
+            step = 0
+            print('Warning: in gro file. There is no step info')
         self.timeframes[frame] = {'time':time,'step':step}
         # second line
         natoms = int(ofile.readline().strip())
@@ -1197,7 +1313,7 @@ class Analysis:
         return  
     
     def write_residues(self,res,fname='selected_residues.gro',
-                       frames=(0,0),boxoff=0.4):
+                       frames=(0,0),box=None,boxoff=0.4):
         with open(fname,'w') as ofile:
             fres = np.isin(self.mol_ids, res)
             
@@ -1214,8 +1330,8 @@ class Analysis:
                         ofile.write('%5d%-5s%5s%5d%8.3f%8.3f%8.3f\n'\
                         % (self.mol_ids[i],self.mol_names[i], self.at_types[i]
                            ,self.at_ids[i%100000] ,c[0],c[1] ,c[2] ))
-                    
-                    box = coords.max(axis=1) - coords.min(axis=1) + boxoff
+                    if box is None: 
+                        box = coords.max(axis=1) - coords.min(axis=1) + boxoff
                     ofile.write('%f  %f  %f\n' % (box[0],box[1],box[2]))  
             
             ofile.closed
@@ -1669,7 +1785,7 @@ class Analysis_Confined(Analysis):
 
         #ads_chains
         ads_chains = np.unique(self.mol_ids[ftrain])
-        check_occurances(ads_chains)
+        #check_occurances(ads_chains)
         fads_chains = np.isin(self.mol_ids,ads_chains)
         args_ads_chain_atoms = np.nonzero(fads_chains)[0]
         
@@ -1776,6 +1892,41 @@ class Analysis_Confined(Analysis):
         
         return ads_chains,args_train,args_tail,args_loop,args_bridge
     
+    def conf_chunks(self,args):
+        #t0 = perf_counter()
+        set_args = set(args)
+        chunks = []
+        aold = -1
+        
+        while(len(set_args)>0):
+
+            a = set_args.pop()
+            set_args.add(a)
+            #assert a != aold,'while loop stuck on argument = {}'.format(a)
+            old_set_a = set()
+            new_set_a = {a}
+                    
+            new_neibs = new_set_a.copy()
+            
+            while new_set_a != old_set_a:
+                old_set_a = new_set_a.copy()
+                
+                for j in new_neibs.copy():
+                    new_neibs = set()
+                    for neib in self.neibs[j]:
+                        if neib in set_args:
+                            new_set_a.add(neib)
+                            if neib not in old_set_a:
+                                new_neibs.add(neib)
+                
+                
+
+            chunks.append(new_set_a)
+            set_args.difference_update(new_set_a)
+        
+            #aold = a
+        #print_time(perf_counter()-t0,'conf_chunks')
+        return chunks
     ############### End of Conformation Calculation Supportive Functions #####
     
     ######## Main calculation Functions for structural properties ############      
@@ -1942,12 +2093,12 @@ class Analysis_Confined(Analysis):
         
         args = (dih_ids,dlayers,dih_distr)
         nframes = self.loop_trajectory('dihedral_distribution', args)
-
+        
         dihedral_distr = {k:{lay:np.array(val) for lay,val in dih_distr[k].items()} for k in dih_distr }
         tf = perf_counter() -t0
        
         print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-    
+        return dihedral_distr
     
     def calc_chain_characteristics(self,dmin,dmax,binl):
         
@@ -2007,7 +2158,12 @@ class Analysis_Confined(Analysis):
         
         return chain_cm
 
-   
+    def segs_CM(self,coords,segids):
+        n = segids.shape[0]
+        segcm = np.empty((n,3),dtype=float)
+        numba_CM(coords,segids,self.atom_mass,segcm)
+        return segcm
+            
 
     def calc_dihedrals_t(self,dih_type,
                              dads=0,filters={'all':None}):
@@ -2017,7 +2173,7 @@ class Analysis_Confined(Analysis):
         filt_per_t = dict()
        
         dih_ids = self.dihedrals_ids_per_type[dih_type] #array (ndihs,4)
-        ids1 = dih_ids[:,1] ; ids2 = dih_ids[:,2] 
+        ids1 = dih_ids[:,0] ; ids2 = dih_ids[:,3] 
 
         args = (dih_ids,ids1,ids2,filters,dads,dihedrals_t,filt_per_t)
         
@@ -2143,7 +2299,7 @@ class Analysis_Confined(Analysis):
         print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return dipoles_t,filters_t
      
-    def calc_chainCM_t(self,filters, dads=1,option=''):
+    def calc_chainCM_t(self,filters={'all':None}, dads=1,option=''):
         t0 = perf_counter()
         filters = {'chain_'+k: v for k,v in filters.items()} #Need to modify when considering chains
         
@@ -2153,6 +2309,28 @@ class Analysis_Confined(Analysis):
         args = (filters,dads,vec_t,filt_per_t)
         
         nframes = self.loop_trajectory('chainCM_t'+option, args)
+      
+        filt_per_t = rearrange_dict_keys(filt_per_t)
+        
+        tf = perf_counter() - t0
+        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
+        return vec_t,filt_per_t
+    
+    def calc_segCM_t(self,topol_vector,segbond,
+                     filters={'all':None}, dads=1,option=''):
+        t0 = perf_counter()
+     
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        
+        segmental_ids = self.find_segmental_ids(ids1, ids2, segbond)
+        
+        vec_t = dict()
+        filt_per_t = dict()
+        
+        args = (filters,dads,ids1,ids2,segmental_ids,vec_t,filt_per_t)
+        
+        nframes = self.loop_trajectory('segCM_t'+option, args)
       
         filt_per_t = rearrange_dict_keys(filt_per_t)
         
@@ -2361,7 +2539,40 @@ class Filters():
         nbonds = np.minimum(nbonds1,nbonds2)
         
         return Filters.filtLayers_inclucive(bondlayers,nbonds)
-                          
+
+    @staticmethod
+    def conformationDistribution(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
+        
+        d = self.dfun(coords,cm)
+        ads_chains, args_train, args_tail,\
+        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+       
+        filt = dict()
+        for conf,intervals in fconfs.items():
+            
+            args = locals()['args_'+conf]
+            
+            conf_chunks = self.conf_chunks(args)
+            
+            sizes = np.array([len(chunk) for chunk in conf_chunks])
+            
+            
+            filt['{}:distr'.format(conf)] = sizes
+            
+            for inter in intervals:
+                #print(conf,inter)
+                chunk_int =set()
+                for chunk, size in zip(conf_chunks,sizes):
+                    if inter[0]<=size<inter[1]:
+                        chunk_int = chunk_int | chunk
+                        
+                args_chunk = np.array(list(chunk_int),dtype=int)
+                f = Filters.filt_bothEndsIn(ids1, ids2, args_chunk)
+                
+                filt['{}:{}'.format(conf,inter)] = f
+                
+        return filt
+    
     @staticmethod
     def conformations(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
         #rm = 0.5*(coords[ids1] + coords[ids2])
@@ -2853,7 +3064,7 @@ class coreFunctions():
         if frame ==0 :
             self.time_zero = time
         key = self.get_timekey(time, self.time_zero)
-        dihedrals_t[key] = np.cos(dih_val)
+        dihedrals_t[key] = dih_val
         
         del dih_val #deallocating for safty
         tm = perf_counter()
@@ -2956,6 +3167,32 @@ class coreFunctions():
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
                             chain_cm, part_cm, coords, dads)
+        
+        return 
+    
+    @staticmethod
+    def segCM_t(self,frame,filters,dads,
+                  ids1,ids2,segment_ids,
+                  vec_t,filt_per_t):
+        
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+        time = self.get_time(frame)
+        coords_whole = self.frame_unwrapped_coords(frame)
+        
+        part_cm = self.centerfun( CM( coords_whole[self.particle_filt], 
+                self.atom_mass[self.particle_filt]) )
+        
+        seg_cm = self.segs_CM(coords,segment_ids)
+        
+        if frame==0:
+            self.time_zero=time
+        key = self.get_timekey(time,self.time_zero)
+        
+        vec_t[key] =  seg_cm
+        
+        filt_per_t[key] = Filters.calc_filters(self,filters,
+                            ids1,ids2,coords_whole,part_cm,dads,box)
         
         return 
     
@@ -3118,6 +3355,65 @@ def tacf_kernel(tacf,nv,x,ft,n):
     for i in prange(n):    
         tacf[i] /= nv[i]
     return
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def P1_change_kernel(P1,nv,x,ft,n):
+    for i in range(n):
+        ft0 = ft[i]   
+        x0 = x[i]
+        for j in prange(i,n):
+            ftt = ft[j]
+            try:
+                value = costh__kernel_with_filter_change(x0,x[j],ft0,ftt)
+            except:
+                pass
+            else:
+                idx = j-i
+                P1[idx] +=  value
+                nv[idx] += 1
+        
+    for i in prange(n):    
+        P1[i] /= nv[i]
+    return 
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def P1_strict_kernel(P1,nv,x,ft,n):
+    for i in range(n):
+        ft0 = ft[i]   
+        x0 = x[i]
+        for j in prange(i,n):
+            ftt = ft[j]
+            try:
+                value = costh__kernel_with_filter_strict(x0,x[j],ft0,ftt)
+            except:
+                pass
+            else:
+                idx = j-i
+                P1[idx] +=  value
+                nv[idx] += 1
+        
+    for i in prange(n):    
+        P1[i] /= nv[i]
+    return 
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def p1_kernel(P1,nv,x,n):
+    for i in range(n):
+        x0 = x[i]
+        for j in prange(i,n):
+            try:
+                value = costh__kernel(x0,x[j])
+            except:
+                pass
+            else:
+                idx = j-i
+                P1[idx] +=  value
+                nv[idx] += 1
+        
+    for i in prange(n):    
+        P1[i] /= nv[i]
+    return 
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def P1_kernel(P1,nv,x,ft,n):
@@ -3293,6 +3589,31 @@ def var_wfilt_kernel(x,f):
     var = secmoment_wfilt_kernel(x,f) - mean_wfilt_kernel(x,f)**2
     return var
 
+@jit(nopython=True,fastmath=True)#,parallel=True)
+def costh__kernel_with_filter_strict(r1,r2,ft0,ftt):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and ftt[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    ave = tot/mi
+    return ave
+
+@jit(nopython=True,fastmath=True)#,parallel=True)
+def costh__kernel_with_filter_change(r1,r2,ft0,ftt):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and not ftt[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    ave = tot/mi
+    return ave
 
 @jit(nopython=True,fastmath=True)#,parallel=True)
 def costh__kernel_with_filter(r1,r2,ft0):
@@ -3415,9 +3736,9 @@ def chain_characteristics_kernel(coords,mass,ch_cm,Gyt):
     
     return Ree2, Rg2,k2,asph,acyl, Rgxx_plus_yy, Rgxx_plus_zz, Rgyy_plus_zz
    
-@jit(nopython=True, fastmath=True)
+@jit(nopython=True, fastmath=True,parallel=True)
 def dihedral_distribution_kernel(dih_ids,coords,dih_val):
-    for i in range(dih_ids.shape[0]):
+    for i in prange(dih_ids.shape[0]):
         r0 = coords[dih_ids[i,0]]
         r1 = coords[dih_ids[i,1]]  
         r2 = coords[dih_ids[i,2]]
@@ -3520,7 +3841,7 @@ def pair_dists_general(coords1,coords2,box,dists):
             dists[i*n2+j] = dist[j]
     return
 
-
+@jit(nopython=True,fastmath=True)
 def CM(coords,mass):
     cm = np.sum(mass*coords.T,axis=1)/mass.sum()
     return cm
@@ -3663,4 +3984,10 @@ def numba_isin(x1,x2,f):
         for x in x2:
             if x1[i] == x: 
                 f[i] = True
+    return
+@jit(nopython=True,fastmath=True,parallel=True)
+def numba_CM(coords,ids,mass,cm):
+    for i in prange(ids.shape[0]):
+        ji = ids[i]
+        cm[i] = CM(coords[ji],mass[ji])
     return
