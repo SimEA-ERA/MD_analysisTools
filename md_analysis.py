@@ -1784,6 +1784,7 @@ class Analysis_Confined(Analysis):
         return 
     
     def check_if_ends_belong_to_different_particle(self,coords,istart,iend):
+        logger.warning('WARNING Function {:s}: This Function was never examined in test cases'.format(inspect.currentframe().f_code.co_name))
         r0 = coords[istart]
         re = coords[iend]
         x = float('inf')
@@ -2080,7 +2081,7 @@ class Analysis_Confined(Analysis):
         t0 = perf_counter()
         
         #initialize
-        dlayers = self.get_layers(dads,dmax,binl)
+        dlayers = self.get_layers(dads,dmax,binl)[1:]
         d_center = [0.5*(b[0]+b[1]) for b in dlayers]
         
         stats = { k : 0 for k in ['adschains','train','looptailbridge',
