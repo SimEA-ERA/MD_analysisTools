@@ -869,7 +869,7 @@ class Analysis:
         print_time(tf,inspect.currentframe().f_code.co_name)
         return box_var/nframes
     
-    def frame_with_closer_box_tobox(self,target_box):
+    def frame_closer_tobox(self,target_box):
         mind = 10**9
         with self.traj_opener(*self.traj_opener_args) as ofile:
             t0 = perf_counter()
@@ -1179,9 +1179,16 @@ class Analysis:
         if len(l)==0:
             return False
         #first line
-        time = self.get_equal_from_string(line.strip(),'t')
-        step = self.get_equal_from_string(line.strip(),'step',int)
-            
+        try:
+            time = self.get_equal_from_string(line.strip(),'t')
+        except:
+            print('Warning: in gro file. There is no time info')
+            time = 0
+        try:
+            step = self.get_equal_from_string(line.strip(),'step',int)
+        except:
+            step = 0
+            print('Warning: in gro file. There is no step info')
         self.timeframes[frame] = {'time':time,'step':step}
         # second line
         natoms = int(ofile.readline().strip())
@@ -1306,7 +1313,7 @@ class Analysis:
         return  
     
     def write_residues(self,res,fname='selected_residues.gro',
-                       frames=(0,0),boxoff=0.4):
+                       frames=(0,0),box=None,boxoff=0.4):
         with open(fname,'w') as ofile:
             fres = np.isin(self.mol_ids, res)
             
@@ -1323,8 +1330,8 @@ class Analysis:
                         ofile.write('%5d%-5s%5s%5d%8.3f%8.3f%8.3f\n'\
                         % (self.mol_ids[i],self.mol_names[i], self.at_types[i]
                            ,self.at_ids[i%100000] ,c[0],c[1] ,c[2] ))
-                    
-                    box = coords.max(axis=1) - coords.min(axis=1) + boxoff
+                    if box is None: 
+                        box = coords.max(axis=1) - coords.min(axis=1) + boxoff
                     ofile.write('%f  %f  %f\n' % (box[0],box[1],box[2]))  
             
             ofile.closed
@@ -3389,6 +3396,24 @@ def P1_strict_kernel(P1,nv,x,ft,n):
         P1[i] /= nv[i]
     return 
 
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def p1_kernel(P1,nv,x,n):
+    for i in range(n):
+        x0 = x[i]
+        for j in prange(i,n):
+            try:
+                value = costh__kernel(x0,x[j])
+            except:
+                pass
+            else:
+                idx = j-i
+                P1[idx] +=  value
+                nv[idx] += 1
+        
+    for i in prange(n):    
+        P1[i] /= nv[i]
+    return 
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def P1_kernel(P1,nv,x,ft,n):
