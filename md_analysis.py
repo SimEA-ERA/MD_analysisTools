@@ -642,21 +642,39 @@ class bin_Volume_Functions():
         v = dr*(4*np.pi*rm**2)
         return  v
     
-class Check_for_periodic_image_Functions():
+class Periodic_image_Functions():
     #functions return True for bridge
     @staticmethod
-    def zdir(r0,re,box):
-        return abs(re[2]) > box[2] or abs(r0[2]) > box[2]
+    def zdir(self,r0,re,dads):
+        return abs(re[2]-r0[2]) > dads
     @staticmethod
-    def ydir(r0,re,box):
-        return abs(re[1]) > box[1] or abs(r0[1]) > box[1]
+    def ydir(self,r0,re,dads):
+        return abs(re[1]-r0[1]) > dads
     @staticmethod
-    def xdir(r0,re,box):
-        return abs(re[0]) > box[0] or abs(r0[0]) > box[0]
+    def xdir(self,r0,re,dads):
+        return abs(re[0]-r0[0]) > dads
     @staticmethod
-    def distance(r0,re,box): #works with unrwap coords
+    def distance(self,r0,re,dads): 
+        raise NotImplementedError('This function is not yet implemented')
         return  ( abs(re) > box ).any() or ( abs(r0) > box ).any()
-    
+
+class Different_Particle_Functions():
+    #functions return True for bridge
+    @staticmethod
+    def zdir(self,r0,re,dads,CMs):
+        x0=r0[2]
+        xe =re[2]
+        for i in range(CMs.shape[0]):
+            for j in range(i+1,CMs.shape[0]):
+                cmi = CMs[i][2] ; cmj = CMs[j][2]
+                if abs(cmi-cmj)>dads: # if it is indeed a different particle
+                    if (abs(cmi-x0)<dads and abs(cmj-xe)<dads) or \
+                        (abs(cmi-xe)<dads and abs(cmj-x0)<dads):
+                            return False
+        return True
+   
+
+
 class Center_Functions():
     @staticmethod
     def zdir(c):
@@ -1669,7 +1687,8 @@ class Analysis_Confined(Analysis):
         self.dfun = self.get_class_function(Distance_Functions,self.conftype)
         self.volfun = self.get_class_function(bin_Volume_Functions,self.conftype)
         self.centerfun = self.get_class_function(Center_Functions,self.conftype)
-        self.periodic_imageFun = self.get_class_function(Check_for_periodic_image_Functions,self.conftype)
+        self.is_periodic_image = self.get_class_function(Periodic_image_Functions,self.conftype)
+        self.is_different_particle = self.get_class_function(Different_Particle_Functions,self.conftype)
         self.unit_vectorFun = self.get_class_function(unit_vector_Functions,self.conftype)
         
         self.find_args_per_residue(self.pol_filt,'chain_args')
@@ -1776,47 +1795,39 @@ class Analysis_Confined(Analysis):
 
     ############### Conformation Calculation Supportive Functions #####
    
-    def check_if_ends_belong_to_periodic_image(self,coords,istart,iend,
-                                               box):
+    def check_if_ends_belong_to_periodic_image(self,coords,istart,iend,dads):
+        
+        
         r0 = coords[istart]
         re = coords[iend]
-        self.periodic_imageFun(r0,re,box)
-        return 
+        perimage = self.is_periodic_image(self,r0,re,dads)
+        if perimage:
+            logger.debug('istart = {:d} , iend = {:d}  periodic image = {:}'.format(istart,iend,perimage))
+        return perimage
     
-    def check_if_ends_belong_to_different_particle(self,coords,istart,iend):
-        logger.warning('WARNING Function {:s}: This Function was never examined in test cases'.format(inspect.currentframe().f_code.co_name))
+    def check_if_ends_belong_to_different_particle(self,coords,istart,iend,dads):
+        #logger.warning('WARNING Function {:s}: This Function was never examined in test cases'.format(inspect.currentframe().f_code.co_name))
         r0 = coords[istart]
         re = coords[iend]
-        x = float('inf')
-        min_dist_r0 = x ; min_dist_re = x
-        for k,args in self.particle_args.items():
-            cm = CM(coords[args],self.atom_mass[args])
-            r0cm = norm2(r0-cm)
-            recm = norm2(re-cm)
+        CMs = np.empty((self.nparticles,3),dtype=float)
+        for i,(k,args) in enumerate(self.particle_args.items()):
+            CMs[i] = CM(coords[args],self.atom_mass[args])
             
-            if r0cm < min_dist_r0:
-                min_dist_r0 = r0cm
-                particle_r0 = k
-            if recm < min_dist_re:
-                min_dist_re = recm
-                particle_re = k
-        return particle_re == particle_r0, particle_r0
+        return self.is_different_particle(self,r0,re,dads,CMs)
    
-    def is_bridge(self,coords,istart,iend,box):
+    def is_bridge(self,coords,istart,iend,dads):
         
         if self.nparticles !=1:
-            same_particle,particle_key = self.check_if_ends_belong_to_different_particle(coords, istart, iend)
-            
+            same_particle = self.check_if_ends_belong_to_different_particle(coords, istart, iend,dads)
         else:
-            particle_key = list(self.particle_args.keys())[0]
             same_particle = True
-        
-
+            
         if same_particle:
-            periodic_image = self.check_if_ends_belong_to_periodic_image(coords, istart, iend, box)
+            periodic_image = self.check_if_ends_belong_to_periodic_image(coords, istart, iend, dads)
             if periodic_image:
                 return True
         else:
+            #logger.info('istart = {:d} , iend = {:d}  Belong to differrent particle'.format(istart,iend))
             return True
         return False
         
@@ -1897,7 +1908,7 @@ class Analysis_Confined(Analysis):
                         node,chunk)
     
                 if loopBridge:
-                    if not self.is_bridge(coords,istart,iend,box):    
+                    if not self.is_bridge(coords,istart,iend,dads):    
                         args_loop = np.concatenate( (args_loop, chunk) )             
                     else:
                         args_bridge = np.concatenate( (args_bridge, chunk) )
@@ -1984,7 +1995,7 @@ class Analysis_Confined(Analysis):
         
         if dmax is None:
             NotImplemented
-        bins  =   np.arange(0, dmax, binl)
+        bins  =   np.arange(0, dmax+binl, binl)
         nbins = len(bins)-1
         rho = np.zeros(nbins,dtype=float)
         mass_pol = self.atom_mass[self.pol_filt] 
@@ -2082,7 +2093,7 @@ class Analysis_Confined(Analysis):
         
         #initialize
         dlayers = self.get_layers(dads,dmax,binl)[1:]
-        d_center = [0.5*(b[0]+b[1]) for b in dlayers]
+        d_center = np.array([0.5*(b[0]+b[1]) for b in dlayers])
         
         stats = { k : 0 for k in ['adschains','train','looptailbridge',
                                   'tail','loop','bridge']}
