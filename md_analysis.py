@@ -498,7 +498,7 @@ class add_atoms():
        
         N = len(info)
         ghost_coords = np.empty((N,3),dtype=float)
-        coords = self.frame_unwrapped_coords(frame)    
+        coords = self.get_whole_coords(frame)    
         
         for j,(k,v) in enumerate(info.items()):
             cr = coords[v['ir']]
@@ -1374,7 +1374,7 @@ class Analysis:
                     if  frame <frames[0] or frame>frames[1]:
                         continue
                 if option == 'unwrap':
-                    coords = self.frame_unwrapped_coords(frame)
+                    coords = self.get_whole_coords(frame)
                 elif option =='transmiddle':
                     coords = self.translate_particle_in_box_middle(self.get_coords(frame),
                                                                    self.get_box(frame))
@@ -1410,9 +1410,9 @@ class Analysis:
             for frame in self.timeframes:
                 if frames[0] <= frame <= frames[1]:
 
-                    coords = self.frame_unwrapped_coords(frame) [fres]
+                    coords = self.get_whole_coords(frame) [fres]
                     at_ids = self.at_ids[fres] 
-                    ofile.write('Residues {}\n'.format(res))
+                    ofile.write('Made by write_residues\n')
                     ofile.write('{:6d}\n'.format(coords.shape[0]))
                     for j in range(coords.shape[0]):
                         i = at_ids[j]
@@ -1433,7 +1433,7 @@ class Analysis:
             for frame in self.timeframes:
                 if frames[0] <= frame <= frames[1]:
 
-                    coords = self.frame_unwrapped_coords(frame) [fres]
+                    coords = self.get_whole_coords(frame) [fres]
                     at_ids = self.at_ids[fres] 
                     ofile.write('Residue {:d}\n'.format(res))
                     ofile.write('{:6d}\n'.format(coords.shape[0]))
@@ -1577,7 +1577,7 @@ class Analysis:
         coords = self.get_coords(frame)
         return coords
    
-    def frame_unwrapped_coords(self,frame):
+    def get_whole_coords(self,frame):
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         coords = self.unwrap_coords(coords, box)
@@ -1696,7 +1696,7 @@ class Analysis_Confined(Analysis):
         coords = self.translate_particle_in_box_middle(coords, box)
         return coords
    
-    def frame_unwrapped_coords(self,frame):
+    def get_whole_coords(self,frame):
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         coords = self.translate_particle_in_box_middle(coords, box)
@@ -1748,7 +1748,7 @@ class Analysis_Confined(Analysis):
         return coords,box,d,cs
     
     def get_unwrappedframe_essentials(self,frame):
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box  = self.get_box(frame)          
         d,cs = self.get_distFromParticle(coords)
         return coords,box,d,cs
@@ -1830,12 +1830,15 @@ class Analysis_Confined(Analysis):
 
     ############### Conformation Calculation Supportive Functions #####
    
-    def check_if_ends_belong_to_periodic_image(self,coords,istart,iend,dads):
+    def check_if_ends_belong_to_periodic_image(self,istart,iend,periodic_image_args):
         
-        r0 = coords[istart]
-        re = coords[iend]
-        perimage = self.is_periodic_image(self,r0,re,dads)
-        return perimage
+        
+        #perimage = self.is_periodic_image(self,r0,re,dads)
+        
+        e = iend in periodic_image_args 
+        s = istart in periodic_image_args
+        
+        return (e and not s) or (s and not e)
     
     def check_if_ends_belong_to_different_particle(self,coords,istart,iend,dads):
         #logger.warning('WARNING Function {:s}: This Function was never examined in test cases'.format(inspect.currentframe().f_code.co_name))
@@ -1847,16 +1850,16 @@ class Analysis_Confined(Analysis):
             
         return self.is_different_particle(self,r0,re,dads,CMs)
    
-    def is_bridge(self,coords,istart,iend,dads):
+    def is_bridge(self,coords,istart,iend,dads,periodic_image_args):
         
         if self.nparticles !=1:
-            same_particle = self.check_if_ends_belong_to_different_particle(coords, istart, iend,dads)
+            same_particle = self.check_if_ends_belong_to_different_particle(coords, istart, iend,dads,)
         else:
             same_particle = True
             
         if same_particle:  
             #logger.debug('istart = {:d}, iend = {:d}'.format(istart,iend))
-            return self.check_if_ends_belong_to_periodic_image(coords, istart, iend, dads)
+            return self.check_if_ends_belong_to_periodic_image( istart, iend, periodic_image_args)
         else:
             #logger.info('istart = {:d} , iend = {:d}  Belong to differrent particle'.format(istart,iend))
             return True
@@ -1864,19 +1867,32 @@ class Analysis_Confined(Analysis):
     
     def get_filt_train(self,dads,coords,box):
         ftrain = False
+       
         for L in self.box_add(box):
             cm = self.get_particle_cm(coords+L)
             d = self.dfun(coords,cm)
             ftrain = np.logical_or(ftrain,np.less_equal(d,dads))
-        
         ftrain = np.logical_and(ftrain,self.pol_filt)
-        return ftrain
+        
+        self_trains = np.less_equal(
+            self.dfun(coords,self.get_particle_cm(coords)),dads)
+        image_trains = np.logical_and(ftrain,np.logical_not(self_trains))
+        
+        return ftrain,image_trains
+    
+    def get_minimum_distance_from_particle(self,coords,box):
+        d = np.ones(coords.shape[0])*float('inf')
+        for L in self.box_add(box):
+            cm = self.get_particle_cm(coords+L)
+            d = np.minimum(d,self.dfun(coords,cm))
+        return d
     
     def conformations(self,dads,coords,box):
         
-        ftrain = self.get_filt_train(dads, coords, box)
+        ftrain,image_trains = self.get_filt_train(dads, coords, box)
         args_train = np.nonzero(ftrain)[0]
-
+        periodic_image_args = set(np.nonzero(image_trains)[0])
+        #logger.debug('Number of periodic image trains ={:d}\n Number of trains = {:d}'.format(len(periodic_image_args),args_train.shape[0]))
         #ads_chains
         ads_chains = np.unique(self.mol_ids[ftrain])
         #check_occurances(ads_chains)
@@ -1949,7 +1965,7 @@ class Analysis_Confined(Analysis):
                         node,chunk)
     
                 if loopBridge:
-                    if not self.is_bridge(coords,istart,iend,dads):    
+                    if not self.is_bridge(coords,istart,iend,dads,periodic_image_args):    
                         args_loop = np.concatenate( (args_loop, chunk) )             
                     else:
                         logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
@@ -2777,7 +2793,7 @@ class coreFunctions():
     @staticmethod
     def theFilt(self,frame,filters,dads,ids1,ids2,filt_per_t):
         
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         
         box = self.get_box(frame)
         time = self.get_time(frame)
@@ -2826,7 +2842,7 @@ class coreFunctions():
                                 segment_args,dipoles_t,filt_per_t):
         
             
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         #coords = self.get_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
@@ -2856,7 +2872,7 @@ class coreFunctions():
     def chain_dipole_moment(self,frame,filters,dads,dipoles_t,filt_per_t):
         
             
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
         
@@ -2984,15 +3000,15 @@ class coreFunctions():
   
     @staticmethod
     def conformation__densityAndstats(self,frame,dads,dlayers,dens,stats):                
-        #0) coords and box
-        coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
         ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
-        coreFunctions.conformation_dens(self, dlayers, dens, d,box,
+        coreFunctions.conformation_dens(self,frame, dlayers, dens,
                                            ads_chains, args_train, args_tail,
                                            args_loop, args_bridge)
         
@@ -3002,15 +3018,15 @@ class coreFunctions():
     
     @staticmethod
     def conformation__density(self,frame,dads,dlayers,dens,stats):                
-        #0) coords and box
-        coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
         ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
-        coreFunctions.conformation_dens(self, dlayers, dens, d,box,
+        coreFunctions.conformation_dens(self,frame, dlayers, dens,
                                            ads_chains, args_train, args_tail,
                                            args_loop, args_bridge)
         
@@ -3018,26 +3034,28 @@ class coreFunctions():
 
     @staticmethod
     def conformation__stats(self,frame,dads,dlayers,dens,stats):                
-        #0) coords and box
-        coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
         ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
-        coreFunctions.conformation_dens(self, dlayers, dens, d,box,
-                                           ads_chains, args_train, args_tail,
-                                           args_loop, args_bridge)
         
         coreFunctions.conformation_stats(stats,ads_chains, args_train, args_tail, 
                              args_loop, args_bridge)
         return
     
     @staticmethod
-    def conformation_dens(self,dlayers,dens,d,box,
+    def conformation_dens(self,frame, dlayers,dens,
                              ads_chains, args_train, args_tail, 
                              args_loop, args_bridge):
+        
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
+        d = self.get_minimum_distance_from_particle(coords,box)
+        
         
         d_tail = d[args_tail]
         d_loop = d[args_loop]          
@@ -3075,7 +3093,7 @@ class coreFunctions():
     def dihedral_distribution(self,frame,dih_ids,dlayers,dih_distr):
         
         box = self.get_box(frame)
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         cs = self.centerfun(CM( coords[self.particle_filt], self.atom_mass[self.particle_filt]))
 
         for k,d_ids in dih_ids.items():
@@ -3091,7 +3109,7 @@ class coreFunctions():
     @staticmethod
     def P2(self,frame,ids1,ids2,dlayers,costh,costh_fz):
         #1) coords
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box =self.get_box(frame)
 
         #2) calc_particle_cm
@@ -3115,7 +3133,7 @@ class coreFunctions():
     def chain_characteristics(self,frame,chain_args,dlayers,chars):
         #1) translate the system
         
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         cs = self.centerfun(CM( coords[self.particle_filt], self.atom_mass[self.particle_filt]))
                    
@@ -3147,7 +3165,7 @@ class coreFunctions():
         
         t0 = perf_counter()
         
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         cm = self.centerfun( CM( coords[self.particle_filt], 
                                self.atom_mass[self.particle_filt]) )
         box = self.get_box(frame)
@@ -3174,7 +3192,7 @@ class coreFunctions():
     @staticmethod
     def vects_t(self,frame,ids1,ids2,filters,dads,vec_t,filt_per_t):
        
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
         
@@ -3273,7 +3291,7 @@ class coreFunctions():
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
-        coords_whole = self.frame_unwrapped_coords(frame)
+        coords_whole = self.get_whole_coords(frame)
         
         part_cm = self.centerfun( CM( coords_whole[self.particle_filt], 
                 self.atom_mass[self.particle_filt]) )
