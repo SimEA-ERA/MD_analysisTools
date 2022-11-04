@@ -204,6 +204,7 @@ class Energetic_Analysis():
         plt.legend(frameon=False)
         if save_figs:plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
         plt.show()
+
 class Analytical_Expressions():
     @staticmethod
     def KWW(t,A,tc,beta,tww):
@@ -584,7 +585,24 @@ class add_atoms():
                 jstart+=1
             
         return new_atoms_info
-    
+
+class Box_Additions():
+    @staticmethod
+    def zdir(box):
+        return [box[2],0,-box[2]]
+    @staticmethod
+    def ydir(box):
+        return [box[1],0,-box[1]]
+    @staticmethod
+    def xdir(box):
+        return [box[0],0,-box[0]]
+    def minimum_distance(box):
+        zd = Box_Additions.zdir(box)
+        yd = Box_Additions.ydir(box)
+        xd = Box_Additions.xdir(box)
+        ls = [np.array([x,y,z]) for x in xd for y in yd for z in zd]
+        return ls
+        
 class Distance_Functions():
     @staticmethod
     def zdir(coords,zc):
@@ -613,7 +631,7 @@ class Distance_Functions():
         return d
     
     @staticmethod
-    def smaller_distance(coords1,coords2):
+    def minimum_distance(coords1,coords2):
         d1 = np.empty(coords1.shape[0])
         d2 = np.empty(coords2.shape[0])
         smaller_distance_kernel(d1,d2,coords1,coords2)
@@ -1698,6 +1716,7 @@ class Analysis_Confined(Analysis):
         self.unique_atom_types = np.unique(self.at_types)
         
         self.dfun = self.get_class_function(Distance_Functions,self.conftype)
+        self.box_add = self.get_class_function(Box_Additions,self.conftype)
         self.volfun = self.get_class_function(bin_Volume_Functions,self.conftype)
         self.centerfun = self.get_class_function(Center_Functions,self.conftype)
         self.is_periodic_image = self.get_class_function(Periodic_image_Functions,self.conftype)
@@ -1746,7 +1765,10 @@ class Analysis_Confined(Analysis):
                                self.atom_mass[self.particle_filt]))
         d = self.dfun(coords,cs)
         return d,cs
-    
+    def get_particle_cm(self,coords):
+        cm =self.centerfun(CM( coords[self.particle_filt], 
+                               self.atom_mass[self.particle_filt]))
+        return cm
     @staticmethod
     def get_layers(dads,dmax,binl):
         bins = np.arange(dads,dmax+binl,binl)
@@ -1810,12 +1832,9 @@ class Analysis_Confined(Analysis):
    
     def check_if_ends_belong_to_periodic_image(self,coords,istart,iend,dads):
         
-        
         r0 = coords[istart]
         re = coords[iend]
         perimage = self.is_periodic_image(self,r0,re,dads)
-        if perimage:
-            logger.debug('istart = {:d} , iend = {:d}  periodic image = {:}'.format(istart,iend,perimage))
         return perimage
     
     def check_if_ends_belong_to_different_particle(self,coords,istart,iend,dads):
@@ -1835,18 +1854,27 @@ class Analysis_Confined(Analysis):
         else:
             same_particle = True
             
-        if same_particle:
-            periodic_image = self.check_if_ends_belong_to_periodic_image(coords, istart, iend, dads)
-            if periodic_image:
-                return True
+        if same_particle:  
+            #logger.debug('istart = {:d}, iend = {:d}'.format(istart,iend))
+            return self.check_if_ends_belong_to_periodic_image(coords, istart, iend, dads)
         else:
             #logger.info('istart = {:d} , iend = {:d}  Belong to differrent particle'.format(istart,iend))
             return True
         return False
+    
+    def get_filt_train(self,dads,coords,box):
+        ftrain = False
+        for L in self.box_add(box):
+            cm = self.get_particle_cm(coords+L)
+            d = self.dfun(coords,cm)
+            ftrain = np.logical_or(ftrain,np.less_equal(d,dads))
         
-    def conformations(self,d,dads,coords,box):
-        #d,cs = self.get_distFromParticle(coords)
-        ftrain = np.logical_and(np.less_equal(d,dads),self.pol_filt)
+        ftrain = np.logical_and(ftrain,self.pol_filt)
+        return ftrain
+    
+    def conformations(self,dads,coords,box):
+        
+        ftrain = self.get_filt_train(dads, coords, box)
         args_train = np.nonzero(ftrain)[0]
 
         #ads_chains
@@ -1924,6 +1952,7 @@ class Analysis_Confined(Analysis):
                     if not self.is_bridge(coords,istart,iend,dads):    
                         args_loop = np.concatenate( (args_loop, chunk) )             
                     else:
+                        logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
                         args_bridge = np.concatenate( (args_bridge, chunk) )
                 else:
                     args_tail = np.concatenate( (args_tail, chunk) )
@@ -2572,9 +2601,9 @@ class Filters():
     @staticmethod
     def BondsTrainFrom(self,bondlayers,ids1,ids2,coords,cm,dads,box,*args):
         #t0 = perf_counter()
-        d = self.dfun(coords,cm)
+        #d = self.dfun(coords,cm)
         ds_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords,box)
         
         args_rest_train = np.concatenate( (args_tail,args_loop,args_bridge ) )
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_rest_train)
@@ -2596,9 +2625,9 @@ class Filters():
     @staticmethod
     def BondsFromTrain(self,bondlayers,ids1,ids2,coords,cm,dads,box,*args):
         #t0 = perf_counter()
-        d = self.dfun(coords,cm)
+        #d = self.dfun(coords,cm)
         ds_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords,box)
 
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_train)
         nbonds2 = self.ids_nbondsFrom_args(ids2,args_train)
@@ -2609,9 +2638,9 @@ class Filters():
     @staticmethod
     def conformationDistribution(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
         
-        d = self.dfun(coords,cm)
+        #d = self.dfun(coords,cm)
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords,box)
        
         filt = dict()
         for conf,intervals in fconfs.items():
@@ -2643,10 +2672,10 @@ class Filters():
     def conformations(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
         #rm = 0.5*(coords[ids1] + coords[ids2])
         # = perf_counter()
-        d = self.dfun(coords,cm)
+        #d = self.dfun(coords,cm)
         
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords,box)
         
         all_not_free = np.concatenate((args_train,args_tail,args_loop,args_bridge))
         
@@ -2959,7 +2988,7 @@ class coreFunctions():
         coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(d, dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
@@ -2977,7 +3006,7 @@ class coreFunctions():
         coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(d, dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
@@ -2993,7 +3022,7 @@ class coreFunctions():
         coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(d, dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
@@ -3172,7 +3201,7 @@ class coreFunctions():
         time = self.get_time(frame)
         
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(d,dads,coords,box)
+                                self.conformations(dads,coords,box)
         x = dict()
         ntot = args_train.shape[0] + args_tail.shape[0] +\
                args_loop.shape[0] + args_bridge.shape[0]
@@ -3196,7 +3225,7 @@ class coreFunctions():
         time = self.get_time(frame)
         
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(d,dads,coords,box)
+                                self.conformations(dads,coords,box)
         x = dict()
         for k in ['train','tail','loop','bridge']:
             args = locals()['args_'+k]
@@ -3488,13 +3517,13 @@ def P1_kernel(P1,nv,x,ft,n):
         x0 = x[i]
         for j in prange(i,n):
             try:
-                value = costh__kernel_with_filter(x0,x[j],ft0)
+                value,mi = costh__kernel_with_filter(x0,x[j],ft0)
             except:
                 pass
             else:
                 idx = j-i
                 P1[idx] +=  value
-                nv[idx] += 1
+                nv[idx] += mi
         
     for i in prange(n):    
         P1[i] /= nv[i]
@@ -3691,8 +3720,7 @@ def costh__kernel_with_filter(r1,r2,ft0):
             costh = costh_kernel(r1[i],r2[i])
             tot+=costh
             mi+=1
-    ave = tot/mi
-    return ave
+    return tot,mi
 
 @jit(nopython=True,fastmath=True)#,parallel=True)
 def costh__kernel_with_filter_weighted(r1,r2,ft0,w):
@@ -3745,9 +3773,12 @@ def costh_kernel(r1,r2):
     return costh
 
 @jit(nopython=True,fastmath=True)
-def costh__kernel(costh,r1,r2):
+def costh__kernel(r1,r2):
+    tot = 0
     for i in r1.shape[0]:
-        costh[i] = costh_kernel(r1[i],r2[i])
+        tot += costh_kernel(r1[i],r2[i])
+    ave = tot/float(r1.shape[0])
+    return ave
 
 @jit(nopython=True,fastmath=True)
 def costhsquare__kernel(costh,r1,r2):
