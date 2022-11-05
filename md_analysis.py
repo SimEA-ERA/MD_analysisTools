@@ -1486,8 +1486,27 @@ class Analysis:
         else:
             nframes = self.loop_timeframes_within_interval(funtocall,args)
         return nframes
+    @property
+    def first_frame(self):
+        return list(self.timeframes.keys())[0]
     
-
+    def cut_timeframes(self,num_start=None,num_end=None):
+        if num_start is None and num_end is None:
+            raise Exception('Give either a number to cut from the start or from the end for the timeframes dictionary')
+        if num_start is not None:
+            i1 = num_start
+        else:
+            i1 =0
+        if num_end is not None:
+            i2 = num_end
+        else:
+            i2 = len(self.timeframes)
+            
+        self.timeframes = self.dict_slice(self.timeframes,i1,i2)
+        return 
+    @staticmethod
+    def dict_slice(d,i1,i2):
+        return {k:v for i,(k,v) in enumerate(d.items()) if i1<=i<i2 }
     def loop_timeframes(self,funtocall,args):
         for frame in self.timeframes:
             funtocall(self,frame,*args)
@@ -2787,7 +2806,7 @@ class coreFunctions():
         pass
     @staticmethod
     def particle_size(self,frame,part_size):
-        part_coords = self.get_coords(0)[self.particle_filt]
+        part_coords = self.get_coords(frame)[self.particle_filt]
         part_size += part_coords.max(axis = 0 ) - part_coords.min(axis = 0 )
         return 
     @staticmethod
@@ -2801,7 +2820,7 @@ class coreFunctions():
         cm = self.centerfun( CM( coords[self.particle_filt], 
                 self.atom_mass[self.particle_filt]) )
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         
         key = self.get_timekey(time,self.time_zero)
@@ -2819,7 +2838,7 @@ class coreFunctions():
         
         chain_cm = self.chains_CM(coords)
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
         
@@ -2850,7 +2869,7 @@ class coreFunctions():
         cm = self.centerfun( CM( coords[self.particle_filt], 
                 self.atom_mass[self.particle_filt]) )
 
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         
         key = self.get_timekey(time,self.time_zero)
@@ -2882,7 +2901,7 @@ class coreFunctions():
         chain_cm = self.chains_CM(coords)
         
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         
         key = self.get_timekey(time,self.time_zero)
@@ -3174,7 +3193,7 @@ class coreFunctions():
         dih_val = np.empty(dih_ids.shape[0],dtype=float) # alloc 
         dihedral_distribution_kernel(dih_ids,coords,dih_val)
 
-        if frame ==0 :
+        if frame == self.first_frame :
             self.time_zero = time
         key = self.get_timekey(time, self.time_zero)
         dihedrals_t[key] = dih_val
@@ -3201,7 +3220,7 @@ class coreFunctions():
         
         vec = coords[ids2,:] - coords[ids1,:]
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero = time
             
         key = self.get_timekey(time,self.time_zero)
@@ -3228,7 +3247,7 @@ class coreFunctions():
             x[k] = args.shape[0]/ntot
         x['ads_chains'] = ads_chains.shape[0]/len(self.chain_args)
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero = time
             
         key = self.get_timekey(time,self.time_zero)
@@ -3251,7 +3270,7 @@ class coreFunctions():
                                       for a in self.chain_args.values() ] 
                                     
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero = time
             
         key = self.get_timekey(time,self.time_zero)
@@ -3272,7 +3291,7 @@ class coreFunctions():
         
         chain_cm = self.chains_CM(coords)
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
         
@@ -3298,7 +3317,7 @@ class coreFunctions():
         
         seg_cm = self.segs_CM(coords,segment_ids)
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
         
