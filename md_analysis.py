@@ -18,7 +18,7 @@ import pandas as pd
 import logging
 import coloredlogs
 
-LOGGING_LEVEL = logging.DEBUG
+LOGGING_LEVEL = logging.INFO
 
 logger = logging.getLogger(__name__)
 logger.setLevel(LOGGING_LEVEL)
@@ -1301,7 +1301,10 @@ class Analysis:
         return True
     
     def read_trr_by_frame(self,ofile,frame):
-        header,data = ofile.read_frame()
+        try:
+            header,data = ofile.read_frame()
+        except EOFError as e:
+            raise e
         self.timeframes[frame] = header
         self.timeframes[frame]['boxsize'] = np.diag(data['box'])
         self.timeframes[frame]['coords'] = data['x']
@@ -1481,10 +1484,8 @@ class Analysis:
                     if self.memory_demanding:
                         del self.timeframes[nframes]
                     nframes+=1
-        elif ~hasattr(self,'frame_interval') or self.frame_interval is None:
-            nframes = self.loop_timeframes(funtocall,args)
         else:
-            nframes = self.loop_timeframes_within_interval(funtocall,args)
+            nframes = self.loop_timeframes(funtocall,args)
         return nframes
     @property
     def first_frame(self):
@@ -1501,27 +1502,24 @@ class Analysis:
             i2 = num_end
         else:
             i2 = len(self.timeframes)
+        new_dict = self.dict_slice(self.timeframes,i1,i2)
+        if len(new_dict) ==0:
+            raise Exception('Oh dear you have cut all your timeframes from memory')
             
-        self.timeframes = self.dict_slice(self.timeframes,i1,i2)
+        self.timeframes = new_dict
         return 
+    
     @staticmethod
     def dict_slice(d,i1,i2):
         return {k:v for i,(k,v) in enumerate(d.items()) if i1<=i<i2 }
+   
     def loop_timeframes(self,funtocall,args):
         for frame in self.timeframes:
             funtocall(self,frame,*args)
-        nframes = frame + 1
+        nframes = len(self.timeframes)
         return nframes
     
-    def loop_timeframes_within_interval(self,funtocall,args):  
-        i = 0
-        frames = self.frame_interval
-        for frame in self.timeframes:
-            if frames[0]<=frame<=frames[1]:
-                funtocall(self,frame,*args)
-                i+=1
-        nframes = i
-        return nframes
+
 
     
     def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
