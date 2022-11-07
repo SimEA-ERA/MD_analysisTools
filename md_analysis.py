@@ -1600,7 +1600,38 @@ class Analysis:
         coords = self.unwrap_coords(coords, box)
         return coords
     
-            
+    def bond_distance_matrix(self,ids):
+        t0 = perf_counter()
+        size = ids.shape[0]
+        distmatrix = np.zeros((size,size),dtype=int)
+        for j1,i1 in enumerate(ids):
+            nbonds = self.bond_distance_id_to_ids(i1,ids)
+            distmatrix[j1,:] = nbonds
+        tf = perf_counter() - t0
+        print_time(tf,inspect.currentframe().f_code.co_name)
+        return distmatrix
+    def bond_distance_id_to_ids(self,i,ids):
+        chunk = {i}
+        n = ids.shape[0]
+        nbonds = np.ones(n)*(-1)
+        incr_bonds = 0
+        new_neibs = np.array(list(chunk))
+        while new_neibs.shape[0]!=0:
+            f = np.zeros(ids.shape[0],dtype=bool)
+            numba_isin(ids,new_neibs,f)
+            nbonds[f] = incr_bonds
+            new_set = set()
+            for ii in new_neibs:
+                for neib in self.neibs[ii]:
+                    if neib not in chunk:
+                        new_set.add(neib)
+                        chunk.add(neib)
+            new_neibs = np.array(list(new_set))
+            incr_bonds+=1
+        return nbonds
+
+        
+                
     def ids_nbondsFrom_args(self,ids,args):
         
         n = ids.shape[0]
@@ -2426,7 +2457,42 @@ class Analysis_Confined(Analysis):
         
         print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return dipoles_t,filters_t
-     
+    
+    def calc_segmental_dipole_moment_correlation(self,topol_vector,
+                                       segbond,filters={'all':None},
+                                       dads=1.025):
+        t0 = perf_counter()
+        dipoles_t,filters_t = self.calc_segmental_dipole_moment_t(topol_vector,
+                                       segbond,filters,dads=1)
+        
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        bond_distmatrix = self.bond_distance_matrix(ids1)
+        
+        unb = np.unique(bond_distmatrix)
+        b0 = dict()
+        b1 = dict()
+        for k in unb:
+            if k>0:
+                b =  np.nonzero(bond_distmatrix ==k)
+                b0[k] = b[0]
+                b1[k] = b[1]
+        
+        correlations ={filt:{k:[] for k in unb if k>0} for filt in filters_t}
+        
+        args = (dipoles_t,filters_t,b0,b1,correlations)
+        
+        nframes = self.loop_trajectory('vector_correlations', args)
+        
+        for kf in filters_t:
+            for k in correlations[kf]:
+                c = correlations[kf][k]
+                correlations[kf][k] = {'mean':np.mean(c),'std':np.std(c)}
+                
+        tf = perf_counter() - t0
+        print_time(tf,inspect.currentframe().f_code.co_name)
+    
+        return correlations
+    
     def calc_chainCM_t(self,filters={'all':None}, dads=1,option=''):
         t0 = perf_counter()
         filters = {'chain_'+k: v for k,v in filters.items()} #Need to modify when considering chains
@@ -2853,7 +2919,34 @@ class coreFunctions():
     def box_var(self,frame,box_var,box_mean_squared):
         box_var += self.get_box(frame)**2 - box_mean_squared
         return
-    
+    @staticmethod
+    def vector_correlations(self,frame,vec_t,filt_t,bk0,bk1,correlation):
+            
+            
+        timekey = self.get_time(frame) - self.get_time(self.first_frame)
+        vec = vec_t[timekey]
+        for kf in correlation:
+            f = filt_t[kf][timekey]
+            for k in correlation[kf]:
+              #  t0 = perf_counter()
+                b0 = bk0[k]
+                b1 = bk1[k]
+                f01 = np.logical_and(f[b0],f[b1])
+                v0 = vec[b0][f01]
+                v1 = vec[b1][f01]
+                
+               # tf = perf_counter()
+              #  print_time(tf-t0,'{}:{} :manipulating data'.format(kf,k))
+                try:
+                    costh = costh__parallelkernel(v0,v1)
+                    correlation[kf][k].append( costh )
+                except ZeroDivisionError:
+              #      logger.warning('In frame {:d} --> For {} and bond distance {:d} there are no statistics'.format(frame,kf,k))
+                    pass
+            #    tf2 = perf_counter()
+             #   print_time(tf2-tf,'{}:{} :computationsa'.format(kf,k))
+        return
+                
     @staticmethod
     def segmental_dipole_moment(self,frame,filters,dads,ids1,ids2,
                                 segment_args,dipoles_t,filt_per_t):
@@ -3719,6 +3812,21 @@ def var_wfilt_kernel(x,f):
     var = secmoment_wfilt_kernel(x,f) - mean_wfilt_kernel(x,f)**2
     return var
 
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def costh__parallelkernel_with_filter_strict(r1,r2,ft0,ftt):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and ftt[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    ave = tot/mi
+    return ave
+
+
 @jit(nopython=True,fastmath=True)#,parallel=True)
 def costh__kernel_with_filter_strict(r1,r2,ft0,ftt):
     tot = 0
@@ -3807,10 +3915,18 @@ def costh_kernel(r1,r2):
     costh/=rn1*rn2
     return costh
 
+@jit(nopython=True,fastmath=True,parallel=True)
+def costh__parallelkernel(r1,r2):
+    tot = 0
+    for i in prange(r1.shape[0]):
+        tot += costh_kernel(r1[i],r2[i])
+    ave = tot/float(r1.shape[0])
+    return ave
+
 @jit(nopython=True,fastmath=True)
 def costh__kernel(r1,r2):
     tot = 0
-    for i in r1.shape[0]:
+    for i in range(r1.shape[0]):
         tot += costh_kernel(r1[i],r2[i])
     ave = tot/float(r1.shape[0])
     return ave
