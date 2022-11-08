@@ -18,7 +18,7 @@ import pandas as pd
 import logging
 import coloredlogs
 
-LOGGING_LEVEL = logging.INFO
+LOGGING_LEVEL = logging.DEBUG
 
 logger = logging.getLogger(__name__)
 logger.setLevel(LOGGING_LEVEL)
@@ -410,7 +410,7 @@ class add_atoms():
         return 
     
     @staticmethod
-    def add_ghost_hydrogens(self,types):
+    def add_ghost_hydrogens(self,types,noise=None):
         t0 = perf_counter()
         
         new_atoms_info = add_atoms.get_new_atoms_info(self,'h',types)
@@ -424,7 +424,7 @@ class add_atoms():
         
         #for frame in self.timeframes:    
          #   add_atoms.set_ghost_coords(self, frame, new_atoms_info)
-        add_atoms.set_all_ghost_coords(self,new_atoms_info) 
+        add_atoms.set_all_ghost_coords(self,new_atoms_info,noise) 
         
         tf = perf_counter() - t0
         print_time(tf,inspect.currentframe().f_code.co_name)
@@ -440,7 +440,7 @@ class add_atoms():
         return
     
     @staticmethod
-    def set_all_ghost_coords(self,info):
+    def set_all_ghost_coords(self,info,noise=None):
         f,l,th,s,ir1,ir0,ir2 = add_atoms.serialize_info(info)
         self.unwrap_all()
         for frame in self.timeframes:      
@@ -448,6 +448,10 @@ class add_atoms():
             coords = self.get_coords(frame)
             add_atoms.set_ghost_coords_parallel(f,l,th,s,ir1,ir0,ir2,
                                                 coords,ghost_coords)
+            if noise is not None:
+                noise_coords =  np.random.normal(0,noise,ghost_coords.shape) 
+                ghost_coords += noise_coords
+                logger.debug('Adding noise mean = {:4.3f}'.format(np.mean(np.abs(noise_coords))))
             self.timeframes[frame]['ghost_coords'] = ghost_coords
         return
     
