@@ -2585,58 +2585,45 @@ class Analysis_Confined(Analysis):
         print_time(tf,inspect.currentframe().f_code.co_name)
         return adsorbed_chains_t['ads']
     
-    def init_xtNfilt(self,xt,filt_t):
+
+    
+    def init_xt(self,xt,dtype=float):
         x0 =xt[0]
         nfr = len(xt)
         shape = (nfr,*x0.shape)
-        x_nump = np.empty(shape,dtype=float)
-        f_nump = np.empty((nfr,filt_t[0].shape[0]),dtype=bool)
+        x_nump = np.empty(shape,dtype=dtype)
         
-        for i,t in zip(range(x_nump.shape[0]),xt.keys()):
+        for i,t in enumerate(xt.keys()):
            x_nump[i] = xt[t]
-           f_nump[i] = filt_t[t]
-        Prop_nump = np.zeros(nfr,dtype=float)
-        nv = np.zeros(nfr,dtype=int)
         
-        return  Prop_nump,nv,x_nump, f_nump , nfr
+        return  x_nump
     
-    def init_weights(self,wt):
-        w0 =wt[0]
-        nfr = len(wt)
-        shape = (nfr,*w0.shape)
-        w_nump = np.empty(shape,dtype=float)
-        
-        for i,t in zip(range(shape[0]), wt.keys()):
-           w_nump[i] = wt[t]
-        
-        return  w_nump
-    
-    def init_xt(self,xt):
-        x0 =xt[0]
+    def init_prop(self,xt):
         nfr = len(xt)
-        shape = (nfr,*x0.shape)
-        x_nump = np.empty(shape,dtype=float)
-        
-        for i,t in zip(range(x_nump.shape[0]),xt.keys()):
-           x_nump[i] = xt[t]
-           
         Prop_nump = np.zeros(nfr,dtype=float)
         nv = np.zeros(nfr,dtype=int)
-        
-        return  Prop_nump,nv,x_nump , nfr  
+        return Prop_nump,nv
     
-    def Dynamics(self,prop,xt,filt_t=None,weights_t=None):
+    def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
+                 filt_option='simple', block_average=True):
         
         tinit = perf_counter()
+        
+        Prop_nump,nv = self.init_prop(xt)
+        x_nump = self.init_xt(xt)
+        
+        args = (Prop_nump,nv,x_nump)
+        
         if filt_t is not None:
-            #prop_nump, nv, x_nump, f_nump , nfr = self.init_xtNfilt(xt,filt_t)
-            args = self.init_xtNfilt(xt,filt_t)
+            f_nump = self.init_xt(filt_t,dtype=bool)
+            args =(*args,f_nump)
         else:
-            #prop_nump, nv, x_nump , nfr = self.init_xt(xt)
-            args = self.init_xt(xt)
+            filt_option = None
+        
         if weights_t is not None:
-            w = self.init_weights(weights_t)
+            w = self.init_xt(weights_t)
             args = (*args,w)
+        
         prop_kernel = globals()[prop+'_kernel']
         overheads = perf_counter() - tinit
         
@@ -3643,44 +3630,52 @@ def p1_kernel(P1,nv,x,n):
     return 
 
 @jit(nopython=True,fastmath=True,parallel=True)
-def P1_kernel(P1,nv,x,ft,n):
+def P1_kernel(P1,nv,x,ft=None,wt=None,
+              filt_option=None,block_average=False):
+    
+    n = x.shape[0]
+    
+    
+    
     for i in range(n):
-        ft0 = ft[i]   
         x0 = x[i]
+        
         for j in prange(i,n):
-            try:
-                value,mi = costh__kernel_with_filter(x0,x[j],ft0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += mi
+            
+            args = (x0,x[j])
+            if ft is None:
+                args = (*args,None,None)
+                if filt_option is None or filt_option=='simple':
+                    args = (*args,ft[i],None)
+                elif filt_option =='strict' or filt_option=='change':
+                    args = (*args,ft[i],ft[j])
+            if wt is not None:
+                args = (*args,wt[i])
+                
+                
+            value,mi = costh__kernel_with_filter(*args)
+            fill_property(P1,nv,i,j,value,mi,block_average)
+
         
     for i in prange(n):    
         P1[i] /= nv[i]
     return 
 
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def wP1_kernel(P1,nv,x,ft,n,w):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        w0 = w[i]
-        for j in prange(i,n):
-            try:
-                value = costh__kernel_with_filter_weighted(x0,x[j],ft0,w0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
+@jit(nopython=True,fastmath=True)
+def fill_property(prop,nv,i,j,value,mi,block_average):
+    
+    idx = j-i
+    if block_average:
+        try:
+            prop[idx] +=  value/mi
+            nv[idx] += 1
+        except:
+            pass
+    else:
+        prop[idx] +=  value
+        nv[idx] += mi
+    
+    return
 
 
 @jit(nopython=True,fastmath=True,parallel=True)
@@ -3702,25 +3697,7 @@ def P2_kernel(P2,nv,x,ft,n):
         P2[i] /= nv[i]
     return 
 
-@jit(nopython=True,fastmath=True,parallel=True)
-def wP2_kernel(P2,nv,x,ft,n,w):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        w0 = w[i]
-        for j in prange(i,n):
-            try:
-                value = cos2th__kernel_with_filter_weighted(x0,x[j],ft0,w0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P2[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P2[i] /= nv[i]
-    return 
+
 @jit(nopython=True,fastmath=True,parallel=True)
 def DK_kernel(phi,nv,x,n):
     for i in range(n):
@@ -3740,25 +3717,7 @@ def DK_kernel(phi,nv,x,n):
         phi[i] /= nv[i]
     return 
 
-@jit(nopython=True,fastmath=True,parallel=True)
-def wDK_kernel(phi,nv,x,n,w):
-    for i in range(n):
-        x0 = x[i]
-        w0 = w[i]
-        for j in prange(i,n):
-            try:
-                xt = x[j]
-                value = DesorptionCorrelation_weighted(x0,xt,w0)
-            except:
-                pass
-            else:
-                idx = j-i
-                phi[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        phi[i] /= nv[i]
-    return
+
 @jit(nopython=True,fastmath=True)
 def DesorptionCorrelation(x0,xt):
     value = 0 ; m = 0
