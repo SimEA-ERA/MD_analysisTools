@@ -2631,8 +2631,10 @@ class Analysis_Confined(Analysis):
         if weights_t is not None:
             w = self.init_xt(weights_t)
             args = (*args,w)
+            
         func = self.get_inner_kernel_function(prop,filt_option,weights_t)
         args = (func,*args)
+        
         prop_kernel = globals()[prop+'_kernel']
         overheads = perf_counter() - tinit
         
