@@ -3635,7 +3635,7 @@ def P1_kernel(P1,nv,x,ft=None,wt=None,
     
     n = x.shape[0]
     
-    
+
     
     for i in range(n):
         x0 = x[i]
@@ -3645,6 +3645,7 @@ def P1_kernel(P1,nv,x,ft=None,wt=None,
             args = (x0,x[j])
             if ft is None:
                 args = (*args,None,None)
+            else:
                 if filt_option is None or filt_option=='simple':
                     args = (*args,ft[i],None)
                 elif filt_option =='strict' or filt_option=='change':
@@ -3817,7 +3818,7 @@ def costh__kernel_with_filter_change(r1,r2,ft0,ftt):
     return ave
 
 @jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter(r1,r2,ft0):
+def costh__kernel_with_filter(r1,r2,ft0,ft2=None):
     tot = 0
     mi = 0
     N = r1.shape[0]
