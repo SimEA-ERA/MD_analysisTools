@@ -2603,7 +2603,15 @@ class Analysis_Confined(Analysis):
         Prop_nump = np.zeros(nfr,dtype=float)
         nv = np.zeros(nfr,dtype=int)
         return Prop_nump,nv
-    
+    def get_inner_kernel_function(self,prop,filt_option,weights_t):
+        mapper = {'P1':'costh'}
+        func_name = mapper[prop]
+        if filt_option is not None:
+            func_name +='_{:s}'.format(filt_option)
+        if weights_t is not None:
+            func_name +='_weighted'
+        func_name = '{:s}__kernel'.format(func_name)
+        return globals()[func_name]
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
                  filt_option='simple', block_average=True):
         
@@ -2623,7 +2631,8 @@ class Analysis_Confined(Analysis):
         if weights_t is not None:
             w = self.init_xt(weights_t)
             args = (*args,w)
-        
+        func = self.get_inner_kernel_function(prop,filt_option,weights_t)
+        args = (func,*args)
         prop_kernel = globals()[prop+'_kernel']
         overheads = perf_counter() - tinit
         
@@ -2637,9 +2646,9 @@ class Analysis_Confined(Analysis):
        
         tf2 = perf_counter()
         if prop !='P2':
-            dynamical_property = {t:p for t,p in zip(xt,args[0])}
+            dynamical_property = {t:p for t,p in zip(xt,args[1])}
         else:
-            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[0])}
+            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[1])}
         tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
@@ -3630,37 +3639,50 @@ def p1_kernel(P1,nv,x,n):
     return 
 
 @jit(nopython=True,fastmath=True,parallel=True)
-def P1_kernel(P1,nv,x,ft=None,wt=None,
+def P1_kernel(func,P1,nv,xt,ft=None,wt=None,
               filt_option=None,block_average=False):
     
-    n = x.shape[0]
-    
+    n = xt.shape[0]
 
+    #func = costh__kernel_simple
     
     for i in range(n):
-        x0 = x[i]
-        
         for j in prange(i,n):
             
-            args = (x0,x[j])
-            if ft is None:
-                args = (*args,None,None)
-            else:
-                if filt_option is None or filt_option=='simple':
-                    args = (*args,ft[i],None)
-                elif filt_option =='strict' or filt_option=='change':
-                    args = (*args,ft[i],ft[j])
-            if wt is not None:
-                args = (*args,wt[i])
-                
-                
-            value,mi = costh__kernel_with_filter(*args)
+            args = get_args(xt,ft,wt,filt_option,i,j)
+            
+            value,mi = func(*args)
+            
             fill_property(P1,nv,i,j,value,mi,block_average)
-
         
     for i in prange(n):    
         P1[i] /= nv[i]
     return 
+
+@jit(nopython=True,fastmath=True)#,parallel=True)
+def costh_simple__kernel(r1,r2,ft0,ft2=None):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    return tot,mi
+@jit(nopython=True,fastmath=True)
+def get_args(xt,ft,wt,filt_option,i,j):
+    args = (xt[i],xt[j])
+    if ft is None:
+        args = (*args,None,None)
+    else:
+        if filt_option is None or filt_option=='simple':
+            args = (*args,ft[i],None)
+        elif filt_option =='strict' or filt_option=='change':
+            args = (*args,ft[i],ft[j])
+    if wt is not None:
+        args = (*args,wt[i])
+    return args
 
 @jit(nopython=True,fastmath=True)
 def fill_property(prop,nv,i,j,value,mi,block_average):
