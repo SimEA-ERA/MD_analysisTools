@@ -2625,6 +2625,7 @@ class Analysis_Confined(Analysis):
         if filt_t is not None:
             f_nump = self.init_xt(filt_t,dtype=bool)
             args =(*args,f_nump)
+            
         else:
             filt_option = None
         
@@ -3483,6 +3484,91 @@ class coreFunctions():
 
         return
     
+@jit(nopython=True,fastmath=True)
+def get_args(xt,ft,wt,filt_option,i,j):
+    args = (xt[i],xt[j])
+    if ft is None:
+        args = (*args,None,None)
+    else:
+        if filt_option is None or filt_option=='simple':
+            args = (*args,ft[i],None)
+        elif filt_option =='strict' or filt_option=='change':
+            args = (*args,ft[i],ft[j])
+    if wt is not None:
+        args = (*args,wt[i])
+    return args
+
+@jit(nopython=True,fastmath=True)
+def fill_property(prop,nv,i,j,value,mi,block_average):
+    
+    idx = j-i
+    if block_average:
+        try:
+            prop[idx] +=  value/mi
+            nv[idx] += 1
+        except:
+            pass
+    else:
+        prop[idx] +=  value
+        nv[idx] += mi
+    
+    return
+
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def P1_kernel(func,P1,nv,xt,ft=None,wt=None,
+              filt_option=None,block_average=False):
+    
+    n = xt.shape[0]
+
+    #func = costh__kernel_simple
+    
+    for i in range(n):
+        for j in prange(i,n):
+            
+            args = get_args(xt,ft,wt,filt_option,i,j)
+            
+            value,mi = func(*args)
+            
+            fill_property(P1,nv,i,j,value,mi,block_average)
+        
+    for i in prange(n):    
+        P1[i] /= nv[i]
+    return 
+
+@jit(nopython=True,fastmath=True)#,parallel=True)
+def costh_simple__kernel(r1,r2,ft0,ft2=None):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    return tot,mi
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def P2_kernel(P2,nv,x,ft,n):
+    for i in range(n):
+        ft0 = ft[i]   
+        x0 = x[i]
+        for j in prange(i,n):
+            try:
+                value = cos2th__kernel_with_filter(x0,x[j],ft0)
+            except:
+                pass
+            else:
+                idx = j-i
+                P2[idx] +=  value
+                nv[idx] += 1
+        
+    for i in prange(n):    
+        P2[i] /= nv[i]
+    return 
+
 @jit(nopython=True,parallel=True)
 def numba_bin_count(d,bins,counter):
     for j in prange(bins.shape[0]-1):
@@ -3510,26 +3596,6 @@ def MSD_kernel(msd,nv,x,ft,n):
         msd[i] /= nv[i]
     return 
 
-@jit(nopython=True,fastmath=True,parallel=True)
-def wMSD_kernel(msd,nv,x,ft,n,w):
-    for i in range(n):
-        ft0= ft[i]
-        x0 = x[i]
-        w0 = w[i]
-        for j in prange(i,n):
-            try:
-                Rt = x0-x[j]
-                value = mean_norm_square__weighted(Rt,ft0,w0)
-            except:
-                pass
-            else:
-                idx = j-i
-                msd[idx] +=  value
-                nv[idx] += 1
-        
-    for i in range(n):    
-        msd[i] /= nv[i]
-    return 
 
 @jit(nopython=True,fastmath=True)
 def norm_square(x1,x2):
@@ -3580,148 +3646,6 @@ def tacf_kernel(tacf,nv,x,ft,n):
     for i in prange(n):    
         tacf[i] /= nv[i]
     return
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def P1_change_kernel(P1,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        for j in prange(i,n):
-            ftt = ft[j]
-            try:
-                value = costh__kernel_with_filter_change(x0,x[j],ft0,ftt)
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def P1_strict_kernel(P1,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        for j in prange(i,n):
-            ftt = ft[j]
-            try:
-                value = costh__kernel_with_filter_strict(x0,x[j],ft0,ftt)
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def p1_kernel(P1,nv,x,n):
-    for i in range(n):
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                value = costh__kernel(x0,x[j])
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def P1_kernel(func,P1,nv,xt,ft=None,wt=None,
-              filt_option=None,block_average=False):
-    
-    n = xt.shape[0]
-
-    #func = costh__kernel_simple
-    
-    for i in range(n):
-        for j in prange(i,n):
-            
-            args = get_args(xt,ft,wt,filt_option,i,j)
-            
-            value,mi = func(*args)
-            
-            fill_property(P1,nv,i,j,value,mi,block_average)
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh_simple__kernel(r1,r2,ft0,ft2=None):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
-            mi+=1
-    return tot,mi
-@jit(nopython=True,fastmath=True)
-def get_args(xt,ft,wt,filt_option,i,j):
-    args = (xt[i],xt[j])
-    if ft is None:
-        args = (*args,None,None)
-    else:
-        if filt_option is None or filt_option=='simple':
-            args = (*args,ft[i],None)
-        elif filt_option =='strict' or filt_option=='change':
-            args = (*args,ft[i],ft[j])
-    if wt is not None:
-        args = (*args,wt[i])
-    return args
-
-@jit(nopython=True,fastmath=True)
-def fill_property(prop,nv,i,j,value,mi,block_average):
-    
-    idx = j-i
-    if block_average:
-        try:
-            prop[idx] +=  value/mi
-            nv[idx] += 1
-        except:
-            pass
-    else:
-        prop[idx] +=  value
-        nv[idx] += mi
-    
-    return
-
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def P2_kernel(P2,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                value = cos2th__kernel_with_filter(x0,x[j],ft0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P2[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P2[i] /= nv[i]
-    return 
-
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def DK_kernel(phi,nv,x,n):
