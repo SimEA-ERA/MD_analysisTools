@@ -1614,6 +1614,7 @@ class Analysis:
         tf = perf_counter() - t0
         print_time(tf,inspect.currentframe().f_code.co_name)
         return distmatrix
+    
     def bond_distance_id_to_ids(self,i,ids):
         chunk = {i}
         n = ids.shape[0]
@@ -1634,7 +1635,6 @@ class Analysis:
             incr_bonds+=1
         return nbonds
 
-        
                 
     def ids_nbondsFrom_args(self,ids,args):
         
@@ -2605,8 +2605,10 @@ class Analysis_Confined(Analysis):
         return Prop_nump,nv
   
     def get_inner_kernel_function(self,prop,filt_option,weights_t):
-        mapper = {'P1':'costh_kernel'}
-        inner_func_name = mapper[prop] 
+        mapper = {'p1':'costh_kernel',
+                  'p2':'cos2th_kernel',
+                  'msd':'norm_square_kernel'}
+        inner_func_name = mapper[prop.lower()] 
         name = 'dynprop'
         af_name = 'get'
         if filt_option is not None:
@@ -2626,7 +2628,7 @@ class Analysis_Confined(Analysis):
         return funcs
   
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
-                 filt_option='simple', block_average=True):
+                 filt_option='simple', block_average=False):
         
         tinit = perf_counter()
         
@@ -2647,13 +2649,15 @@ class Analysis_Confined(Analysis):
             w_nump = None
         
         
-        func,func_args,func_inner = self.get_inner_kernel_function(prop,filt_option,weights_t)
+        func,func_args,func_inner = \
+        self.get_inner_kernel_function(prop,filt_option,weights_t)
+        
         args = (func,func_args,func_inner,
                 Prop_nump,nv,
                 x_nump,f_nump,w_nump,
                 block_average)
         
-        prop_kernel = globals()[prop+'_kernel']
+        prop_kernel = globals()['DynamicProperty_kernel']
         overheads = perf_counter() - tinit
         
         try:
@@ -2665,7 +2669,7 @@ class Analysis_Confined(Analysis):
         
        
         tf2 = perf_counter()
-        if prop !='P2':
+        if prop.lower() !='p2':
             dynamical_property = {t:p for t,p in zip(xt,args[3])}
         else:
             dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[3])}
@@ -3520,10 +3524,28 @@ def fill_property(prop,nv,i,j,value,mi,block_average):
     return
 
 
+@jit(nopython=True,fastmath=True,parallel=True)
+def DK_kernel(phi,nv,x,n):
+    for i in range(n):
+        x0 = x[i]
+        for j in prange(i,n):
+            try:
+                xt = x[j]
+                value = DesorptionCorrelation(x0,xt)
+            except:
+                pass
+            else:
+                idx = j-i
+                phi[idx] +=  value
+                nv[idx] += 1
+        
+    for i in prange(n):    
+        phi[i] /= nv[i]
+    return 
 
 @jit(nopython=True,fastmath=True,parallel=True)
-def P1_kernel(func,func_args,inner_func,
-              P1,nv,xt,ft=None,wt=None,
+def DynamicProperty_kernel(func,func_args,inner_func,
+              Prop,nv,xt,ft=None,wt=None,
               block_average=False):
     
     n = xt.shape[0]
@@ -3535,10 +3557,10 @@ def P1_kernel(func,func_args,inner_func,
             
             value,mi = func(inner_func,*args)
             
-            fill_property(P1,nv,i,j,value,mi,block_average)
+            fill_property(Prop,nv,i,j,value,mi,block_average)
         
     for i in prange(n):   
-        P1[i] /= nv[i]
+        Prop[i] /= nv[i]
     return 
 
 @jit(nopython=True,fastmath=True)
@@ -3671,24 +3693,7 @@ def dynprop_change_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w):
     return tot,mi
 
 
-@jit(nopython=True,fastmath=True,parallel=True)
-def P2_kernel(P2,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                value = cos2th__kernel_with_filter(x0,x[j],ft0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P2[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P2[i] /= nv[i]
-    return 
+
 
 @jit(nopython=True,parallel=True)
 def numba_bin_count(d,bins,counter):
@@ -3697,52 +3702,45 @@ def numba_bin_count(d,bins,counter):
             if bins[j]<d[i] and d[i] <=bins[j+1]:
                 counter[j] +=1
     return
-@jit(nopython=True,fastmath=True,parallel=True)
-def MSD_kernel(msd,nv,x,ft,n):
-    for i in range(n):
-        ft0= ft[i]
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                Rt = x0-x[j]
-                value = mean_norm_square(Rt,ft0)
-            except:
-                pass
-            else:
-                idx = j-i
-                msd[idx] +=  value
-                nv[idx] += 1
-        
-    for i in range(n):    
-        msd[i] /= nv[i]
-    return 
-
 
 @jit(nopython=True,fastmath=True)
-def norm_square(x1,x2):
+def cos2th_kernel(r1,r2):
+    costh = costh_kernel(r1,r2)
+    return costh*costh
+
+@jit(nopython=True,fastmath=True)
+def costh_kernel(r1,r2):
+    costh=0 ; rn1 =0 ;rn2=0
+    n = r1.shape[0]
+    for j in range(n):
+        costh+=r1[j]*r2[j]
+        rn1+=r1[j]*r1[j]
+        rn2+=r2[j]*r2[j]
+    rn1 = rn1**0.5
+    rn2 = rn2**0.5
+    costh/=rn1*rn2
+    return costh
+
+@jit(nopython=True,fastmath=True)
+def norm_square_kernel(r1,r2):
+    
     nm = 0
-    for i in range(x1.shape[0]):
-        nm+= x1[i]*x2[i]
+    for i in range(r1.shape[0]):
+        ri = r2[i] - r1[i]
+        nm+= ri*ri
     return nm
 
 @jit(nopython=True,fastmath=True)
-def mean_norm_square(Rt,ft0):
-    mu = 0
-    ni = 0
-    for i in range(Rt.shape[0]):
-        if ft0[i]:
-             mu += norm_square(Rt[i],Rt[i])
-             ni+=1
-    return mu/ni
-@jit(nopython=True,fastmath=True)
-def mean_norm_square__weighted(Rt,ft0,w):
-    mu = 0
-    ni = 0
-    for i in range(Rt.shape[0]):
-        if ft0[i]:
-             mu += w[i]*norm_square(Rt[i],Rt[i])
-             ni+=w[i]
-    return mu/ni
+def DesorptionCorrelation__kernel(x0,xt):
+    value = 0 ; m = 0
+    for k1 in range(x0.shape[0]):
+        if x0[k1]:
+            if xt[k1]:
+                value+=1
+            else:
+                value+=0
+            m+=1
+    return value,m
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def tacf_kernel(tacf,nv,x,ft,n):
@@ -3768,51 +3766,12 @@ def tacf_kernel(tacf,nv,x,ft,n):
         tacf[i] /= nv[i]
     return
 
-@jit(nopython=True,fastmath=True,parallel=True)
-def DK_kernel(phi,nv,x,n):
-    for i in range(n):
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                xt = x[j]
-                value = DesorptionCorrelation(x0,xt)
-            except:
-                pass
-            else:
-                idx = j-i
-                phi[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        phi[i] /= nv[i]
-    return 
 
 
-@jit(nopython=True,fastmath=True)
-def DesorptionCorrelation(x0,xt):
-    value = 0 ; m = 0
-    for k1 in range(x0.shape[0]):
-        if x0[k1]:
-            if xt[k1]:
-                value+=1
-            else:
-                value+=0
-            m+=1
-    value/=m
-    return value
 
-@jit(nopython=True,fastmath=True)
-def DesorptionCorrelation_weighted(x0,xt,w):
-    value = 0 ; m = 0
-    for k1 in range(x0.shape[0]):
-        if x0[k1]:
-            if xt[k1]:
-                value += w[k1]
-            else:
-                value+=0
-            m+=w[k1]
-    value/=m
-    return value
+
+
+
 @jit(nopython = True,fastmath=True)
 def mean_wfilt_kernel(x,f):
     m =0 ; mi=0
@@ -3847,48 +3806,6 @@ def var_wfilt_kernel(x,f):
 
 
 
-
-
-
-
-
-
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def cos2th__kernel_with_filter(r1,r2,ft0):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh*costh
-            mi+=1
-    ave = tot/mi
-    return ave
-@jit(nopython=True,fastmath=True)
-def cos2th__kernel_with_filter_weighted(r1,r2,ft0,w):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot += w[i]*costh*costh
-            mi  += w[i]
-    ave = tot/mi
-    return ave
-@jit(nopython=True,fastmath=True)
-def costh_kernel(r1,r2):
-    costh=0 ; rn1 =0 ;rn2=0
-    n = r1.shape[0]
-    for j in range(n):
-        costh+=r1[j]*r2[j]
-        rn1+=r1[j]*r1[j]
-        rn2+=r2[j]*r2[j]
-    rn1 = rn1**0.5
-    rn2 = rn2**0.5
-    costh/=rn1*rn2
-    return costh
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def costh__parallelkernel(r1,r2):
