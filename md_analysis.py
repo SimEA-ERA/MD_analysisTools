@@ -2603,15 +2603,25 @@ class Analysis_Confined(Analysis):
         Prop_nump = np.zeros(nfr,dtype=float)
         nv = np.zeros(nfr,dtype=int)
         return Prop_nump,nv
+  
     def get_inner_kernel_function(self,prop,filt_option,weights_t):
         mapper = {'P1':'costh'}
-        func_name = mapper[prop]
+        name = mapper[prop]
+        af_name = 'get'
         if filt_option is not None:
-            func_name +='_{:s}'.format(filt_option)
+            ps = '_{:s}'.format(filt_option)
+            name += ps 
+            af_name+= ps
         if weights_t is not None:
-            func_name +='_weighted'
-        func_name = '{:s}__kernel'.format(func_name)
-        return globals()[func_name]
+            ps = '_weighted'
+            name += ps
+            af_name += ps
+        func_name = '{:s}__kernel'.format(name)
+        args_func_name = '{:s}__args'.format(af_name)
+        logger.info('func name : {:s} , argsFunc name : {:s}'.format(func_name,args_func_name))
+        funcs = (globals()[func_name],globals()[args_func_name])
+        return funcs
+  
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
                  filt_option='simple', block_average=True):
         
@@ -2620,21 +2630,25 @@ class Analysis_Confined(Analysis):
         Prop_nump,nv = self.init_prop(xt)
         x_nump = self.init_xt(xt)
         
-        args = (Prop_nump,nv,x_nump)
-        
         if filt_t is not None:
             f_nump = self.init_xt(filt_t,dtype=bool)
-            args =(*args,f_nump)
-            
+            if filt_option is None:
+                filt_option= 'simple'
         else:
+            f_nump = None
             filt_option = None
         
         if weights_t is not None:
-            w = self.init_xt(weights_t)
-            args = (*args,w)
-            
-        func = self.get_inner_kernel_function(prop,filt_option,weights_t)
-        args = (func,*args)
+            w_nump = self.init_xt(weights_t)
+        else:
+            w_nump = None
+        
+        
+        func,func_args = self.get_inner_kernel_function(prop,filt_option,weights_t)
+        args = (func,func_args,
+                Prop_nump,nv,
+                x_nump,f_nump,w_nump,
+                block_average)
         
         prop_kernel = globals()[prop+'_kernel']
         overheads = perf_counter() - tinit
@@ -2649,9 +2663,9 @@ class Analysis_Confined(Analysis):
        
         tf2 = perf_counter()
         if prop !='P2':
-            dynamical_property = {t:p for t,p in zip(xt,args[1])}
+            dynamical_property = {t:p for t,p in zip(xt,args[2])}
         else:
-            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[1])}
+            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[2])}
         tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
@@ -3484,19 +3498,7 @@ class coreFunctions():
 
         return
     
-@jit(nopython=True,fastmath=True)
-def get_args(xt,ft,wt,filt_option,i,j):
-    args = (xt[i],xt[j])
-    if ft is None:
-        args = (*args,None,None)
-    else:
-        if filt_option is None or filt_option=='simple':
-            args = (*args,ft[i],None)
-        elif filt_option =='strict' or filt_option=='change':
-            args = (*args,ft[i],ft[j])
-    if wt is not None:
-        args = (*args,wt[i])
-    return args
+
 
 @jit(nopython=True,fastmath=True)
 def fill_property(prop,nv,i,j,value,mi,block_average):
@@ -3517,8 +3519,8 @@ def fill_property(prop,nv,i,j,value,mi,block_average):
 
 
 @jit(nopython=True,fastmath=True,parallel=True)
-def P1_kernel(func,P1,nv,xt,ft=None,wt=None,
-              filt_option=None,block_average=False):
+def P1_kernel(func,func_args,P1,nv,xt,ft=None,wt=None,
+              block_average=False):
     
     n = xt.shape[0]
 
@@ -3527,7 +3529,7 @@ def P1_kernel(func,P1,nv,xt,ft=None,wt=None,
     for i in range(n):
         for j in prange(i,n):
             
-            args = get_args(xt,ft,wt,filt_option,i,j)
+            args = func_args(i,j,xt,ft,wt)
             
             value,mi = func(*args)
             
@@ -3537,8 +3539,54 @@ def P1_kernel(func,P1,nv,xt,ft=None,wt=None,
         P1[i] /= nv[i]
     return 
 
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh_simple__kernel(r1,r2,ft0,ft2=None):
+@jit(nopython=True,fastmath=True)
+def get__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j])
+
+@jit(nopython=True,fastmath=True)
+def get_weighted__args(i,j,xt,ft,wt):
+    return (xt[i], xt[j],  wt[i])
+
+
+@jit(nopython=True,fastmath=True)
+def get_simple__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i])
+
+@jit(nopython=True,fastmath=True)
+def get_simple_weighted__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],wt[i])
+
+
+@jit(nopython=True,fastmath=True)
+def get_strict__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],ft[j])
+
+@jit(nopython=True,fastmath=True)
+def get_strict_weighted__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],ft[j],wt[i])
+
+
+@jit(nopython=True,fastmath=True)
+def get_change__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],ft[j])
+
+@jit(nopython=True,fastmath=True)
+def get_change_weighted__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],ft[j],wt[i])
+
+@jit(nopython=True,fastmath=True)
+def costh__kernel(r1,r2):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        costh = costh_kernel(r1[i],r2[i])
+        tot+=costh
+        mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def costh_simple__kernel(r1,r2,ft0):
     tot = 0
     mi = 0
     N = r1.shape[0]
@@ -3547,6 +3595,77 @@ def costh_simple__kernel(r1,r2,ft0,ft2=None):
             costh = costh_kernel(r1[i],r2[i])
             tot+=costh
             mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def costh_strict__kernel(r1,r2,ft0,fte):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and fte[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def costh_change__kernel(r1,r2,ft0,fte):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and not fte[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=costh
+            mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def costh_weighted__kernel(r1,r2,w):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        costh = costh_kernel(r1[i],r2[i])
+        tot+=w[i]*costh
+        mi+=w[i]
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def costh_simple_weighted__kernel(r1,r2,ft0,w):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=w[i]*costh
+            mi+=w[i]
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def costh_strict_weighted__kernel(r1,r2,ft0,fte,w):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and fte[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=w[i]*costh
+            mi+=w[i]
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def costh_change_weighted__kernel(r1,r2,ft0,fte,w):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and not fte[i]:
+            costh = costh_kernel(r1[i],r2[i])
+            tot+=w[i]*costh
+            mi+=w[i]
     return tot,mi
 
 
@@ -3835,13 +3954,7 @@ def costh__parallelkernel(r1,r2):
     ave = tot/float(r1.shape[0])
     return ave
 
-@jit(nopython=True,fastmath=True)
-def costh__kernel(r1,r2):
-    tot = 0
-    for i in range(r1.shape[0]):
-        tot += costh_kernel(r1[i],r2[i])
-    ave = tot/float(r1.shape[0])
-    return ave
+
 
 @jit(nopython=True,fastmath=True)
 def costhsquare__kernel(costh,r1,r2):
