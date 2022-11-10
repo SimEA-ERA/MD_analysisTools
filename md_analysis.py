@@ -2605,8 +2605,9 @@ class Analysis_Confined(Analysis):
         return Prop_nump,nv
   
     def get_inner_kernel_function(self,prop,filt_option,weights_t):
-        mapper = {'P1':'costh'}
-        name = mapper[prop]
+        mapper = {'P1':'costh_kernel'}
+        inner_func_name = mapper[prop] 
+        name = 'dynprop'
         af_name = 'get'
         if filt_option is not None:
             ps = '_{:s}'.format(filt_option)
@@ -2619,7 +2620,9 @@ class Analysis_Confined(Analysis):
         func_name = '{:s}__kernel'.format(name)
         args_func_name = '{:s}__args'.format(af_name)
         logger.info('func name : {:s} , argsFunc name : {:s}'.format(func_name,args_func_name))
-        funcs = (globals()[func_name],globals()[args_func_name])
+        funcs = (globals()[func_name],
+                 globals()[args_func_name],
+                 globals()[inner_func_name])
         return funcs
   
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
@@ -2644,8 +2647,8 @@ class Analysis_Confined(Analysis):
             w_nump = None
         
         
-        func,func_args = self.get_inner_kernel_function(prop,filt_option,weights_t)
-        args = (func,func_args,
+        func,func_args,func_inner = self.get_inner_kernel_function(prop,filt_option,weights_t)
+        args = (func,func_args,func_inner,
                 Prop_nump,nv,
                 x_nump,f_nump,w_nump,
                 block_average)
@@ -2663,9 +2666,9 @@ class Analysis_Confined(Analysis):
        
         tf2 = perf_counter()
         if prop !='P2':
-            dynamical_property = {t:p for t,p in zip(xt,args[2])}
+            dynamical_property = {t:p for t,p in zip(xt,args[3])}
         else:
-            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[2])}
+            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[3])}
         tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
@@ -3519,23 +3522,22 @@ def fill_property(prop,nv,i,j,value,mi,block_average):
 
 
 @jit(nopython=True,fastmath=True,parallel=True)
-def P1_kernel(func,func_args,P1,nv,xt,ft=None,wt=None,
+def P1_kernel(func,func_args,inner_func,
+              P1,nv,xt,ft=None,wt=None,
               block_average=False):
     
     n = xt.shape[0]
 
-    #func = costh__kernel_simple
-    
     for i in range(n):
         for j in prange(i,n):
             
             args = func_args(i,j,xt,ft,wt)
             
-            value,mi = func(*args)
+            value,mi = func(inner_func,*args)
             
             fill_property(P1,nv,i,j,value,mi,block_average)
         
-    for i in prange(n):    
+    for i in prange(n):   
         P1[i] /= nv[i]
     return 
 
@@ -3575,96 +3577,96 @@ def get_change_weighted__args(i,j,xt,ft,wt):
     return (xt[i],xt[j],ft[i],ft[j],wt[i])
 
 @jit(nopython=True,fastmath=True)
-def costh__kernel(r1,r2):
+def dynprop__kernel(inner_kernel,r1,r2):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
-        costh = costh_kernel(r1[i],r2[i])
-        tot+=costh
+        inner = inner_kernel(r1[i],r2[i])
+        tot+=inner
         mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def costh_simple__kernel(r1,r2,ft0):
+def dynprop_simple__kernel(inner_kernel,r1,r2,ft0):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=inner
             mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def costh_strict__kernel(r1,r2,ft0,fte):
+def dynprop_strict__kernel(inner_kernel,r1,r2,ft0,fte):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and fte[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=inner
             mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def costh_change__kernel(r1,r2,ft0,fte):
+def dynprop_change__kernel(inner_kernel,r1,r2,ft0,fte):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and not fte[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=inner
             mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def costh_weighted__kernel(r1,r2,w):
+def dynprop_weighted__kernel(inner_kernel,r1,r2,w):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
-        costh = costh_kernel(r1[i],r2[i])
-        tot+=w[i]*costh
+        inner = inner_kernel(r1[i],r2[i])
+        tot+=w[i]*inner
         mi+=w[i]
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def costh_simple_weighted__kernel(r1,r2,ft0,w):
+def dynprop_simple_weighted__kernel(inner_kernel,r1,r2,ft0,w):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=w[i]*costh
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=w[i]*inner
             mi+=w[i]
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def costh_strict_weighted__kernel(r1,r2,ft0,fte,w):
+def dynprop_strict_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and fte[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=w[i]*costh
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=w[i]*inner
             mi+=w[i]
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def costh_change_weighted__kernel(r1,r2,ft0,fte,w):
+def dynprop_change_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and not fte[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=w[i]*costh
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=w[i]*inner
             mi+=w[i]
     return tot,mi
 
@@ -3844,70 +3846,12 @@ def var_wfilt_kernel(x,f):
     return var
 
 
-@jit(nopython=True,fastmath=True,parallel=True)
-def costh__parallelkernel_with_filter_strict(r1,r2,ft0,ftt):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i] and ftt[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
-            mi+=1
-    ave = tot/mi
-    return ave
 
 
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter_strict(r1,r2,ft0,ftt):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i] and ftt[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
-            mi+=1
-    ave = tot/mi
-    return ave
 
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter_change(r1,r2,ft0,ftt):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i] and not ftt[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
-            mi+=1
-    ave = tot/mi
-    return ave
 
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter(r1,r2,ft0,ft2=None):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
-            mi+=1
-    return tot,mi
 
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter_weighted(r1,r2,ft0,w):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=w[i]*costh
-            mi+=w[i]
-    ave = tot/mi
-    return ave
+
 
 @jit(nopython=True,fastmath=True)#,parallel=True)
 def cos2th__kernel_with_filter(r1,r2,ft0):
