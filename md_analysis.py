@@ -2723,9 +2723,102 @@ class Analysis_Confined(Analysis):
         tf = perf_counter()-tinit
         #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
         print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "Kinetics')
-        
         return kinetic_property
     
+    def get_TACF_inner_kernel_functions(self,prop,filt_option,weights_t):
+        
+        inner_mapper = {'cos':'cosCorrelation_kernel'}
+        inner_zero_mapper = {'cos':'fcos_kernel'}
+        
+        inner_func_name = inner_mapper[prop.lower()] 
+        inner_zero_func_name = inner_zero_mapper[prop.lower()]
+        
+        name = 'dynprop'
+        af_name = 'get'
+        args_z_name = 'get_zero'
+        mean_func_name = 'mean'
+        secmom_func_name = 'secmoment'
+        
+        if filt_option is not None:
+            ps = '_{:s}'.format(filt_option)
+            pz = '_filt'
+            name += ps 
+            af_name+= ps
+            args_z_name +=pz 
+            mean_func_name+=pz
+            secmom_func_name+=pz
+        if weights_t is not None:
+            ps = '_weighted'
+            args_z_name += ps
+            name += ps
+            af_name += ps
+            mean_func_name+=ps
+            secmom_func_name+=ps
+        
+        func_name = '{:s}__kernel'.format(name)
+        args_func_name = '{:s}__args'.format(af_name)
+        args_zero_func_name = '{:s}__args'.format(args_z_name)
+        mean_func_name = '{:s}__kernel'.format(mean_func_name)
+        secmom_func_name = '{:s}__kernel'.format(secmom_func_name)
+        
+        func_names = [func_name,args_func_name, inner_func_name,
+                      mean_func_name,secmom_func_name,
+                      args_zero_func_name,
+                      inner_zero_func_name]
+        
+        s = ''.join( ['f{:d}={:s} \n'.format(i,f) for i,f in enumerate(func_names)] )
+        
+        logger.info(s)
+        
+        funcs = tuple([ globals()[f] for f in func_names])
+        return funcs
+  
+    def TACF(self,prop,xt,filt_t=None,
+             wt=None,filt_option=None,block_average=False):
+        
+        tinit = perf_counter()
+        
+        Prop_nump,nv = self.init_prop(xt)
+        mu_val,mu_num = self.init_prop(xt)
+        secmom_val,secmom_num = self.init_prop(xt)
+        
+        x_nump = self.init_xt(xt,dtype=float)
+        
+        if filt_t is not None:
+            f_nump = self.init_xt(filt_t,dtype=bool)
+            if filt_option is None:
+                filt_option= 'simple'
+        else:
+            f_nump = None
+            filt_option = None
+        
+        if wt is not None:
+            w_nump = self.init_xt(wt)
+        else:
+            w_nump = None
+        
+        func_name, func_args, inner_func,\
+        mean_func, secmoment_func, func_args_zero, inner_func_zero \
+        = self.get_TACF_inner_kernel_functions(prop,filt_option,wt)
+        
+
+        args = (func_name, func_args, inner_func,
+              mean_func, secmoment_func, func_args_zero, inner_func_zero,
+              Prop_nump,nv,
+              mu_val,mu_num,secmom_val,secmom_num,
+              x_nump, f_nump, w_nump,
+              block_average)
+    
+        TACF_kernel(*args)
+        #print(Prop_nump)
+        TACF_property = {t:p for t,p in zip(xt,Prop_nump)}
+        tf = perf_counter()-tinit
+        
+        print_time(tf,inspect.currentframe().f_code.co_name)
+        
+        return TACF_property
+    
+
 class Filters():
     def __init__(self):
         pass
@@ -2766,7 +2859,6 @@ class Filters():
             else:
                 return {layers: filt_uplow_inclucive(d , layers[0], layers[1])}
         return dict()
-
     @staticmethod
     def BondsTrainFrom(self,bondlayers,ids1,ids2,coords,cm,dads,box,*args):
         #t0 = perf_counter()
@@ -2797,7 +2889,7 @@ class Filters():
         #d = self.dfun(coords,cm)
         ds_chains, args_train, args_tail,\
         args_loop, args_bridge = self.conformations(dads,coords,box)
-
+        
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_train)
         nbonds2 = self.ids_nbondsFrom_args(ids2,args_train)
         nbonds = np.minimum(nbonds1,nbonds2)
@@ -3280,7 +3372,7 @@ class coreFunctions():
             rm = 0.5*( coords[d_ids[:,1]] + coords[d_ids[:,2]] )
             d = self.dfun(rm,cs)
             dih_val = np.empty(d_ids.shape[0],dtype=float)
-            dihedral_distribution_kernel(d_ids,coords,dih_val)
+            dihedral_values_kernel(d_ids,coords,dih_val)
             for lay in dlayers:
                 fin_bin = filt_uplow(d, lay[0], lay[1])
                 dih_distr[k][lay].extend(dih_val[fin_bin])
@@ -3352,14 +3444,14 @@ class coreFunctions():
         time = self.get_time(frame)
         
         dih_val = np.empty(dih_ids.shape[0],dtype=float) # alloc 
-        dihedral_distribution_kernel(dih_ids,coords,dih_val)
+        dihedral_values_kernel(dih_ids,coords,dih_val)
 
         if frame == self.first_frame :
             self.time_zero = time
         key = self.get_timekey(time, self.time_zero)
         dihedrals_t[key] = dih_val
         
-        del dih_val #deallocating for safty
+        del dih_val #deallocating for safety
         tm = perf_counter()
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
@@ -3560,7 +3652,7 @@ def fill_property(prop,nv,i,j,value,mi,block_average):
     if block_average:
         try:
             prop[idx] +=  value/mi
-            nv[idx] += 1
+            nv[idx] += 1.0
         except:
             pass
     else:
@@ -3610,6 +3702,158 @@ def Kinetics_inner_weighted__kernel(x0,xt,w0):
                 value += wi
             
     return value,m
+
+@jit(nopython=True,fastmath=True)
+def get_zero__args(i,xt,ft,wt):
+    return (xt[i],)
+
+@jit(nopython=True,fastmath=True)
+def get_zero_filt__args(i,xt,ft,wt):
+    return (xt[i],ft[i])
+
+@jit(nopython=True,fastmath=True)
+def get_zero_weighted__args(i,xt,ft,wt):
+    return (xt[i],  wt[i])
+
+@jit(nopython=True,fastmath=True)
+def get_zero_filt_weighted__args(i,xt,ft,wt):
+    return (xt[i],ft[i],wt[i])
+
+@jit(nopython = True,fastmath=True)
+def mean__kernel(ifunc,x):
+    mean =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        mean += ifunc(x[i])
+    mi = float(x.shape[0])
+    return mean, mi
+
+@jit(nopython = True,fastmath=True)
+def mean_weighted__kernel(ifunc,x,w):
+    mean =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        wi = w[i]
+        mean += wi*ifunc(x[i])
+        mi += wi
+    return mean,mi
+
+@jit(nopython = True,fastmath=True)
+def mean_filt__kernel(ifunc,x,f):
+    mean =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        if f[i]:
+            mean+=ifunc(x[i])
+            mi+=1.0
+    return mean, mi
+
+@jit(nopython = True,fastmath=True)
+def mean_filt_weighted__kernel(ifunc,x,f,w):
+    mean =0 ; mi=0
+    for i in range(x.shape[0]):
+        if f[i]:
+            wi = w[i]
+            mean+=wi*ifunc(x[i])
+            mi+=wi
+    return mean, mi
+
+
+@jit(nopython = True,fastmath=True)
+def secmoment__kernel(ifunc,x):
+    sec =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        xi = ifunc(x[i])
+        sec += xi*xi
+    mi = float(x.shape[0])
+    return sec, mi
+
+@jit(nopython = True,fastmath=True)
+def secmoment_weighted__kernel(ifunc,x,w):
+    sec =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        wi = w[i]
+        xi = ifunc(x[i])
+        sec += wi*xi*xi
+        mi += wi
+    return sec,mi
+
+@jit(nopython = True,fastmath=True)
+def secmoment_filt__kernel(ifunc,x,f):
+    sec =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        if f[i]:
+            xi = ifunc(x[i])
+            sec+=xi*xi
+            mi+=1.0
+    return sec, mi
+
+@jit(nopython = True,fastmath=True)
+def secmoment_filt_weighted__kernel(ifunc,x,f,w):
+    sec =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        if f[i]:
+            wi = w[i]
+            xi = ifunc(xi[i])
+            sec+=wi*xi*xi
+            mi+=w[i]
+    return sec, mi
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def TACF_kernel(func, func_args, inner_func,
+              mean_func, secmoment_func, func_args_zero, inner_func_zero,
+              Prop,nv,
+              mu_val,mu_num,secmom_val,secmom_num,
+              xt, ft=None, wt=None,
+              block_average=False):
+    
+    n= xt.shape[0]
+    
+    for i in range(n):
+
+        args_zero = func_args_zero(i,xt,ft,wt)
+        
+        mu_val[i],mu_num[i] = mean_func(inner_func_zero,*args_zero)
+        
+        secmom_val[i],secmom_num[i] = secmoment_func(inner_func_zero,*args_zero)
+        
+        for j in prange(i,n):
+                
+            args = func_args(i,j,xt,ft,wt)
+
+            value,mi = func(inner_func,*args)
+            
+            fill_property(Prop,nv,i,j,value,mi,block_average)
+            
+    if block_average:
+    
+        for i in range(n):
+            
+            mui = mu_val[i]/mu_num[i]
+            seci = secmom_val[i]/secmom_num[i] 
+            
+            mui_square = mui*mui  
+            vari = seci - mui_square
+            if i<10:
+                print(1,i,Prop[i])
+            Prop[i] = (Prop[i]/nv[i] - mui_square)/vari
+            if i<10:
+                print(2,i,Prop[i],vari)
+        return
+    else:
+        mu =0 ;nmu =0
+        sec = 0;nsec =0
+        for i in prange(n):
+            mu+=mu_val[i]  ; nmu+=mu_num[i]
+            sec+= secmom_val[i] ; nsec += secmom_num[i]
+        mu/=nmu 
+        sec/=nsec
+        
+        mu_sq = mu*mu
+        var = sec-mu_sq
+        
+        for i in prange(n):
+            Prop[i] = (Prop[i]/nv[i] - mu_sq)/var
+    
+        return 
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def DynamicProperty_kernel(func,func_args,inner_func,
@@ -3772,6 +4016,17 @@ def numba_bin_count(d,bins,counter):
     return
 
 @jit(nopython=True,fastmath=True)
+def fcos_kernel(x):
+    return np.cos(x)
+
+@jit(nopython=True,fastmath=True)
+def cosCorrelation_kernel(x1,x2):
+    
+    c1= np.cos(x1)
+    c2 = np.cos(x2)
+    return c1*c2
+
+@jit(nopython=True,fastmath=True)
 def cos2th_kernel(r1,r2):
     costh = costh_kernel(r1,r2)
     return costh*costh
@@ -3797,73 +4052,6 @@ def norm_square_kernel(r1,r2):
         ri = r2[i] - r1[i]
         nm+= ri*ri
     return nm
-
-
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def tacf_kernel(tacf,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]
-        x0 = x[i]
-        mu = mean_wfilt_kernel(x0,ft0)
-        
-        mu_square = mu**2
-        var = secmoment_wfilt_kernel(x0, ft0) - mu_square
-        
-        for j in prange(i,n):
-            try:
-                value = covariance_wfilter_kernel(x0,x[j],ft0)
-            except:
-                pass
-            else:
-                idx = j-i               
-                tacf[idx] +=  (value - mu_square)/var
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        tacf[i] /= nv[i]
-    return
-
-
-
-
-
-
-
-@jit(nopython = True,fastmath=True)
-def mean_wfilt_kernel(x,f):
-    m =0 ; mi=0
-    for i in range(x.shape[0]):
-        if f[i]:
-            m+=x[i]
-            mi+=1
-    m/=mi
-    return m
-@jit(nopython=True,fastmath=True)
-def covariance_wfilter_kernel(x0,xt,ft0):
-    m=0 ; mi =0
-    for i in range(x0.shape[0]):
-        if ft0[i]:
-            m+=xt[i]*x0[i]
-            mi+=1
-    m/=mi
-    return m 
-@jit(nopython = True,fastmath=True)
-def secmoment_wfilt_kernel(x,f):
-    se=0 ; mi=0
-    for i in range(x.shape[0]):
-        if f[i]:
-            se+=x[i]**2
-            mi+=1
-    se /=mi
-    return se 
-@jit(nopython = True,fastmaeth=True)
-def var_wfilt_kernel(x,f):
-    var = secmoment_wfilt_kernel(x,f) - mean_wfilt_kernel(x,f)**2
-    return var
-
-
-
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def costh__parallelkernel(r1,r2):
@@ -3929,7 +4117,7 @@ def chain_characteristics_kernel(coords,mass,ch_cm,Gyt):
     return Ree2, Rg2,k2,asph,acyl, Rgxx_plus_yy, Rgxx_plus_zz, Rgyy_plus_zz
    
 @jit(nopython=True, fastmath=True,parallel=True)
-def dihedral_distribution_kernel(dih_ids,coords,dih_val):
+def dihedral_values_kernel(dih_ids,coords,dih_val):
     for i in prange(dih_ids.shape[0]):
         r0 = coords[dih_ids[i,0]]
         r1 = coords[dih_ids[i,1]]  
