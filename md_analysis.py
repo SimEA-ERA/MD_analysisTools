@@ -2601,16 +2601,18 @@ class Analysis_Confined(Analysis):
     def init_prop(self,xt):
         nfr = len(xt)
         Prop_nump = np.zeros(nfr,dtype=float)
-        nv = np.zeros(nfr,dtype=int)
+        nv = np.zeros(nfr,dtype=float)
         return Prop_nump,nv
   
-    def get_inner_kernel_function(self,prop,filt_option,weights_t):
+    def get_Dynamics_inner_kernel_functions(self,prop,filt_option,weights_t):
         mapper = {'p1':'costh_kernel',
                   'p2':'cos2th_kernel',
                   'msd':'norm_square_kernel'}
         inner_func_name = mapper[prop.lower()] 
+        
         name = 'dynprop'
         af_name = 'get'
+        
         if filt_option is not None:
             ps = '_{:s}'.format(filt_option)
             name += ps 
@@ -2619,12 +2621,16 @@ class Analysis_Confined(Analysis):
             ps = '_weighted'
             name += ps
             af_name += ps
+        
         func_name = '{:s}__kernel'.format(name)
         args_func_name = '{:s}__args'.format(af_name)
-        logger.info('func name : {:s} , argsFunc name : {:s}'.format(func_name,args_func_name))
+        
+        logger.info(' func name : "{:s}" \n argsFunc name : "{:s}" \n innerFunc name : "{:s}" '.format(func_name,args_func_name,inner_func_name))
+        
         funcs = (globals()[func_name],
                  globals()[args_func_name],
                  globals()[inner_func_name])
+        
         return funcs
   
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
@@ -2650,7 +2656,7 @@ class Analysis_Confined(Analysis):
         
         
         func,func_args,func_inner = \
-        self.get_inner_kernel_function(prop,filt_option,weights_t)
+        self.get_Dynamics_inner_kernel_functions(prop,filt_option,weights_t)
         
         args = (func,func_args,func_inner,
                 Prop_nump,nv,
@@ -2679,7 +2685,47 @@ class Analysis_Confined(Analysis):
         #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
         print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "{}'.format(prop))
         return dynamical_property
-
+    
+    def get_Kinetics_inner_kernel_functions(self,wt):
+        
+        if wt is None:
+            func_args = 'get__args'
+            func_name = 'Kinetics_inner__kernel'
+        else:
+            func_args = 'get_weighted__args'
+            func_name = 'Kinetics_inner_weighted__kernel'
+        
+        logger.info('func name : {:s} , argsFunc name : {:s}'.format(func_name,func_args))
+        
+        return globals()[func_name],globals()[func_args]
+    
+    def Kinetics(self,xt,wt=None,block_average=False):
+        
+        tinit = perf_counter()
+        
+        Prop_nump,nv = self.init_prop(xt)
+        x_nump = self.init_xt(xt,dtype=bool)
+        
+        if wt is not None:
+            w_nump = self.init_xt(wt)
+        else:
+            w_nump = None
+        
+        func_name,func_args = self.get_Kinetics_inner_kernel_functions(wt)
+        
+        args = (func_name,func_args,
+                Prop_nump,nv,
+                x_nump,w_nump,
+                block_average)
+        Kinetics_kernel(*args)
+        
+        kinetic_property = {t:p for t,p in zip(xt,Prop_nump)}
+        tf = perf_counter()-tinit
+        #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
+        print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "Kinetics')
+        
+        return kinetic_property
+    
 class Filters():
     def __init__(self):
         pass
@@ -3525,23 +3571,45 @@ def fill_property(prop,nv,i,j,value,mi,block_average):
 
 
 @jit(nopython=True,fastmath=True,parallel=True)
-def DK_kernel(phi,nv,x,n):
+def Kinetics_kernel(func,func_args,
+                    Prop,nv,xt,wt=None,
+                    block_average=False):
+    
+    n = xt.shape[0]
+    
     for i in range(n):
-        x0 = x[i]
         for j in prange(i,n):
-            try:
-                xt = x[j]
-                value = DesorptionCorrelation(x0,xt)
-            except:
-                pass
-            else:
-                idx = j-i
-                phi[idx] +=  value
-                nv[idx] += 1
+            args = func_args(i,j,xt,None,wt)
+            
+            value,mi = func(*args)
+            fill_property(Prop,nv,i,j,value,mi,block_average)
         
-    for i in prange(n):    
-        phi[i] /= nv[i]
+    for i in prange(n):  
+        Prop[i] /= nv[i]
     return 
+
+@jit(nopython=True,fastmath=True)
+def Kinetics_inner__kernel(x0,xt):
+    value = 0.0 ; m = 0.0
+    for i in range(x0.shape[0]):
+        if x0[i]:
+            if xt[i]:
+                value += 1.0
+            m += 1.0
+    return value,m
+
+@jit(nopython=True,fastmath=True)
+def Kinetics_inner_weighted__kernel(x0,xt,w0):
+    value = 0.0 ; m = 0.0
+    for i in range(x0.shape[0]):
+        if x0[i]:
+            wi = w0[i]
+            m += wi
+            
+            if xt[i]:
+                value += wi
+            
+    return value,m
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def DynamicProperty_kernel(func,func_args,inner_func,
@@ -3730,17 +3798,7 @@ def norm_square_kernel(r1,r2):
         nm+= ri*ri
     return nm
 
-@jit(nopython=True,fastmath=True)
-def DesorptionCorrelation__kernel(x0,xt):
-    value = 0 ; m = 0
-    for k1 in range(x0.shape[0]):
-        if x0[k1]:
-            if xt[k1]:
-                value+=1
-            else:
-                value+=0
-            m+=1
-    return value,m
+
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def tacf_kernel(tacf,nv,x,ft,n):
