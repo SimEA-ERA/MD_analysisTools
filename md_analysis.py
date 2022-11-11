@@ -3824,7 +3824,6 @@ def TACF_kernel(func, func_args, inner_func,
             fill_property(Prop,nv,i,j,value,mi,block_average)
             
     if block_average:
-    
         for i in range(n):
             
             mui = mu_val[i]/mu_num[i]
@@ -3832,11 +3831,9 @@ def TACF_kernel(func, func_args, inner_func,
             
             mui_square = mui*mui  
             vari = seci - mui_square
-            if i<10:
-                print(1,i,Prop[i])
+            
             Prop[i] = (Prop[i]/nv[i] - mui_square)/vari
-            if i<10:
-                print(2,i,Prop[i],vari)
+
         return
     else:
         mu =0 ;nmu =0
