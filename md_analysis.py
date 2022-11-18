@@ -15,6 +15,47 @@ import pytrr
 from joblib import Parallel, delayed
 import multiprocessing
 import pandas as pd
+import logging
+import coloredlogs
+
+LOGGING_LEVEL = logging.DEBUG
+
+logger = logging.getLogger(__name__)
+logger.setLevel(LOGGING_LEVEL)
+logFormat = '%(asctime)s\n[ %(levelname)s ]\n[%(filename)s -> %(funcName)s() -> line %(lineno)s]\n%(message)s\n --------'
+formatter = logging.Formatter(logFormat)
+
+logfile_handler = logging.FileHandler('md_analysis.log',mode='w')
+logfile_handler.setFormatter(formatter)
+
+logger.addHandler(logfile_handler)
+
+stream = logging.StreamHandler()
+stream.setLevel(logging.DEBUG)
+stream.setFormatter(formatter)
+
+logger.addHandler(stream)
+
+fieldstyle = {'asctime': {'color': 'magenta'},
+              'levelname': {'bold': True, 'color': 'green'},
+              'filename':{'color':'green'},
+              'funcName':{'color':'green'},
+              'lineno':{'color':'green'}}
+                                   
+levelstyles = {'critical': {'bold': True, 'color': 'red'},
+               'debug': {'color': 'blue'}, 
+               'error': {'color': 'red'}, 
+               'info': {'color':'cyan'},
+               'warning': {'color': 'yellow'}}
+
+coloredlogs.install(level=LOGGING_LEVEL,
+                    logger=logger,
+                    fmt=logFormat,
+                    datefmt='%H:%M:%S',
+                    field_styles=fieldstyle,
+                    level_styles=levelstyles)
+
+
 
 def stay_True(dic):
     keys = list(dic.keys())
@@ -36,7 +77,7 @@ def iterable(arg):
         isinstance(arg, collections.Iterable) 
         and not isinstance(arg, six.string_types)
     )
-import logging
+
 def print_time(tf,name,nf=None):
     s1 = readable_time(tf)
     if nf is None:
@@ -44,7 +85,8 @@ def print_time(tf,name,nf=None):
     else:
         s2 = ' Time/frame --> {:s}\n'.format( readable_time(tf/nf))
     x = '-'*(len(name)+11)
-    print('Function "{:s}"\n{:s} \n{:s} Total time --> {:s}\n{:s}\n{:s}'.format(name,x,s2,s1,x,x))
+    logger.info('Function "{:s}"\n{:s} Total time --> {:s}'.format(name,s2,s1))
+
 def readable_time(tf):
     hours = int(tf/3600)
     minutes = int((tf-3600*hours)/60)
@@ -163,16 +205,61 @@ class Energetic_Analysis():
         plt.legend(frameon=False)
         if save_figs:plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
         plt.show()
+
 class Analytical_Expressions():
     @staticmethod
     def KWW(t,A,tc,beta,tww):
         #Kohlrausch–Williams–Watts
-        phi = A*np.exp( ( -(t-tc)/tww )**beta )
+        #A is initial point shift
+        #tc changes the shape of the fast motion(slow times)
+        #beta changes the shape of the curve. 
+        #very small beta makes the curve linear.
+        #the larger the beta the sharpest the curve
+        #all curves regardless beta pass through the same point
+        phi = A*np.exp( -((t-tc)/tww )**beta )
+        return phi
+    @staticmethod
+    def KWW_sum(t,tww,beta):
+        s = 0 
+        tww = np.array(tww)
+        beta =np.array(beta)
+        for j,b in enumerate(beta):
+            for i,tw in enumerate(tww):
+                s+= Analytical_Expressions.KWW(t,1,0,b,tw)
+        return s/(tww.shape[0]*beta.shape[0])
+    
+    @staticmethod
+    def expDecay_sum(t,t0v):
+        s = np.zeros(t.shape[0])
+        t0v = np.array(t0v)
+        for i,t0 in enumerate(t0v):
+            s+=Analytical_Expressions.expDecay_simple(t,t0)
+        return s/t0v.shape[0]
+    @staticmethod
+    def expDecay_simple(t,t0):
+        phi =  np.exp(-t/t0)
         return phi
     @staticmethod
     def expDecay(t,A,t0):
+        #A paramater shifts the end point of the curve up to minus A, see exersize 2
         phi = 1+A*( np.exp(-t/t0) - 1 )
         return phi
+    @staticmethod
+    def expDecay2(t,A,t0):
+        #A parameter shifts the starting point to A
+        phi = A*np.exp(-t/t0)
+        return phi
+    @staticmethod
+    def expDecay3(t,A,t0):
+        #A parameter shifts and the end point to point to -A
+        phi = A*(np.exp(-t/t0)-1)
+        return phi  
+    @staticmethod
+    def expDecay4(t,As,Ae,t0):
+        #As shifts initial point to As
+        #Ae shifts the whole curve by Ae
+        phi = As*np.exp(-t/t0)-Ae
+        return phi 
     @staticmethod
     def expDecay_KWW(t,A1,A2,tc,t0,beta,tww):
         tl =  t[t<tc]
@@ -248,7 +335,7 @@ class Analytical_Functions():
         naxis = np.cross((rp-r0)/norm2(rp-r0),rrel/norm2(rrel))
         rrot = Analytical_Functions().rotate_around_an_axis(naxis, rrel, theta)
         newth = calc_angle(rp,r0,r0+rrot)
-        #print('th0 = {:6.5f}, new th = {:6.5f} '.format(th0*180/np.pi,newth*180/np.pi))
+        #logger.debug('th0 = {:6.5f}, new th = {:6.5f} '.format(th0*180/np.pi,newth*180/np.pi))
         return rrot,newth
     
     @staticmethod
@@ -261,7 +348,7 @@ class Analytical_Functions():
         s = -np.sign(r01)
         
         rrel = np.array([s[0]*dhalf,s[1]*dhalf,-s[2]*dhalf])
-        #print('theta target = {:4.3f}'.format(theta*180/np.pi))
+        #logger.debug('theta target = {:4.3f}'.format(theta*180/np.pi))
         
         newth = theta +1    
         af = Analytical_Functions()
@@ -368,7 +455,7 @@ class add_atoms():
         return 
     
     @staticmethod
-    def add_ghost_hydrogens(self,types):
+    def add_ghost_hydrogens(self,types,noise=None):
         t0 = perf_counter()
         
         new_atoms_info = add_atoms.get_new_atoms_info(self,'h',types)
@@ -382,7 +469,7 @@ class add_atoms():
         
         #for frame in self.timeframes:    
          #   add_atoms.set_ghost_coords(self, frame, new_atoms_info)
-        add_atoms.set_all_ghost_coords(self,new_atoms_info) 
+        add_atoms.set_all_ghost_coords(self,new_atoms_info,noise) 
         
         tf = perf_counter() - t0
         print_time(tf,inspect.currentframe().f_code.co_name)
@@ -398,7 +485,7 @@ class add_atoms():
         return
     
     @staticmethod
-    def set_all_ghost_coords(self,info):
+    def set_all_ghost_coords(self,info,noise=None):
         f,l,th,s,ir1,ir0,ir2 = add_atoms.serialize_info(info)
         self.unwrap_all()
         for frame in self.timeframes:      
@@ -406,6 +493,10 @@ class add_atoms():
             coords = self.get_coords(frame)
             add_atoms.set_ghost_coords_parallel(f,l,th,s,ir1,ir0,ir2,
                                                 coords,ghost_coords)
+            if noise is not None:
+                noise_coords =  np.random.normal(0,noise,ghost_coords.shape) 
+                ghost_coords += noise_coords
+                logger.debug('Adding noise mean = {:4.3f}'.format(np.mean(np.abs(noise_coords))))
             self.timeframes[frame]['ghost_coords'] = ghost_coords
         return
     
@@ -456,7 +547,7 @@ class add_atoms():
        
         N = len(info)
         ghost_coords = np.empty((N,3),dtype=float)
-        coords = self.frame_unwrapped_coords(frame)    
+        coords = self.get_whole_coords(frame)    
         
         for j,(k,v) in enumerate(info.items()):
             cr = coords[v['ir']]
@@ -543,7 +634,24 @@ class add_atoms():
                 jstart+=1
             
         return new_atoms_info
-    
+
+class Box_Additions():
+    @staticmethod
+    def zdir(box):
+        return [box[2],0,-box[2]]
+    @staticmethod
+    def ydir(box):
+        return [box[1],0,-box[1]]
+    @staticmethod
+    def xdir(box):
+        return [box[0],0,-box[0]]
+    def minimum_distance(box):
+        zd = Box_Additions.zdir(box)
+        yd = Box_Additions.ydir(box)
+        xd = Box_Additions.xdir(box)
+        ls = [np.array([x,y,z]) for x in xd for y in yd for z in zd]
+        return ls
+        
 class Distance_Functions():
     @staticmethod
     def zdir(coords,zc):
@@ -572,7 +680,7 @@ class Distance_Functions():
         return d
     
     @staticmethod
-    def smaller_distance(coords1,coords2):
+    def minimum_distance(coords1,coords2):
         d1 = np.empty(coords1.shape[0])
         d2 = np.empty(coords2.shape[0])
         smaller_distance_kernel(d1,d2,coords1,coords2)
@@ -601,21 +709,52 @@ class bin_Volume_Functions():
         v = dr*(4*np.pi*rm**2)
         return  v
     
-class Check_for_periodic_image_Functions():
+class Periodic_image_Functions():
     #functions return True for bridge
     @staticmethod
-    def zdir(r0,re,box):
-        return abs(re[2]) > box[2] or abs(r0[2]) > box[2]
+    def zdir(self,r0,re,dads):
+        return abs(re[2]-r0[2]) > dads
     @staticmethod
-    def ydir(r0,re,box):
-        return abs(re[1]) > box[1] or abs(r0[1]) > box[1]
+    def ydir(self,r0,re,dads):
+        return abs(re[1]-r0[1]) > dads
     @staticmethod
-    def xdir(r0,re,box):
-        return abs(re[0]) > box[0] or abs(r0[0]) > box[0]
+    def xdir(self,r0,re,dads):
+        return abs(re[0]-r0[0]) > dads
     @staticmethod
-    def distance(r0,re,box): #works with unrwap coords
+    def distance(self,r0,re,dads): 
+        raise NotImplementedError('This function is not yet implemented')
         return  ( abs(re) > box ).any() or ( abs(r0) > box ).any()
+
+class Different_Particle_Functions():
+    #functions return True for bridge
+    @staticmethod
+    def core_zyx_dir(d,r0,re,dads,CMs):
+        x0=r0[d]
+        xe =re[d]
+        for i in range(CMs.shape[0]):
+            for j in range(i+1,CMs.shape[0]):
+                cmi = CMs[i][d] ; cmj = CMs[j][d]
+                if abs(cmi-cmj)>dads: # if it is indeed a different particle
+                    if (abs(cmi-x0)<dads and abs(cmj-xe)<dads) or \
+                        (abs(cmi-xe)<dads and abs(cmj-x0)<dads):
+                            return False
+        return True
     
+    @staticmethod
+    def zdir(self,r0,re,dads,CMs):
+        d = 2
+        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
+    @staticmethod
+    def ydir(self,r0,re,dads,CMs):
+        d = 1
+        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
+    @staticmethod
+    def xdir(self,r0,re,dads,CMs):
+        d = 0
+        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
+   
+
+
 class Center_Functions():
     @staticmethod
     def zdir(c):
@@ -1075,7 +1214,7 @@ class Analysis:
         try:
             bonds-=bonds.min()
         except ValueError as e:
-            print('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
+            logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
         tf = perf_counter()
         return  bonds
             
@@ -1182,13 +1321,13 @@ class Analysis:
         try:
             time = self.get_equal_from_string(line.strip(),'t')
         except:
-            print('Warning: in gro file. There is no time info')
+            logger.warning('Warning: in gro file. There is no time info')
             time = 0
         try:
             step = self.get_equal_from_string(line.strip(),'step',int)
         except:
             step = 0
-            print('Warning: in gro file. There is no step info')
+            logger.warning('Warning: in gro file. There is no step info')
         self.timeframes[frame] = {'time':time,'step':step}
         # second line
         natoms = int(ofile.readline().strip())
@@ -1211,7 +1350,10 @@ class Analysis:
         return True
     
     def read_trr_by_frame(self,ofile,frame):
-        header,data = ofile.read_frame()
+        try:
+            header,data = ofile.read_frame()
+        except EOFError as e:
+            raise e
         self.timeframes[frame] = header
         self.timeframes[frame]['boxsize'] = np.diag(data['box'])
         self.timeframes[frame]['coords'] = data['x']
@@ -1284,7 +1426,7 @@ class Analysis:
                     if  frame <frames[0] or frame>frames[1]:
                         continue
                 if option == 'unwrap':
-                    coords = self.frame_unwrapped_coords(frame)
+                    coords = self.get_whole_coords(frame)
                 elif option =='transmiddle':
                     coords = self.translate_particle_in_box_middle(self.get_coords(frame),
                                                                    self.get_box(frame))
@@ -1320,9 +1462,9 @@ class Analysis:
             for frame in self.timeframes:
                 if frames[0] <= frame <= frames[1]:
 
-                    coords = self.frame_unwrapped_coords(frame) [fres]
+                    coords = self.get_whole_coords(frame) [fres]
                     at_ids = self.at_ids[fres] 
-                    ofile.write('Residues {}\n'.format(res))
+                    ofile.write('Made by write_residues\n')
                     ofile.write('{:6d}\n'.format(coords.shape[0]))
                     for j in range(coords.shape[0]):
                         i = at_ids[j]
@@ -1343,7 +1485,7 @@ class Analysis:
             for frame in self.timeframes:
                 if frames[0] <= frame <= frames[1]:
 
-                    coords = self.frame_unwrapped_coords(frame) [fres]
+                    coords = self.get_whole_coords(frame) [fres]
                     at_ids = self.at_ids[fres] 
                     ofile.write('Residue {:d}\n'.format(res))
                     ofile.write('{:6d}\n'.format(coords.shape[0]))
@@ -1391,28 +1533,42 @@ class Analysis:
                     if self.memory_demanding:
                         del self.timeframes[nframes]
                     nframes+=1
-        elif ~hasattr(self,'frame_interval') or self.frame_interval is None:
-            nframes = self.loop_timeframes(funtocall,args)
         else:
-            nframes = self.loop_timeframes_within_interval(funtocall,args)
+            nframes = self.loop_timeframes(funtocall,args)
         return nframes
+    @property
+    def first_frame(self):
+        return list(self.timeframes.keys())[0]
     
-
+    def cut_timeframes(self,num_start=None,num_end=None):
+        if num_start is None and num_end is None:
+            raise Exception('Give either a number to cut from the start or from the end for the timeframes dictionary')
+        if num_start is not None:
+            i1 = num_start
+        else:
+            i1 =0
+        if num_end is not None:
+            i2 = num_end
+        else:
+            i2 = len(self.timeframes)
+        new_dict = self.dict_slice(self.timeframes,i1,i2)
+        if len(new_dict) ==0:
+            raise Exception('Oh dear you have cut all your timeframes from memory')
+            
+        self.timeframes = new_dict
+        return 
+    
+    @staticmethod
+    def dict_slice(d,i1,i2):
+        return {k:v for i,(k,v) in enumerate(d.items()) if i1<=i<i2 }
+   
     def loop_timeframes(self,funtocall,args):
         for frame in self.timeframes:
             funtocall(self,frame,*args)
-        nframes = frame + 1
+        nframes = len(self.timeframes)
         return nframes
     
-    def loop_timeframes_within_interval(self,funtocall,args):  
-        i = 0
-        frames = self.frame_interval
-        for frame in self.timeframes:
-            if frames[0]<=frame<=frames[1]:
-                funtocall(self,frame,*args)
-                i+=1
-        nframes = i
-        return nframes
+
 
     
     def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
@@ -1487,13 +1643,44 @@ class Analysis:
         coords = self.get_coords(frame)
         return coords
    
-    def frame_unwrapped_coords(self,frame):
+    def get_whole_coords(self,frame):
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         coords = self.unwrap_coords(coords, box)
         return coords
     
-            
+    def bond_distance_matrix(self,ids):
+        t0 = perf_counter()
+        size = ids.shape[0]
+        distmatrix = np.zeros((size,size),dtype=int)
+        for j1,i1 in enumerate(ids):
+            nbonds = self.bond_distance_id_to_ids(i1,ids)
+            distmatrix[j1,:] = nbonds
+        tf = perf_counter() - t0
+        print_time(tf,inspect.currentframe().f_code.co_name)
+        return distmatrix
+    
+    def bond_distance_id_to_ids(self,i,ids):
+        chunk = {i}
+        n = ids.shape[0]
+        nbonds = np.ones(n)*(-1)
+        incr_bonds = 0
+        new_neibs = np.array(list(chunk))
+        while new_neibs.shape[0]!=0:
+            f = np.zeros(ids.shape[0],dtype=bool)
+            numba_isin(ids,new_neibs,f)
+            nbonds[f] = incr_bonds
+            new_set = set()
+            for ii in new_neibs:
+                for neib in self.neibs[ii]:
+                    if neib not in chunk:
+                        new_set.add(neib)
+                        chunk.add(neib)
+            new_neibs = np.array(list(new_set))
+            incr_bonds+=1
+        return nbonds
+
+                
     def ids_nbondsFrom_args(self,ids,args):
         
         n = ids.shape[0]
@@ -1582,7 +1769,7 @@ class Analysis_Confined(Analysis):
        
         else:
             raise Exception('Give particle_name or particle_filt explicitly')
-        print('Number of particle atoms: {:5d}'.format(np.count_nonzero(self.particle_filt)))
+        logger.info('Number of particle atoms: {:5d}'.format(np.count_nonzero(self.particle_filt)))
         return 
     
     def find_pol_filt(self):
@@ -1591,7 +1778,7 @@ class Analysis_Confined(Analysis):
             self.pol_filt = self.mol_names == self.pol_name # it gets a filter form
         else:
             raise Exception('Give mol_name or mol_ids explicitly')
-        print('Number of adsorbent atoms: {:5d}'.format(np.count_nonzero(self.pol_filt)))
+        logger.info('Number of adsorbent atoms: {:5d}'.format(np.count_nonzero(self.pol_filt)))
         return
        
     def translate_particle_in_box_middle(self,coords,box):
@@ -1606,7 +1793,7 @@ class Analysis_Confined(Analysis):
         coords = self.translate_particle_in_box_middle(coords, box)
         return coords
    
-    def frame_unwrapped_coords(self,frame):
+    def get_whole_coords(self,frame):
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         coords = self.translate_particle_in_box_middle(coords, box)
@@ -1626,9 +1813,11 @@ class Analysis_Confined(Analysis):
         self.unique_atom_types = np.unique(self.at_types)
         
         self.dfun = self.get_class_function(Distance_Functions,self.conftype)
+        self.box_add = self.get_class_function(Box_Additions,self.conftype)
         self.volfun = self.get_class_function(bin_Volume_Functions,self.conftype)
         self.centerfun = self.get_class_function(Center_Functions,self.conftype)
-        self.periodic_imageFun = self.get_class_function(Check_for_periodic_image_Functions,self.conftype)
+        self.is_periodic_image = self.get_class_function(Periodic_image_Functions,self.conftype)
+        self.is_different_particle = self.get_class_function(Different_Particle_Functions,self.conftype)
         self.unit_vectorFun = self.get_class_function(unit_vector_Functions,self.conftype)
         
         self.find_args_per_residue(self.pol_filt,'chain_args')
@@ -1656,7 +1845,7 @@ class Analysis_Confined(Analysis):
         return coords,box,d,cs
     
     def get_unwrappedframe_essentials(self,frame):
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box  = self.get_box(frame)          
         d,cs = self.get_distFromParticle(coords)
         return coords,box,d,cs
@@ -1673,10 +1862,13 @@ class Analysis_Confined(Analysis):
                                self.atom_mass[self.particle_filt]))
         d = self.dfun(coords,cs)
         return d,cs
-    
+    def get_particle_cm(self,coords):
+        cm =self.centerfun(CM( coords[self.particle_filt], 
+                               self.atom_mass[self.particle_filt]))
+        return cm
     @staticmethod
     def get_layers(dads,dmax,binl):
-        bins = np.arange(dads,dmax,binl)
+        bins = np.arange(dads,dmax+binl,binl)
         dlayers = [(0,dads)]
         nbins = len(bins)-1
         for i in range(0,nbins):
@@ -1728,61 +1920,76 @@ class Analysis_Confined(Analysis):
         if ty is str or ty is int:
             ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
 
-        #print('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
+        #logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
         return ids1,ids2
     
     ###############End of General Supportive functions Section#########
 
     ############### Conformation Calculation Supportive Functions #####
    
-    def check_if_ends_belong_to_periodic_image(self,coords,istart,iend,
-                                               box):
-        r0 = coords[istart]
-        re = coords[iend]
-        self.periodic_imageFun(r0,re,box)
-        return 
+    def check_if_ends_belong_to_periodic_image(self,istart,iend,periodic_image_args):
+        
+        
+        #perimage = self.is_periodic_image(self,r0,re,dads)
+        
+        e = iend in periodic_image_args 
+        s = istart in periodic_image_args
+        
+        return (e and not s) or (s and not e)
     
-    def check_if_ends_belong_to_different_particle(self,coords,istart,iend):
+    def check_if_ends_belong_to_different_particle(self,coords,istart,iend,dads):
+        #logger.warning('WARNING Function {:s}: This Function was never examined in test cases'.format(inspect.currentframe().f_code.co_name))
         r0 = coords[istart]
         re = coords[iend]
-        x = float('inf')
-        min_dist_r0 = x ; min_dist_re = x
-        for k,args in self.particle_args.items():
-            cm = CM(coords[args],self.atom_mass[args])
-            r0cm = norm2(r0-cm)
-            recm = norm2(re-cm)
+        CMs = np.empty((self.nparticles,3),dtype=float)
+        for i,(k,args) in enumerate(self.particle_args.items()):
+            CMs[i] = CM(coords[args],self.atom_mass[args])
             
-            if r0cm < min_dist_r0:
-                min_dist_r0 = r0cm
-                particle_r0 = k
-            if recm < min_dist_re:
-                min_dist_re = recm
-                particle_re = k
-        return particle_re == particle_r0, particle_r0
+        return self.is_different_particle(self,r0,re,dads,CMs)
    
-    def is_bridge(self,coords,istart,iend,box):
+    def is_bridge(self,coords,istart,iend,dads,periodic_image_args):
         
         if self.nparticles !=1:
-            same_particle,particle_key = self.check_if_ends_belong_to_different_particle(coords, istart, iend)
-            
+            same_particle = self.check_if_ends_belong_to_different_particle(coords, istart, iend,dads,)
         else:
-            particle_key = list(self.particle_args.keys())[0]
             same_particle = True
-        
-
-        if same_particle:
-            periodic_image = self.check_if_ends_belong_to_periodic_image(coords, istart, iend, box)
-            if periodic_image:
-                return True
+            
+        if same_particle:  
+            #logger.debug('istart = {:d}, iend = {:d}'.format(istart,iend))
+            return self.check_if_ends_belong_to_periodic_image( istart, iend, periodic_image_args)
         else:
+            #logger.info('istart = {:d} , iend = {:d}  Belong to differrent particle'.format(istart,iend))
             return True
         return False
+    
+    def get_filt_train(self,dads,coords,box):
+        ftrain = False
+       
+        for L in self.box_add(box):
+            cm = self.get_particle_cm(coords+L)
+            d = self.dfun(coords,cm)
+            ftrain = np.logical_or(ftrain,np.less_equal(d,dads))
+        ftrain = np.logical_and(ftrain,self.pol_filt)
         
-    def conformations(self,d,dads,coords,box):
-        #d,cs = self.get_distFromParticle(coords)
-        ftrain = np.logical_and(np.less_equal(d,dads),self.pol_filt)
+        self_trains = np.less_equal(
+            self.dfun(coords,self.get_particle_cm(coords)),dads)
+        image_trains = np.logical_and(ftrain,np.logical_not(self_trains))
+        
+        return ftrain,image_trains
+    
+    def get_minimum_distance_from_particle(self,coords,box):
+        d = np.ones(coords.shape[0])*float('inf')
+        for L in self.box_add(box):
+            cm = self.get_particle_cm(coords+L)
+            d = np.minimum(d,self.dfun(coords,cm))
+        return d
+    
+    def conformations(self,dads,coords,box):
+        
+        ftrain,image_trains = self.get_filt_train(dads, coords, box)
         args_train = np.nonzero(ftrain)[0]
-
+        periodic_image_args = set(np.nonzero(image_trains)[0])
+        #logger.debug('Number of periodic image trains ={:d}\n Number of trains = {:d}'.format(len(periodic_image_args),args_train.shape[0]))
         #ads_chains
         ads_chains = np.unique(self.mol_ids[ftrain])
         #check_occurances(ads_chains)
@@ -1855,9 +2062,10 @@ class Analysis_Confined(Analysis):
                         node,chunk)
     
                 if loopBridge:
-                    if not self.is_bridge(coords,istart,iend,box):    
+                    if not self.is_bridge(coords,istart,iend,dads,periodic_image_args):    
                         args_loop = np.concatenate( (args_loop, chunk) )             
                     else:
+                        logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
                         args_bridge = np.concatenate( (args_bridge, chunk) )
                 else:
                     args_tail = np.concatenate( (args_tail, chunk) )
@@ -1942,7 +2150,7 @@ class Analysis_Confined(Analysis):
         
         if dmax is None:
             NotImplemented
-        bins  =   np.arange(0, dmax, binl)
+        bins  =   np.arange(0, dmax+binl, binl)
         nbins = len(bins)-1
         rho = np.zeros(nbins,dtype=float)
         mass_pol = self.atom_mass[self.pol_filt] 
@@ -2013,7 +2221,7 @@ class Analysis_Confined(Analysis):
         
         ids1, ids2 = self.find_vector_ids(topol_vector)
         nvectors = ids1.shape[0]
-        print('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
+        logger.info('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
         nlayers = len(d_center)
         costh_fz = [[] for i in range(len(dlayers))]
         costh = np.empty(nvectors,dtype=float)
@@ -2039,8 +2247,8 @@ class Analysis_Confined(Analysis):
         t0 = perf_counter()
         
         #initialize
-        dlayers = self.get_layers(dads,dmax,binl)
-        d_center = [0.5*(b[0]+b[1]) for b in dlayers]
+        dlayers = self.get_layers(dads,dmax,binl)[1:]
+        d_center = np.array([0.5*(b[0]+b[1]) for b in dlayers])
         
         stats = { k : 0 for k in ['adschains','train','looptailbridge',
                                   'tail','loop','bridge']}
@@ -2063,7 +2271,7 @@ class Analysis_Confined(Analysis):
         stats['adschains_perc'] = stats['adschains'] / len(self.chain_args)
             
         for k,v in stats.items():
-            print('{:s} = {:4.3f}'.format(k,v))
+            logger.info('{:s} = {:4.3f}'.format(k,v))
         
         tf = perf_counter() -t0
         print_time(tf,inspect.currentframe().f_code.co_name,nframes)
@@ -2298,7 +2506,42 @@ class Analysis_Confined(Analysis):
         
         print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return dipoles_t,filters_t
-     
+    
+    def calc_segmental_dipole_moment_correlation(self,topol_vector,
+                                       segbond,filters={'all':None},
+                                       dads=1.025):
+        t0 = perf_counter()
+        dipoles_t,filters_t = self.calc_segmental_dipole_moment_t(topol_vector,
+                                       segbond,filters,dads=1)
+        
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        bond_distmatrix = self.bond_distance_matrix(ids1)
+        
+        unb = np.unique(bond_distmatrix)
+        b0 = dict()
+        b1 = dict()
+        for k in unb:
+            if k>0:
+                b =  np.nonzero(bond_distmatrix ==k)
+                b0[k] = b[0]
+                b1[k] = b[1]
+        
+        correlations ={filt:{k:[] for k in unb if k>0} for filt in filters_t}
+        
+        args = (dipoles_t,filters_t,b0,b1,correlations)
+        
+        nframes = self.loop_trajectory('vector_correlations', args)
+        
+        for kf in filters_t:
+            for k in correlations[kf]:
+                c = correlations[kf][k]
+                correlations[kf][k] = {'mean':np.mean(c),'std':np.std(c)}
+                
+        tf = perf_counter() - t0
+        print_time(tf,inspect.currentframe().f_code.co_name)
+    
+        return correlations
+    
     def calc_chainCM_t(self,filters={'all':None}, dads=1,option=''):
         t0 = perf_counter()
         filters = {'chain_'+k: v for k,v in filters.items()} #Need to modify when considering chains
@@ -2387,80 +2630,239 @@ class Analysis_Confined(Analysis):
         print_time(tf,inspect.currentframe().f_code.co_name)
         return adsorbed_chains_t['ads']
     
-    def init_xtNfilt(self,xt,filt_t):
+
+    
+    def init_xt(self,xt,dtype=float):
         x0 =xt[0]
         nfr = len(xt)
         shape = (nfr,*x0.shape)
-        x_nump = np.empty(shape,dtype=float)
-        f_nump = np.empty((nfr,filt_t[0].shape[0]),dtype=bool)
+        x_nump = np.empty(shape,dtype=dtype)
         
-        for i,t in zip(range(x_nump.shape[0]),xt.keys()):
+        for i,t in enumerate(xt.keys()):
            x_nump[i] = xt[t]
-           f_nump[i] = filt_t[t]
-        Prop_nump = np.zeros(nfr,dtype=float)
-        nv = np.zeros(nfr,dtype=int)
         
-        return  Prop_nump,nv,x_nump, f_nump , nfr
+        return  x_nump
     
-    def init_weights(self,wt):
-        w0 =wt[0]
-        nfr = len(wt)
-        shape = (nfr,*w0.shape)
-        w_nump = np.empty(shape,dtype=float)
-        
-        for i,t in zip(range(shape[0]), wt.keys()):
-           w_nump[i] = wt[t]
-        
-        return  w_nump
-    
-    def init_xt(self,xt):
-        x0 =xt[0]
+    def init_prop(self,xt):
         nfr = len(xt)
-        shape = (nfr,*x0.shape)
-        x_nump = np.empty(shape,dtype=float)
-        
-        for i,t in zip(range(x_nump.shape[0]),xt.keys()):
-           x_nump[i] = xt[t]
-           
         Prop_nump = np.zeros(nfr,dtype=float)
-        nv = np.zeros(nfr,dtype=int)
+        nv = np.zeros(nfr,dtype=float)
+        return Prop_nump,nv
+  
+    def get_Dynamics_inner_kernel_functions(self,prop,filt_option,weights_t):
+        mapper = {'p1':'costh_kernel',
+                  'p2':'cos2th_kernel',
+                  'msd':'norm_square_kernel'}
+        inner_func_name = mapper[prop.lower()] 
         
-        return  Prop_nump,nv,x_nump , nfr  
-    
-    def Dynamics(self,prop,xt,filt_t=None,weights_t=None):
+        name = 'dynprop'
+        af_name = 'get'
+        
+        if filt_option is not None:
+            ps = '_{:s}'.format(filt_option)
+            name += ps 
+            af_name+= ps
+        if weights_t is not None:
+            ps = '_weighted'
+            name += ps
+            af_name += ps
+        
+        func_name = '{:s}__kernel'.format(name)
+        args_func_name = '{:s}__args'.format(af_name)
+        
+        logger.info(' func name : "{:s}" \n argsFunc name : "{:s}" \n innerFunc name : "{:s}" '.format(func_name,args_func_name,inner_func_name))
+        
+        funcs = (globals()[func_name],
+                 globals()[args_func_name],
+                 globals()[inner_func_name])
+        
+        return funcs
+  
+    def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
+                 filt_option='simple', block_average=False):
         
         tinit = perf_counter()
+        
+        Prop_nump,nv = self.init_prop(xt)
+        x_nump = self.init_xt(xt)
+        
         if filt_t is not None:
-            #prop_nump, nv, x_nump, f_nump , nfr = self.init_xtNfilt(xt,filt_t)
-            args = self.init_xtNfilt(xt,filt_t)
+            f_nump = self.init_xt(filt_t,dtype=bool)
+            if filt_option is None:
+                filt_option= 'simple'
         else:
-            #prop_nump, nv, x_nump , nfr = self.init_xt(xt)
-            args = self.init_xt(xt)
+            f_nump = None
+            filt_option = None
+        
         if weights_t is not None:
-            w = self.init_weights(weights_t)
-            args = (*args,w)
-        prop_kernel = globals()[prop+'_kernel']
+            w_nump = self.init_xt(weights_t)
+        else:
+            w_nump = None
+        
+        
+        func,func_args,func_inner = \
+        self.get_Dynamics_inner_kernel_functions(prop,filt_option,weights_t)
+        
+        args = (func,func_args,func_inner,
+                Prop_nump,nv,
+                x_nump,f_nump,w_nump,
+                block_average)
+        
+        prop_kernel = globals()['DynamicProperty_kernel']
         overheads = perf_counter() - tinit
         
         try:
             #prop_kernel(prop_nump, nv, x_nump, f_nump, nfr)
             prop_kernel(*args)
         except ZeroDivisionError as err:
-            print('Dynamics Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
+            logger.error('Dynamics Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
             return None
         
        
         tf2 = perf_counter()
-        if prop !='P2':
-            dynamical_property = {t:p for t,p in zip(xt,args[0])}
+        if prop.lower() !='p2':
+            dynamical_property = {t:p for t,p in zip(xt,args[3])}
         else:
-            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[0])}
+            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[3])}
         tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
-        #print('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
+        #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
         print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "{}'.format(prop))
         return dynamical_property
+    
+    def get_Kinetics_inner_kernel_functions(self,wt):
+        
+        if wt is None:
+            func_args = 'get__args'
+            func_name = 'Kinetics_inner__kernel'
+        else:
+            func_args = 'get_weighted__args'
+            func_name = 'Kinetics_inner_weighted__kernel'
+        
+        logger.info('func name : {:s} , argsFunc name : {:s}'.format(func_name,func_args))
+        
+        return globals()[func_name],globals()[func_args]
+    
+    def Kinetics(self,xt,wt=None,block_average=False):
+        
+        tinit = perf_counter()
+        
+        Prop_nump,nv = self.init_prop(xt)
+        x_nump = self.init_xt(xt,dtype=bool)
+        
+        if wt is not None:
+            w_nump = self.init_xt(wt)
+        else:
+            w_nump = None
+        
+        func_name,func_args = self.get_Kinetics_inner_kernel_functions(wt)
+        
+        args = (func_name,func_args,
+                Prop_nump,nv,
+                x_nump,w_nump,
+                block_average)
+        Kinetics_kernel(*args)
+        
+        kinetic_property = {t:p for t,p in zip(xt,Prop_nump)}
+        tf = perf_counter()-tinit
+        #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
+        print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "Kinetics')
+        return kinetic_property
+    
+    def get_TACF_inner_kernel_functions(self,prop,filt_option,weights_t):
+        
+        inner_mapper = {'cos':'cosCorrelation_kernel'}
+        inner_zero_mapper = {'cos':'fcos_kernel'}
+        
+        inner_func_name = inner_mapper[prop.lower()] 
+        inner_zero_func_name = inner_zero_mapper[prop.lower()]
+        
+        name = 'dynprop'
+        af_name = 'get'
+        args_z_name = 'get_zero'
+        mean_func_name = 'mean'
+        secmom_func_name = 'secmoment'
+        
+        if filt_option is not None:
+            ps = '_{:s}'.format(filt_option)
+            pz = '_filt'
+            name += ps 
+            af_name+= ps
+            args_z_name +=pz 
+            mean_func_name+=pz
+            secmom_func_name+=pz
+        if weights_t is not None:
+            ps = '_weighted'
+            args_z_name += ps
+            name += ps
+            af_name += ps
+            mean_func_name+=ps
+            secmom_func_name+=ps
+        
+        func_name = '{:s}__kernel'.format(name)
+        args_func_name = '{:s}__args'.format(af_name)
+        args_zero_func_name = '{:s}__args'.format(args_z_name)
+        mean_func_name = '{:s}__kernel'.format(mean_func_name)
+        secmom_func_name = '{:s}__kernel'.format(secmom_func_name)
+        
+        func_names = [func_name,args_func_name, inner_func_name,
+                      mean_func_name,secmom_func_name,
+                      args_zero_func_name,
+                      inner_zero_func_name]
+        
+        s = ''.join( ['f{:d}={:s} \n'.format(i,f) for i,f in enumerate(func_names)] )
+        
+        logger.info(s)
+        
+        funcs = tuple([ globals()[f] for f in func_names])
+        return funcs
+  
+    def TACF(self,prop,xt,filt_t=None,
+             wt=None,filt_option=None,block_average=False):
+        
+        tinit = perf_counter()
+        
+        Prop_nump,nv = self.init_prop(xt)
+        mu_val,mu_num = self.init_prop(xt)
+        secmom_val,secmom_num = self.init_prop(xt)
+        
+        x_nump = self.init_xt(xt,dtype=float)
+        
+        if filt_t is not None:
+            f_nump = self.init_xt(filt_t,dtype=bool)
+            if filt_option is None:
+                filt_option= 'simple'
+        else:
+            f_nump = None
+            filt_option = None
+        
+        if wt is not None:
+            w_nump = self.init_xt(wt)
+        else:
+            w_nump = None
+        
+        func_name, func_args, inner_func,\
+        mean_func, secmoment_func, func_args_zero, inner_func_zero \
+        = self.get_TACF_inner_kernel_functions(prop,filt_option,wt)
+        
+
+        args = (func_name, func_args, inner_func,
+              mean_func, secmoment_func, func_args_zero, inner_func_zero,
+              Prop_nump,nv,
+              mu_val,mu_num,secmom_val,secmom_num,
+              x_nump, f_nump, w_nump,
+              block_average)
+    
+        TACF_kernel(*args)
+        #print(Prop_nump)
+        TACF_property = {t:p for t,p in zip(xt,Prop_nump)}
+        tf = perf_counter()-tinit
+        
+        print_time(tf,inspect.currentframe().f_code.co_name)
+        
+        return TACF_property
+    
 
 class Filters():
     def __init__(self):
@@ -2502,13 +2904,12 @@ class Filters():
             else:
                 return {layers: filt_uplow_inclucive(d , layers[0], layers[1])}
         return dict()
-
     @staticmethod
     def BondsTrainFrom(self,bondlayers,ids1,ids2,coords,cm,dads,box,*args):
         #t0 = perf_counter()
-        d = self.dfun(coords,cm)
+        #d = self.dfun(coords,cm)
         ds_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords,box)
         
         args_rest_train = np.concatenate( (args_tail,args_loop,args_bridge ) )
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_rest_train)
@@ -2530,10 +2931,10 @@ class Filters():
     @staticmethod
     def BondsFromTrain(self,bondlayers,ids1,ids2,coords,cm,dads,box,*args):
         #t0 = perf_counter()
-        d = self.dfun(coords,cm)
+        #d = self.dfun(coords,cm)
         ds_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(d,dads,coords,box)
-
+        args_loop, args_bridge = self.conformations(dads,coords,box)
+        
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_train)
         nbonds2 = self.ids_nbondsFrom_args(ids2,args_train)
         nbonds = np.minimum(nbonds1,nbonds2)
@@ -2543,9 +2944,9 @@ class Filters():
     @staticmethod
     def conformationDistribution(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
         
-        d = self.dfun(coords,cm)
+        #d = self.dfun(coords,cm)
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords,box)
        
         filt = dict()
         for conf,intervals in fconfs.items():
@@ -2560,7 +2961,7 @@ class Filters():
             filt['{}:distr'.format(conf)] = sizes
             
             for inter in intervals:
-                #print(conf,inter)
+                
                 chunk_int =set()
                 for chunk, size in zip(conf_chunks,sizes):
                     if inter[0]<=size<inter[1]:
@@ -2577,10 +2978,10 @@ class Filters():
     def conformations(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
         #rm = 0.5*(coords[ids1] + coords[ids2])
         # = perf_counter()
-        d = self.dfun(coords,cm)
+        #d = self.dfun(coords,cm)
         
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(d,dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords,box)
         
         all_not_free = np.concatenate((args_train,args_tail,args_loop,args_bridge))
         
@@ -2676,13 +3077,13 @@ class coreFunctions():
         pass
     @staticmethod
     def particle_size(self,frame,part_size):
-        part_coords = self.get_coords(0)[self.particle_filt]
+        part_coords = self.get_coords(frame)[self.particle_filt]
         part_size += part_coords.max(axis = 0 ) - part_coords.min(axis = 0 )
         return 
     @staticmethod
     def theFilt(self,frame,filters,dads,ids1,ids2,filt_per_t):
         
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         
         box = self.get_box(frame)
         time = self.get_time(frame)
@@ -2690,7 +3091,7 @@ class coreFunctions():
         cm = self.centerfun( CM( coords[self.particle_filt], 
                 self.atom_mass[self.particle_filt]) )
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         
         key = self.get_timekey(time,self.time_zero)
@@ -2708,7 +3109,7 @@ class coreFunctions():
         
         chain_cm = self.chains_CM(coords)
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
         
@@ -2725,13 +3126,40 @@ class coreFunctions():
     def box_var(self,frame,box_var,box_mean_squared):
         box_var += self.get_box(frame)**2 - box_mean_squared
         return
-    
+    @staticmethod
+    def vector_correlations(self,frame,vec_t,filt_t,bk0,bk1,correlation):
+            
+            
+        timekey = self.get_time(frame) - self.get_time(self.first_frame)
+        vec = vec_t[timekey]
+        for kf in correlation:
+            f = filt_t[kf][timekey]
+            for k in correlation[kf]:
+              #  t0 = perf_counter()
+                b0 = bk0[k]
+                b1 = bk1[k]
+                f01 = np.logical_and(f[b0],f[b1])
+                v0 = vec[b0][f01]
+                v1 = vec[b1][f01]
+                
+               # tf = perf_counter()
+              #  print_time(tf-t0,'{}:{} :manipulating data'.format(kf,k))
+                try:
+                    costh = costh__parallelkernel(v0,v1)
+                    correlation[kf][k].append( costh )
+                except ZeroDivisionError:
+              #      logger.warning('In frame {:d} --> For {} and bond distance {:d} there are no statistics'.format(frame,kf,k))
+                    pass
+            #    tf2 = perf_counter()
+             #   print_time(tf2-tf,'{}:{} :computationsa'.format(kf,k))
+        return
+                
     @staticmethod
     def segmental_dipole_moment(self,frame,filters,dads,ids1,ids2,
                                 segment_args,dipoles_t,filt_per_t):
         
             
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         #coords = self.get_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
@@ -2739,7 +3167,7 @@ class coreFunctions():
         cm = self.centerfun( CM( coords[self.particle_filt], 
                 self.atom_mass[self.particle_filt]) )
 
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         
         key = self.get_timekey(time,self.time_zero)
@@ -2761,7 +3189,7 @@ class coreFunctions():
     def chain_dipole_moment(self,frame,filters,dads,dipoles_t,filt_per_t):
         
             
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
         
@@ -2771,7 +3199,7 @@ class coreFunctions():
         chain_cm = self.chains_CM(coords)
         
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         
         key = self.get_timekey(time,self.time_zero)
@@ -2889,15 +3317,15 @@ class coreFunctions():
   
     @staticmethod
     def conformation__densityAndstats(self,frame,dads,dlayers,dens,stats):                
-        #0) coords and box
-        coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(d, dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
-        coreFunctions.conformation_dens(self, dlayers, dens, d,box,
+        coreFunctions.conformation_dens(self,frame, dlayers, dens,
                                            ads_chains, args_train, args_tail,
                                            args_loop, args_bridge)
         
@@ -2907,15 +3335,15 @@ class coreFunctions():
     
     @staticmethod
     def conformation__density(self,frame,dads,dlayers,dens,stats):                
-        #0) coords and box
-        coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(d, dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
-        coreFunctions.conformation_dens(self, dlayers, dens, d,box,
+        coreFunctions.conformation_dens(self,frame, dlayers, dens,
                                            ads_chains, args_train, args_tail,
                                            args_loop, args_bridge)
         
@@ -2923,26 +3351,28 @@ class coreFunctions():
 
     @staticmethod
     def conformation__stats(self,frame,dads,dlayers,dens,stats):                
-        #0) coords and box
-        coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
         
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(d, dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
-        coreFunctions.conformation_dens(self, dlayers, dens, d,box,
-                                           ads_chains, args_train, args_tail,
-                                           args_loop, args_bridge)
         
         coreFunctions.conformation_stats(stats,ads_chains, args_train, args_tail, 
                              args_loop, args_bridge)
         return
     
     @staticmethod
-    def conformation_dens(self,dlayers,dens,d,box,
+    def conformation_dens(self,frame, dlayers,dens,
                              ads_chains, args_train, args_tail, 
                              args_loop, args_bridge):
+        
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
+        d = self.get_minimum_distance_from_particle(coords,box)
+        
         
         d_tail = d[args_tail]
         d_loop = d[args_loop]          
@@ -2980,14 +3410,14 @@ class coreFunctions():
     def dihedral_distribution(self,frame,dih_ids,dlayers,dih_distr):
         
         box = self.get_box(frame)
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         cs = self.centerfun(CM( coords[self.particle_filt], self.atom_mass[self.particle_filt]))
 
         for k,d_ids in dih_ids.items():
             rm = 0.5*( coords[d_ids[:,1]] + coords[d_ids[:,2]] )
             d = self.dfun(rm,cs)
             dih_val = np.empty(d_ids.shape[0],dtype=float)
-            dihedral_distribution_kernel(d_ids,coords,dih_val)
+            dihedral_values_kernel(d_ids,coords,dih_val)
             for lay in dlayers:
                 fin_bin = filt_uplow(d, lay[0], lay[1])
                 dih_distr[k][lay].extend(dih_val[fin_bin])
@@ -2996,7 +3426,7 @@ class coreFunctions():
     @staticmethod
     def P2(self,frame,ids1,ids2,dlayers,costh,costh_fz):
         #1) coords
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box =self.get_box(frame)
 
         #2) calc_particle_cm
@@ -3020,7 +3450,7 @@ class coreFunctions():
     def chain_characteristics(self,frame,chain_args,dlayers,chars):
         #1) translate the system
         
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         cs = self.centerfun(CM( coords[self.particle_filt], self.atom_mass[self.particle_filt]))
                    
@@ -3052,34 +3482,34 @@ class coreFunctions():
         
         t0 = perf_counter()
         
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         cm = self.centerfun( CM( coords[self.particle_filt], 
                                self.atom_mass[self.particle_filt]) )
         box = self.get_box(frame)
         time = self.get_time(frame)
         
         dih_val = np.empty(dih_ids.shape[0],dtype=float) # alloc 
-        dihedral_distribution_kernel(dih_ids,coords,dih_val)
+        dihedral_values_kernel(dih_ids,coords,dih_val)
 
-        if frame ==0 :
+        if frame == self.first_frame :
             self.time_zero = time
         key = self.get_timekey(time, self.time_zero)
         dihedrals_t[key] = dih_val
         
-        del dih_val #deallocating for safty
+        del dih_val #deallocating for safety
         tm = perf_counter()
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
                                     ids1,ids2,coords,cm,dads,box)
         tf = perf_counter()
         if frame ==1:
-            print('Dihedrals_as_t: Estimate time consuption --> Main: {:2.1f} %, Filters: {:2.1f} %'.format((tm-t0)*100/(tf-t0),(tf-tm)*100/(tf-t0)))
+            logger.info('Dihedrals_as_t: Estimate time consuption --> Main: {:2.1f} %, Filters: {:2.1f} %'.format((tm-t0)*100/(tf-t0),(tf-tm)*100/(tf-t0)))
         return
 
     @staticmethod
     def vects_t(self,frame,ids1,ids2,filters,dads,vec_t,filt_per_t):
        
-        coords = self.frame_unwrapped_coords(frame)
+        coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
         
@@ -3088,7 +3518,7 @@ class coreFunctions():
         
         vec = coords[ids2,:] - coords[ids1,:]
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero = time
             
         key = self.get_timekey(time,self.time_zero)
@@ -3106,7 +3536,7 @@ class coreFunctions():
         time = self.get_time(frame)
         
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(d,dads,coords,box)
+                                self.conformations(dads,coords,box)
         x = dict()
         ntot = args_train.shape[0] + args_tail.shape[0] +\
                args_loop.shape[0] + args_bridge.shape[0]
@@ -3115,7 +3545,7 @@ class coreFunctions():
             x[k] = args.shape[0]/ntot
         x['ads_chains'] = ads_chains.shape[0]/len(self.chain_args)
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero = time
             
         key = self.get_timekey(time,self.time_zero)
@@ -3130,7 +3560,7 @@ class coreFunctions():
         time = self.get_time(frame)
         
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(d,dads,coords,box)
+                                self.conformations(dads,coords,box)
         x = dict()
         for k in ['train','tail','loop','bridge']:
             args = locals()['args_'+k]
@@ -3138,7 +3568,7 @@ class coreFunctions():
                                       for a in self.chain_args.values() ] 
                                     
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero = time
             
         key = self.get_timekey(time,self.time_zero)
@@ -3159,7 +3589,7 @@ class coreFunctions():
         
         chain_cm = self.chains_CM(coords)
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
         
@@ -3178,14 +3608,14 @@ class coreFunctions():
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
-        coords_whole = self.frame_unwrapped_coords(frame)
+        coords_whole = self.get_whole_coords(frame)
         
         part_cm = self.centerfun( CM( coords_whole[self.particle_filt], 
                 self.atom_mass[self.particle_filt]) )
         
         seg_cm = self.segs_CM(coords,segment_ids)
         
-        if frame==0:
+        if frame == self.first_frame:
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
         
@@ -3258,6 +3688,367 @@ class coreFunctions():
 
         return
     
+
+
+@jit(nopython=True,fastmath=True)
+def fill_property(prop,nv,i,j,value,mi,block_average):
+    
+    idx = j-i
+    if block_average:
+        try:
+            prop[idx] +=  value/mi
+            nv[idx] += 1.0
+        except:
+            pass
+    else:
+        prop[idx] +=  value
+        nv[idx] += mi
+    
+    return
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def Kinetics_kernel(func,func_args,
+                    Prop,nv,xt,wt=None,
+                    block_average=False):
+    
+    n = xt.shape[0]
+    
+    for i in range(n):
+        for j in prange(i,n):
+            args = func_args(i,j,xt,None,wt)
+            
+            value,mi = func(*args)
+            fill_property(Prop,nv,i,j,value,mi,block_average)
+        
+    for i in prange(n):  
+        Prop[i] /= nv[i]
+    return 
+
+@jit(nopython=True,fastmath=True)
+def Kinetics_inner__kernel(x0,xt):
+    value = 0.0 ; m = 0.0
+    for i in range(x0.shape[0]):
+        if x0[i]:
+            if xt[i]:
+                value += 1.0
+            m += 1.0
+    return value,m
+
+@jit(nopython=True,fastmath=True)
+def Kinetics_inner_weighted__kernel(x0,xt,w0):
+    value = 0.0 ; m = 0.0
+    for i in range(x0.shape[0]):
+        if x0[i]:
+            wi = w0[i]
+            m += wi
+            
+            if xt[i]:
+                value += wi
+            
+    return value,m
+
+@jit(nopython=True,fastmath=True)
+def get_zero__args(i,xt,ft,wt):
+    return (xt[i],)
+
+@jit(nopython=True,fastmath=True)
+def get_zero_filt__args(i,xt,ft,wt):
+    return (xt[i],ft[i])
+
+@jit(nopython=True,fastmath=True)
+def get_zero_weighted__args(i,xt,ft,wt):
+    return (xt[i],  wt[i])
+
+@jit(nopython=True,fastmath=True)
+def get_zero_filt_weighted__args(i,xt,ft,wt):
+    return (xt[i],ft[i],wt[i])
+
+@jit(nopython = True,fastmath=True)
+def mean__kernel(ifunc,x):
+    mean =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        mean += ifunc(x[i])
+    mi = float(x.shape[0])
+    return mean, mi
+
+@jit(nopython = True,fastmath=True)
+def mean_weighted__kernel(ifunc,x,w):
+    mean =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        wi = w[i]
+        mean += wi*ifunc(x[i])
+        mi += wi
+    return mean,mi
+
+@jit(nopython = True,fastmath=True)
+def mean_filt__kernel(ifunc,x,f):
+    mean =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        if f[i]:
+            mean+=ifunc(x[i])
+            mi+=1.0
+    return mean, mi
+
+@jit(nopython = True,fastmath=True)
+def mean_filt_weighted__kernel(ifunc,x,f,w):
+    mean =0 ; mi=0
+    for i in range(x.shape[0]):
+        if f[i]:
+            wi = w[i]
+            mean+=wi*ifunc(x[i])
+            mi+=wi
+    return mean, mi
+
+
+@jit(nopython = True,fastmath=True)
+def secmoment__kernel(ifunc,x):
+    sec =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        xi = ifunc(x[i])
+        sec += xi*xi
+    mi = float(x.shape[0])
+    return sec, mi
+
+@jit(nopython = True,fastmath=True)
+def secmoment_weighted__kernel(ifunc,x,w):
+    sec =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        wi = w[i]
+        xi = ifunc(x[i])
+        sec += wi*xi*xi
+        mi += wi
+    return sec,mi
+
+@jit(nopython = True,fastmath=True)
+def secmoment_filt__kernel(ifunc,x,f):
+    sec =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        if f[i]:
+            xi = ifunc(x[i])
+            sec+=xi*xi
+            mi+=1.0
+    return sec, mi
+
+@jit(nopython = True,fastmath=True)
+def secmoment_filt_weighted__kernel(ifunc,x,f,w):
+    sec =0.0 ; mi=0.0
+    for i in range(x.shape[0]):
+        if f[i]:
+            wi = w[i]
+            xi = ifunc(xi[i])
+            sec+=wi*xi*xi
+            mi+=w[i]
+    return sec, mi
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def TACF_kernel(func, func_args, inner_func,
+              mean_func, secmoment_func, func_args_zero, inner_func_zero,
+              Prop,nv,
+              mu_val,mu_num,secmom_val,secmom_num,
+              xt, ft=None, wt=None,
+              block_average=False):
+    
+    n= xt.shape[0]
+    
+    for i in range(n):
+
+        args_zero = func_args_zero(i,xt,ft,wt)
+        
+        mu_val[i],mu_num[i] = mean_func(inner_func_zero,*args_zero)
+        
+        secmom_val[i],secmom_num[i] = secmoment_func(inner_func_zero,*args_zero)
+        
+        for j in prange(i,n):
+                
+            args = func_args(i,j,xt,ft,wt)
+
+            value,mi = func(inner_func,*args)
+            
+            fill_property(Prop,nv,i,j,value,mi,block_average)
+            
+    if block_average:
+        for i in range(n):
+            
+            mui = mu_val[i]/mu_num[i]
+            seci = secmom_val[i]/secmom_num[i] 
+            
+            mui_square = mui*mui  
+            vari = seci - mui_square
+            
+            Prop[i] = (Prop[i]/nv[i] - mui_square)/vari
+
+        return
+    else:
+        mu =0 ;nmu =0
+        sec = 0;nsec =0
+        for i in prange(n):
+            mu+=mu_val[i]  ; nmu+=mu_num[i]
+            sec+= secmom_val[i] ; nsec += secmom_num[i]
+        mu/=nmu 
+        sec/=nsec
+        
+        mu_sq = mu*mu
+        var = sec-mu_sq
+        
+        for i in prange(n):
+            Prop[i] = (Prop[i]/nv[i] - mu_sq)/var
+    
+        return 
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def DynamicProperty_kernel(func,func_args,inner_func,
+              Prop,nv,xt,ft=None,wt=None,
+              block_average=False):
+    
+    n = xt.shape[0]
+
+    for i in range(n):
+        for j in prange(i,n):
+            
+            args = func_args(i,j,xt,ft,wt)
+            
+            value,mi = func(inner_func,*args)
+            
+            fill_property(Prop,nv,i,j,value,mi,block_average)
+        
+    for i in prange(n):   
+        Prop[i] /= nv[i]
+    return 
+
+@jit(nopython=True,fastmath=True)
+def get__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j])
+
+@jit(nopython=True,fastmath=True)
+def get_weighted__args(i,j,xt,ft,wt):
+    return (xt[i], xt[j],  wt[i])
+
+
+@jit(nopython=True,fastmath=True)
+def get_simple__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i])
+
+@jit(nopython=True,fastmath=True)
+def get_simple_weighted__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],wt[i])
+
+
+@jit(nopython=True,fastmath=True)
+def get_strict__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],ft[j])
+
+@jit(nopython=True,fastmath=True)
+def get_strict_weighted__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],ft[j],wt[i])
+
+
+@jit(nopython=True,fastmath=True)
+def get_change__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],ft[j])
+
+@jit(nopython=True,fastmath=True)
+def get_change_weighted__args(i,j,xt,ft,wt):
+    return (xt[i],xt[j],ft[i],ft[j],wt[i])
+
+@jit(nopython=True,fastmath=True)
+def dynprop__kernel(inner_kernel,r1,r2):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        inner = inner_kernel(r1[i],r2[i])
+        tot+=inner
+        mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def dynprop_simple__kernel(inner_kernel,r1,r2,ft0):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i]:
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=inner
+            mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def dynprop_strict__kernel(inner_kernel,r1,r2,ft0,fte):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and fte[i]:
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=inner
+            mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def dynprop_change__kernel(inner_kernel,r1,r2,ft0,fte):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and not fte[i]:
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=inner
+            mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def dynprop_weighted__kernel(inner_kernel,r1,r2,w):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        inner = inner_kernel(r1[i],r2[i])
+        tot+=w[i]*inner
+        mi+=w[i]
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def dynprop_simple_weighted__kernel(inner_kernel,r1,r2,ft0,w):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i]:
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=w[i]*inner
+            mi+=w[i]
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def dynprop_strict_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and fte[i]:
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=w[i]*inner
+            mi+=w[i]
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def dynprop_change_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    for i in prange(N):
+        if ft0[i] and not fte[i]:
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=w[i]*inner
+            mi+=w[i]
+    return tot,mi
+
+
+
+
 @jit(nopython=True,parallel=True)
 def numba_bin_count(d,bins,counter):
     for j in prange(bins.shape[0]-1):
@@ -3265,406 +4056,23 @@ def numba_bin_count(d,bins,counter):
             if bins[j]<d[i] and d[i] <=bins[j+1]:
                 counter[j] +=1
     return
-@jit(nopython=True,fastmath=True,parallel=True)
-def MSD_kernel(msd,nv,x,ft,n):
-    for i in range(n):
-        ft0= ft[i]
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                Rt = x0-x[j]
-                value = mean_norm_square(Rt,ft0)
-            except:
-                pass
-            else:
-                idx = j-i
-                msd[idx] +=  value
-                nv[idx] += 1
-        
-    for i in range(n):    
-        msd[i] /= nv[i]
-    return 
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def wMSD_kernel(msd,nv,x,ft,n,w):
-    for i in range(n):
-        ft0= ft[i]
-        x0 = x[i]
-        w0 = w[i]
-        for j in prange(i,n):
-            try:
-                Rt = x0-x[j]
-                value = mean_norm_square__weighted(Rt,ft0,w0)
-            except:
-                pass
-            else:
-                idx = j-i
-                msd[idx] +=  value
-                nv[idx] += 1
-        
-    for i in range(n):    
-        msd[i] /= nv[i]
-    return 
 
 @jit(nopython=True,fastmath=True)
-def norm_square(x1,x2):
-    nm = 0
-    for i in range(x1.shape[0]):
-        nm+= x1[i]*x2[i]
-    return nm
+def fcos_kernel(x):
+    return np.cos(x)
 
 @jit(nopython=True,fastmath=True)
-def mean_norm_square(Rt,ft0):
-    mu = 0
-    ni = 0
-    for i in range(Rt.shape[0]):
-        if ft0[i]:
-             mu += norm_square(Rt[i],Rt[i])
-             ni+=1
-    return mu/ni
-@jit(nopython=True,fastmath=True)
-def mean_norm_square__weighted(Rt,ft0,w):
-    mu = 0
-    ni = 0
-    for i in range(Rt.shape[0]):
-        if ft0[i]:
-             mu += w[i]*norm_square(Rt[i],Rt[i])
-             ni+=w[i]
-    return mu/ni
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def tacf_kernel(tacf,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]
-        x0 = x[i]
-        mu = mean_wfilt_kernel(x0,ft0)
-        
-        mu_square = mu**2
-        var = secmoment_wfilt_kernel(x0, ft0) - mu_square
-        
-        for j in prange(i,n):
-            try:
-                value = covariance_wfilter_kernel(x0,x[j],ft0)
-            except:
-                pass
-            else:
-                idx = j-i               
-                tacf[idx] +=  (value - mu_square)/var
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        tacf[i] /= nv[i]
-    return
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def P1_change_kernel(P1,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        for j in prange(i,n):
-            ftt = ft[j]
-            try:
-                value = costh__kernel_with_filter_change(x0,x[j],ft0,ftt)
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def P1_strict_kernel(P1,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        for j in prange(i,n):
-            ftt = ft[j]
-            try:
-                value = costh__kernel_with_filter_strict(x0,x[j],ft0,ftt)
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def p1_kernel(P1,nv,x,n):
-    for i in range(n):
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                value = costh__kernel(x0,x[j])
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def P1_kernel(P1,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                value = costh__kernel_with_filter(x0,x[j],ft0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def wP1_kernel(P1,nv,x,ft,n,w):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        w0 = w[i]
-        for j in prange(i,n):
-            try:
-                value = costh__kernel_with_filter_weighted(x0,x[j],ft0,w0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P1[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P1[i] /= nv[i]
-    return 
-
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def P2_kernel(P2,nv,x,ft,n):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                value = cos2th__kernel_with_filter(x0,x[j],ft0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P2[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P2[i] /= nv[i]
-    return 
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def wP2_kernel(P2,nv,x,ft,n,w):
-    for i in range(n):
-        ft0 = ft[i]   
-        x0 = x[i]
-        w0 = w[i]
-        for j in prange(i,n):
-            try:
-                value = cos2th__kernel_with_filter_weighted(x0,x[j],ft0,w0)
-            except:
-                pass
-            else:
-                idx = j-i
-                P2[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        P2[i] /= nv[i]
-    return 
-@jit(nopython=True,fastmath=True,parallel=True)
-def DK_kernel(phi,nv,x,n):
-    for i in range(n):
-        x0 = x[i]
-        for j in prange(i,n):
-            try:
-                xt = x[j]
-                value = DesorptionCorrelation(x0,xt)
-            except:
-                pass
-            else:
-                idx = j-i
-                phi[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        phi[i] /= nv[i]
-    return 
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def wDK_kernel(phi,nv,x,n,w):
-    for i in range(n):
-        x0 = x[i]
-        w0 = w[i]
-        for j in prange(i,n):
-            try:
-                xt = x[j]
-                value = DesorptionCorrelation_weighted(x0,xt,w0)
-            except:
-                pass
-            else:
-                idx = j-i
-                phi[idx] +=  value
-                nv[idx] += 1
-        
-    for i in prange(n):    
-        phi[i] /= nv[i]
-    return
-@jit(nopython=True,fastmath=True)
-def DesorptionCorrelation(x0,xt):
-    value = 0 ; m = 0
-    for k1 in range(x0.shape[0]):
-        if x0[k1]:
-            if xt[k1]:
-                value+=1
-            else:
-                value+=0
-            m+=1
-    value/=m
-    return value
+def cosCorrelation_kernel(x1,x2):
+    
+    c1= np.cos(x1)
+    c2 = np.cos(x2)
+    return c1*c2
 
 @jit(nopython=True,fastmath=True)
-def DesorptionCorrelation_weighted(x0,xt,w):
-    value = 0 ; m = 0
-    for k1 in range(x0.shape[0]):
-        if x0[k1]:
-            if xt[k1]:
-                value += w[k1]
-            else:
-                value+=0
-            m+=w[k1]
-    value/=m
-    return value
-@jit(nopython = True,fastmath=True)
-def mean_wfilt_kernel(x,f):
-    m =0 ; mi=0
-    for i in range(x.shape[0]):
-        if f[i]:
-            m+=x[i]
-            mi+=1
-    m/=mi
-    return m
-@jit(nopython=True,fastmath=True)
-def covariance_wfilter_kernel(x0,xt,ft0):
-    m=0 ; mi =0
-    for i in range(x0.shape[0]):
-        if ft0[i]:
-            m+=xt[i]*x0[i]
-            mi+=1
-    m/=mi
-    return m 
-@jit(nopython = True,fastmath=True)
-def secmoment_wfilt_kernel(x,f):
-    se=0 ; mi=0
-    for i in range(x.shape[0]):
-        if f[i]:
-            se+=x[i]**2
-            mi+=1
-    se /=mi
-    return se 
-@jit(nopython = True,fastmaeth=True)
-def var_wfilt_kernel(x,f):
-    var = secmoment_wfilt_kernel(x,f) - mean_wfilt_kernel(x,f)**2
-    return var
+def cos2th_kernel(r1,r2):
+    costh = costh_kernel(r1,r2)
+    return costh*costh
 
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter_strict(r1,r2,ft0,ftt):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i] and ftt[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
-            mi+=1
-    ave = tot/mi
-    return ave
-
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter_change(r1,r2,ft0,ftt):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i] and not ftt[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
-            mi+=1
-    ave = tot/mi
-    return ave
-
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter(r1,r2,ft0):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh
-            mi+=1
-    ave = tot/mi
-    return ave
-
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def costh__kernel_with_filter_weighted(r1,r2,ft0,w):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=w[i]*costh
-            mi+=w[i]
-    ave = tot/mi
-    return ave
-
-@jit(nopython=True,fastmath=True)#,parallel=True)
-def cos2th__kernel_with_filter(r1,r2,ft0):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot+=costh*costh
-            mi+=1
-    ave = tot/mi
-    return ave
-@jit(nopython=True,fastmath=True)
-def cos2th__kernel_with_filter_weighted(r1,r2,ft0,w):
-    tot = 0
-    mi = 0
-    N = r1.shape[0]
-    for i in prange(N):
-        if ft0[i]:
-            costh = costh_kernel(r1[i],r2[i])
-            tot += w[i]*costh*costh
-            mi  += w[i]
-    ave = tot/mi
-    return ave
 @jit(nopython=True,fastmath=True)
 def costh_kernel(r1,r2):
     costh=0 ; rn1 =0 ;rn2=0
@@ -3679,12 +4087,20 @@ def costh_kernel(r1,r2):
     return costh
 
 @jit(nopython=True,fastmath=True)
-def costh__kernel(r1,r2):
+def norm_square_kernel(r1,r2):
+    
+    nm = 0
+    for i in range(r1.shape[0]):
+        ri = r2[i] - r1[i]
+        nm+= ri*ri
+    return nm
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def costh__parallelkernel(r1,r2):
     tot = 0
-    N = r1.shape[0]
-    for i in prange(N):
+    for i in prange(r1.shape[0]):
         tot += costh_kernel(r1[i],r2[i])
-    ave = tot/float(N)
+    ave = tot/float(r1.shape[0])
     return ave
 
 @jit(nopython=True,fastmath=True)
@@ -3741,7 +4157,7 @@ def chain_characteristics_kernel(coords,mass,ch_cm,Gyt):
     return Ree2, Rg2,k2,asph,acyl, Rgxx_plus_yy, Rgxx_plus_zz, Rgyy_plus_zz
    
 @jit(nopython=True, fastmath=True,parallel=True)
-def dihedral_distribution_kernel(dih_ids,coords,dih_val):
+def dihedral_values_kernel(dih_ids,coords,dih_val):
     for i in prange(dih_ids.shape[0]):
         r0 = coords[dih_ids[i,0]]
         r1 = coords[dih_ids[i,1]]  
@@ -3831,7 +4247,7 @@ def pair_dists(coords,box,dists):
             idx_i-=k
         for j in range(rc.shape[0]):
             dists[idx_i+j] = dist[j]
-    #print(j,int(n*(n-1)/2),dists[-5:])
+    
     return
 @jit(nopython=True,fastmath=True,parallel=True)
 def pair_dists_general(coords1,coords2,box,dists):
