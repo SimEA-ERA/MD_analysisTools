@@ -219,6 +219,23 @@ class Analytical_Expressions():
         phi = A*np.exp( -((t-tc)/tww )**beta )
         return phi
     @staticmethod
+    def KWW_sum(t,tww,beta):
+        s = 0 
+        tww = np.array(tww)
+        beta =np.array(beta)
+        for j,b in enumerate(beta):
+            for i,tw in enumerate(tww):
+                s+= Analytical_Expressions.KWW(t,1,0,b,tw)
+        return s/(tww.shape[0]*beta.shape[0])
+    
+    @staticmethod
+    def expDecay_sum(t,t0v):
+        s = np.zeros(t.shape[0])
+        t0v = np.array(t0v)
+        for i,t0 in enumerate(t0v):
+            s+=Analytical_Expressions.expDecay_simple(t,t0)
+        return s/t0v.shape[0]
+    @staticmethod
     def expDecay_simple(t,t0):
         phi =  np.exp(-t/t0)
         return phi
