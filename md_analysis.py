@@ -77,7 +77,7 @@ def iterable(arg):
         isinstance(arg, collections.Iterable) 
         and not isinstance(arg, six.string_types)
     )
-import logging
+
 def print_time(tf,name,nf=None):
     s1 = readable_time(tf)
     if nf is None:
@@ -86,6 +86,7 @@ def print_time(tf,name,nf=None):
         s2 = ' Time/frame --> {:s}\n'.format( readable_time(tf/nf))
     x = '-'*(len(name)+11)
     logger.info('Function "{:s}"\n{:s} Total time --> {:s}'.format(name,s2,s1))
+
 def readable_time(tf):
     hours = int(tf/3600)
     minutes = int((tf-3600*hours)/60)
@@ -209,12 +210,39 @@ class Analytical_Expressions():
     @staticmethod
     def KWW(t,A,tc,beta,tww):
         #Kohlrausch–Williams–Watts
-        phi = A*np.exp( ( -(t-tc)/tww )**beta )
+        #A is initial point shift
+        #tc changes the shape of the fast motion(slow times)
+        #beta changes the shape of the curve. 
+        #very small beta makes the curve linear.
+        #the larger the beta the sharpest the curve
+        #all curves regardless beta pass through the same point
+        phi = A*np.exp( -((t-tc)/tww )**beta )
+        return phi
+    @staticmethod
+    def expDecay_simple(t,t0):
+        phi =  np.exp(-t/t0)
         return phi
     @staticmethod
     def expDecay(t,A,t0):
+        #A paramater shifts the end point of the curve up to minus A, see exersize 2
         phi = 1+A*( np.exp(-t/t0) - 1 )
         return phi
+    @staticmethod
+    def expDecay2(t,A,t0):
+        #A parameter shifts the starting point to A
+        phi = A*np.exp(-t/t0)
+        return phi
+    @staticmethod
+    def expDecay3(t,A,t0):
+        #A parameter shifts and the end point to point to -A
+        phi = A*(np.exp(-t/t0)-1)
+        return phi  
+    @staticmethod
+    def expDecay4(t,As,Ae,t0):
+        #As shifts initial point to As
+        #Ae shifts the whole curve by Ae
+        phi = As*np.exp(-t/t0)-Ae
+        return phi 
     @staticmethod
     def expDecay_KWW(t,A1,A2,tc,t0,beta,tww):
         tl =  t[t<tc]
