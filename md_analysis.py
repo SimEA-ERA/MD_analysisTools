@@ -55,8 +55,13 @@ coloredlogs.install(level=LOGGING_LEVEL,
                     field_styles=fieldstyle,
                     level_styles=levelstyles)
 
-
-
+def print_stats( stats):
+    print('ads chains  = {:4.4f} %'.format(stats['adschains_perc']*100))
+    x = [stats[k] for k in stats if '_perc' in k and k.split('_')[0] in ['train','tail','loop','bridge'] ]
+    tot = np.sum(x)
+    for k in ['train','loop','tail','bridge']:
+        print('{:s} = {:4.2f}%'.format(k,stats[k+'_perc']/tot*100))
+    return
 def stay_True(dic):
     keys = list(dic.keys())
     stayTrue = {keys[0]:dic[keys[0]]}
@@ -430,7 +435,19 @@ class add_atoms():
                     'C':[2,0.11,109.47,(1,2),''],
                     'CE':[3,0.109,109.47,(1,2,3),'_endgroup']}
     
-    
+    @staticmethod
+    def add_ghost_atoms(self,system2,gconnectivity=dict()):
+        t0 = perf_counter()
+        for s in ['at_ids','at_types','mol_names','mol_ids']:
+            a1 = getattr( system2, s )
+            setattr(self,'_'.join(('ghost',s)),a1)
+        for frame in system2.timeframes:
+            c1 = system2.timeframes[frame]['coords']
+            self.timeframes[frame]['_'.join(('ghost','coords'))] = c1
+        self.ghost_connectivity = gconnectivity
+        self.mass_map.update(system2.mass_map)
+        return
+            
     @staticmethod
     def append_atoms(self,k='ghost'):
         t0 = perf_counter()
@@ -864,6 +881,10 @@ class Analysis:
         bid,bt = self.sorted_id_and_type(bid)
         self.connectivity[bid] = bt
         return
+    
+    @property
+    def nframes(self):
+        return len(self.timeframes)
     
     @staticmethod
     def get_timekey(time,t0):
@@ -1463,6 +1484,7 @@ class Analysis:
                 if frames[0] <= frame <= frames[1]:
 
                     coords = self.get_whole_coords(frame) [fres]
+                    coords -= coords.min(axis=0)
                     at_ids = self.at_ids[fres] 
                     ofile.write('Made by write_residues\n')
                     ofile.write('{:6d}\n'.format(coords.shape[0]))
@@ -1473,35 +1495,14 @@ class Analysis:
                         % (self.mol_ids[i],self.mol_names[i], self.at_types[i]
                            ,self.at_ids[i%100000] ,c[0],c[1] ,c[2] ))
                     if box is None: 
-                        box = coords.max(axis=1) - coords.min(axis=1) + boxoff
+                        box = coords.max(axis=0) - coords.min(axis=0) + boxoff
                     ofile.write('%f  %f  %f\n' % (box[0],box[1],box[2]))  
             
             ofile.closed
         return
-    def write_residue(self,res,frames=(0,0),boxoff=0.4):
-        with open('res{}.gro'.format(res),'w') as ofile:
-            fres = self.mol_ids == res
-            
-            for frame in self.timeframes:
-                if frames[0] <= frame <= frames[1]:
 
-                    coords = self.get_whole_coords(frame) [fres]
-                    at_ids = self.at_ids[fres] 
-                    ofile.write('Residue {:d}\n'.format(res))
-                    ofile.write('{:6d}\n'.format(coords.shape[0]))
-                    for j in range(coords.shape[0]):
-                        i = at_ids[j]
-                        c = coords[j]
-                        ofile.write('%5d%-5s%5s%5d%8.3f%8.3f%8.3f\n'\
-                        % (self.mol_ids[i],self.mol_names[i], self.at_types[i]
-                           ,self.at_ids[i%100000] ,c[0],c[1] ,c[2] ))
-                    
-                    box = coords.max(axis=1) - coords.min(axis=1) + boxoff
-                    ofile.write('%f  %f  %f\n' % (box[0],box[1],box[2]))  
             
-            ofile.closed
-        return
-            
+    
     def unwrap_coords(self,coords,box):   
 
         unc = coords.copy()
@@ -1536,6 +1537,7 @@ class Analysis:
         else:
             nframes = self.loop_timeframes(funtocall,args)
         return nframes
+    
     @property
     def first_frame(self):
         return list(self.timeframes.keys())[0]
@@ -2065,7 +2067,7 @@ class Analysis_Confined(Analysis):
                     if not self.is_bridge(coords,istart,iend,dads,periodic_image_args):    
                         args_loop = np.concatenate( (args_loop, chunk) )             
                     else:
-                        logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
+                        #logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
                         args_bridge = np.concatenate( (args_bridge, chunk) )
                 else:
                     args_tail = np.concatenate( (args_tail, chunk) )
@@ -3077,8 +3079,14 @@ class coreFunctions():
         pass
     @staticmethod
     def particle_size(self,frame,part_size):
-        part_coords = self.get_coords(frame)[self.particle_filt]
-        part_size += part_coords.max(axis = 0 ) - part_coords.min(axis = 0 )
+        coords = self.get_coords(frame)
+        
+        box = self.get_box(frame)
+        coords = self.translate_particle_in_box_middle(coords,box)
+        part_coords = coords[self.particle_filt]
+        part_s = part_coords.max(axis = 0 ) - part_coords.min(axis = 0 )
+        #logger.debug('frame = {:d} --> part size = {} '.format(frame,part_s))
+        part_size += part_s
         return 
     @staticmethod
     def theFilt(self,frame,filters,dads,ids1,ids2,filt_per_t):
@@ -3510,6 +3518,7 @@ class coreFunctions():
     def vects_t(self,frame,ids1,ids2,filters,dads,vec_t,filt_per_t):
        
         coords = self.get_whole_coords(frame)
+        #coords = self.get_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
         
@@ -3532,7 +3541,8 @@ class coreFunctions():
     @staticmethod
     def confs_t(self,frame,dads,confs_t):
         
-        coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
+        coords = self.get_whole_coords(frame)
+        box = self.get_box(frame)
         time = self.get_time(frame)
         
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
