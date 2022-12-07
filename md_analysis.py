@@ -55,51 +55,88 @@ coloredlogs.install(level=LOGGING_LEVEL,
                     field_styles=fieldstyle,
                     level_styles=levelstyles)
 
-def print_stats( stats):
-    print('ads chains  = {:4.4f} %'.format(stats['adschains_perc']*100))
-    x = [stats[k] for k in stats if '_perc' in k and k.split('_')[0] in ['train','tail','loop','bridge'] ]
-    tot = np.sum(x)
-    for k in ['train','loop','tail','bridge']:
-        print('{:s} = {:4.2f}%'.format(k,stats[k+'_perc']/tot*100))
-    return
-def stay_True(dic):
-    keys = list(dic.keys())
-    stayTrue = {keys[0]:dic[keys[0]]}
-    for i in range(1,len(dic)):
-        stayTrue[keys[i]] = np.logical_and(stayTrue[keys[i-1]],dic[keys[i]])
-    return stayTrue
+class assistant():
+    class colors():
+        class distictive():                
+            colors4 = ['#e41a1c','#377eb8','#4daf4a','#984ea3']
+    @staticmethod
+    def print_time(tf,name,nf=None):
+        s1 = assistant.readable_time(tf)
+        if nf is None:
+            s2 =''
+        else:
+            s2 = ' Time/frame --> {:s}\n'.format( readable_time(tf/nf))
+        x = '-'*(len(name)+11)
+        logger.info('Function "{:s}"\n{:s} Total time --> {:s}'.format(name,s2,s1))
+    
+    @staticmethod
+    def print_stats( stats):
+        print('ads chains  = {:4.4f} %'.format(stats['adschains_perc']*100))
+        x = [stats[k] for k in stats if '_perc' in k and k.split('_')[0] in ['train','tail','loop','bridge'] ]
+        tot = np.sum(x)
+        for k in ['train','loop','tail','bridge']:
+            print('{:s} = {:4.2f}%'.format(k,stats[k+'_perc']/tot*100))
+        return
+    
+    @staticmethod
+    def stay_True(dic):
+        keys = list(dic.keys())
+        stayTrue = {keys[0]:dic[keys[0]]}
+        for i in range(1,len(dic)):
+            stayTrue[keys[i]] = np.logical_and(stayTrue[keys[i-1]],dic[keys[i]])
+        return stayTrue
+    
+    @staticmethod
+    def become_False(dic):
+        keys = list(dic.keys())
+        bFalse = {keys[0]:dic[keys[0]]}
+        for i in range(1,len(dic)):
+            bFalse[keys[i]] = np.logical_and(bFalse[keys[0]],np.logical_not(dic[keys[i]]))
+        return bFalse
 
-def become_False(dic):
-    keys = list(dic.keys())
-    bFalse = {keys[0]:dic[keys[0]]}
-    for i in range(1,len(dic)):
-        bFalse[keys[i]] = np.logical_and(bFalse[keys[0]],np.logical_not(dic[keys[i]]))
-    return bFalse
+    @staticmethod
+    def iterable(arg):
+        return (
+            isinstance(arg, collections.assistant.iterable) 
+            and not isinstance(arg, six.string_types)
+        )
 
-
-def iterable(arg):
-    return (
-        isinstance(arg, collections.Iterable) 
-        and not isinstance(arg, six.string_types)
-    )
-
-def print_time(tf,name,nf=None):
-    s1 = readable_time(tf)
-    if nf is None:
-        s2 =''
-    else:
-        s2 = ' Time/frame --> {:s}\n'.format( readable_time(tf/nf))
-    x = '-'*(len(name)+11)
-    logger.info('Function "{:s}"\n{:s} Total time --> {:s}'.format(name,s2,s1))
-
-def readable_time(tf):
-    hours = int(tf/3600)
-    minutes = int((tf-3600*hours)/60)
-    sec = tf-3600*hours - 60*minutes
-    dec = sec - int(sec)
-    sec = int(sec)
-    return '{:d}h : {:d}\' : {:d}" : {:0.3f}"\''.format(hours,minutes,sec,dec)
-        
+    @staticmethod
+    def readable_time(tf):
+        hours = int(tf/3600)
+        minutes = int((tf-3600*hours)/60)
+        sec = tf-3600*hours - 60*minutes
+        dec = sec - int(sec)
+        sec = int(sec)
+        return '{:d}h : {:d}\' : {:d}" : {:0.3f}"\''.format(hours,minutes,sec,dec)
+    
+    @staticmethod
+    def rearrange_dict_keys(dictionary):
+        '''
+        Changes the order of the keys to access data
+        Parameters
+        ----------
+        d : Dictionary of dictionaries with the same keys.
+        Returns
+        -------
+        x : Dictionary with the second set of keys being now first.
+    
+        '''
+        x = {k2 : {k1:None for k1 in dictionary} for k2 in dictionary[list(dictionary.keys())[0]]}
+        for k1 in dictionary:
+            for k2 in dictionary[k1]:
+                x[k2][k1] = dictionary[k1][k2]
+        return x
+    
+    @staticmethod  
+    def check_occurances(a):
+        x = set()
+        for i in a:
+            if i not in x:
+                x.add(i)
+            else:
+                raise Exception('{} is more than once in the array'.format(i))
+        return        
 @jit(nopython=True,fastmath=True)
 def distance_kernel(d,coords,c):
     for i in range(d.shape[0]):
@@ -467,7 +504,7 @@ class add_atoms():
         
         if self.__class__.__name__ == 'Analysis_Confined':
             self.confined_system_initialization()
-        print_time(perf_counter()-t0,
+        assistant.print_time(perf_counter()-t0,
                    inspect.currentframe().f_code.co_name,frame+1)
         return 
     
@@ -489,7 +526,7 @@ class add_atoms():
         add_atoms.set_all_ghost_coords(self,new_atoms_info,noise) 
         
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
     
         return 
     
@@ -560,7 +597,7 @@ class add_atoms():
         return
 
     @staticmethod
-    def set_ghost_coords(self,frame,info):
+    def set_ghost_coords(self,info):
        
         N = len(info)
         ghost_coords = np.empty((N,3),dtype=float)
@@ -851,7 +888,7 @@ class Analysis:
         
         self.timeframes = dict() # we will store the coordinates,box,step and time here
         tf = perf_counter()-t0
-        #print_time(tf,inspect.currentframe().f_code.co_name)
+        #assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
     
     def analysis_initialization(self):
@@ -873,7 +910,7 @@ class Analysis:
         self.dict_to_sorted_numpy('connectivity') #necessary to unwrap the coords efficiently
         
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
             
         return
     
@@ -906,7 +943,7 @@ class Analysis:
         setattr(self,'sorted_'+attr_name+'_keys',x-self.starts_from)
         
         tf = perf_counter() - t0 
-        #print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        #assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return
 
     def keys_ids_per_type(self,attr_name):
@@ -924,7 +961,7 @@ class Analysis:
     def find_connectivity(self):
         t0 = perf_counter()
         conn = dict()
-        if iterable(self.connectivity_info):
+        if assistant.iterable(self.connectivity_info):
             for cf in self.connectivity_info:
                 if '.itp' in cf:
                     self.read_atoms_and_connectivity_from_itp(cf)
@@ -971,7 +1008,7 @@ class Analysis:
                 conn_id,c_type = self.sorted_id_and_type((id0,id1))
                 self.connectivity[conn_id] = c_type
         tf = perf_counter() - t0
-        #print_time(tf,inspect.currentframe().f_code.co_name)
+        #assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
 
     def find_neibs(self):
@@ -995,7 +1032,7 @@ class Analysis:
         args = (box,)
         nframes = self.loop_trajectory('box_mean', args)
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return box/nframes
     
     def find_EndGroup_args(self,ty = None,serial=True):
@@ -1026,7 +1063,7 @@ class Analysis:
         args = (box_var,box_mean**2)
         nframes = self.loop_trajectory('box_var', args)
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return box_var/nframes
     
     def frame_closer_tobox(self,target_box):
@@ -1045,7 +1082,7 @@ class Analysis:
                     del self.timeframes[nframes]
                 nframes+=1
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return frame_min
     
     def sorted_id_and_type(self,a_id):
@@ -1086,7 +1123,7 @@ class Analysis:
                 if ang_id[::-1] not in self.angles.keys():
                     self.angles[ang_id] = ang_type  
         tf = perf_counter()-t0
-        #print_time(tf,inspect.currentframe().f_code.co_name)
+        #assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return
 
     def find_dihedrals(self):
@@ -1115,7 +1152,7 @@ class Analysis:
                 if dih_id[::-1] not in self.dihedrals:
                     self.dihedrals[dih_id] = dih_type
         tf = perf_counter()
-        #print_time(tf,inspect.currentframe().f_code.co_name)
+        #assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return
 
     def correct_types_from_itp(self,itp_atoms):
@@ -1162,7 +1199,7 @@ class Analysis:
             for t,c in connectivity_per_resname.items():
                 self.connectivity_per_resname[t] = c
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
     
     @staticmethod
@@ -1200,7 +1237,7 @@ class Analysis:
                 break
             
         tf = perf_counter() - t0
-        #print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        #assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return np.array(at_ids),np.array(at_types),np.array(res_num),np.array(res_name),atoms,cngr,charge,mass
 
@@ -1296,14 +1333,14 @@ class Analysis:
         return self.at_ids.shape[0]
     
     @staticmethod
-    def unique_values(iterable):
+    def unique_values(assistant.iterable):
         try:
-            iter(iterable)
+            iter(assistant.iterable)
         except:
-            raise Exception('Give an iterable variable')
+            raise Exception('Give an assistant.iterable variable')
         else:
             un = []
-            for x in iterable:
+            for x in assistant.iterable:
                 if x not in un:
                     un.append(x)
             return un
@@ -1322,7 +1359,7 @@ class Analysis:
             mass[i] = self.mass_map[self.at_types[i]]
         self.atom_mass = mass
         tf = perf_counter() -t0
-        #print_time(tf,inspect.currentframe().f_code.co_name)
+        #assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return
     
     @staticmethod
@@ -1411,7 +1448,7 @@ class Analysis:
                         del self.timeframes[nframes]
                     nframes += 1
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return 
 
     def read_gro_file(self):
@@ -1425,7 +1462,7 @@ class Analysis:
                 nframes+=1
             ofile.close()
             tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return 
     
     def read_file(self):    
@@ -1453,7 +1490,7 @@ class Analysis:
                                                                    self.get_box(frame))
                 elif option=='':
                 
-                    coords = d['coords']
+                    coords = self.get_coords(frame)
                 else:
                     raise NotImplementedError('option "{:}" Not implemented'.format(option))
                 self.write_gro_by_frame(ofile,
@@ -1462,7 +1499,7 @@ class Analysis:
                                         step =d['step'])
             ofile.close()
         tf = perf_counter() -t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return
 
     def write_gro_by_frame(self,ofile,coords,box,name='gro_by_frame',time=0,step=0):
@@ -1530,12 +1567,14 @@ class Analysis:
             with self.traj_opener(*self.traj_opener_args) as ofile:
                 nframes=0
                 while(self.read_from_disk_or_mem(ofile,nframes)):
+                    self.current_frame = nframes
                     funtocall(self,nframes,*args)      
                     if self.memory_demanding:
                         del self.timeframes[nframes]
                     nframes+=1
         else:
             nframes = self.loop_timeframes(funtocall,args)
+        del self.current_frame
         return nframes
     
     @property
@@ -1566,7 +1605,8 @@ class Analysis:
    
     def loop_timeframes(self,funtocall,args):
         for frame in self.timeframes:
-            funtocall(self,frame,*args)
+            self.current_frame = frame
+            funtocall(self,*args)
         nframes = len(self.timeframes)
         return nframes
     
@@ -1628,7 +1668,7 @@ class Analysis:
         
         pair_distribution = {'d':cb, 'gr':gofr }
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return pair_distribution
     
     
@@ -1641,9 +1681,6 @@ class Analysis:
     def get_time(self,frame):
         return self.timeframes[frame]['time']
     
-    def frame_coords(self,frame):
-        coords = self.get_coords(frame)
-        return coords
    
     def get_whole_coords(self,frame):
         coords = self.get_coords(frame)
@@ -1659,7 +1696,7 @@ class Analysis:
             nbonds = self.bond_distance_id_to_ids(i1,ids)
             distmatrix[j1,:] = nbonds
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return distmatrix
     
     def bond_distance_id_to_ids(self,i,ids):
@@ -1784,12 +1821,13 @@ class Analysis_Confined(Analysis):
         return
        
     def translate_particle_in_box_middle(self,coords,box):
-        particle_cm = CM( coords[self.particle_filt], self.atom_mass[self.particle_filt])
-        coords += box/2 - particle_cm
-        coords  = implement_pbc(coords,box)
-        return coords
+        particle_cm = self.get_particle_cm(coords)
+        cds = coords.copy()
+        cds += box/2 - particle_cm
+        cds = implement_pbc(cds,box,inplace=True)
+        return cds
     
-    def frame_coords(self,frame):
+    def translated_coords(self,frame):
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         coords = self.translate_particle_in_box_middle(coords, box)
@@ -1830,7 +1868,7 @@ class Analysis_Confined(Analysis):
         self.all_args = np.arange(0,self.natoms,1,dtype=int)
         
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return
        
     def get_class_function(self,_class,fun,inplace=False):
@@ -1840,34 +1878,27 @@ class Analysis_Confined(Analysis):
             setattr(self,attr_name, fun)
         return fun
      
-    def get_frame_essentials(self,frame):
-        coords = self.frame_coords(frame)
+    def get_frame_basics(self,frame):
+        coords = self.translated_coords(frame)
         box  = self.get_box(frame)          
-        d,cs = self.get_distFromParticle(coords)
-        return coords,box,d,cs
+        cm = self.get_particle_cm(coords)
+        d = self.dfun(coords,cm)
+        return coords,box,d,cm
     
-    def get_unwrappedframe_essentials(self,frame):
+    def get_whole_frame_basics(self,frame):
         coords = self.get_whole_coords(frame)
         box  = self.get_box(frame)          
-        d,cs = self.get_distFromParticle(coords)
-        return coords,box,d,cs
+        cm = self.get_particle_cm(coords)
+        d = self.dfun(coords,cm)
+        return coords,box,d,cm
 
 
-    
-    def get_PoldistFromParticle(self,coords):
-        cs = self.centerfun(CM( coords[self.particle_filt], 
-                               self.atom_mass[self.particle_filt]))
-        d = self.dfun(coords[self.pol_filt],cs)
-        return d,cs
-    def get_distFromParticle(self,coords):
-        cs = self.centerfun(CM( coords[self.particle_filt], 
-                               self.atom_mass[self.particle_filt]))
-        d = self.dfun(coords,cs)
-        return d,cs
+
     def get_particle_cm(self,coords):
         cm =self.centerfun(CM( coords[self.particle_filt], 
                                self.atom_mass[self.particle_filt]))
         return cm
+    
     @staticmethod
     def get_layers(dads,dmax,binl):
         bins = np.arange(dads,dmax+binl,binl)
@@ -1979,14 +2010,19 @@ class Analysis_Confined(Analysis):
         
         return ftrain,image_trains
     
-    def get_minimum_distance_from_particle(self,coords,box):
-        d = np.ones(coords.shape[0])*float('inf')
+    def get_periodic_distance_from_particle(self,r):
+        frame = self.current_frame
+        box = self.get_box(frame)
+        cm = self.get_particle_cm(self.get_coords(frame))
+        d = np.ones(r.shape[0])*10**9
         for L in self.box_add(box):
-            cm = self.get_particle_cm(coords+L)
-            d = np.minimum(d,self.dfun(coords,cm))
+            #d = numba_elementwise_minimum(d,self.dfun(r,cm+L))
+            d = np.minimum(d,self.dfun(r,cm+L))
         return d
     
-    def conformations(self,dads,coords,box):
+    def conformations(self,dads,coords):
+        
+        box = self.get_box(self.current_frame)
         
         ftrain,image_trains = self.get_filt_train(dads, coords, box)
         args_train = np.nonzero(ftrain)[0]
@@ -2054,6 +2090,7 @@ class Analysis_Confined(Analysis):
   
                 
                 chunk = np.array(list(chunk),dtype=int)
+                '''
                 assert not ftrain[chunk].any(), \
                     'chunk in train chain {:d}, node {}, chunk size = {:d}\
                     ,istart = {:d}, iend ={:d} \n\n chunk =\n {} \n\n'.format(j,
@@ -2062,7 +2099,7 @@ class Analysis_Confined(Analysis):
                     'chunk out of adsorbed chains, j = {:d} ,\
                         node = {} n\n chunk \n {} \n\n'.format(j,
                         node,chunk)
-    
+                '''
                 if loopBridge:
                     if not self.is_bridge(coords,istart,iend,dads,periodic_image_args):    
                         args_loop = np.concatenate( (args_loop, chunk) )             
@@ -2135,7 +2172,7 @@ class Analysis_Confined(Analysis):
             set_args.difference_update(new_set_a)
         
             #aold = a
-        #print_time(perf_counter()-t0,'conf_chunks')
+        #assistant.print_time(perf_counter()-t0,'conf_chunks')
         return chunks
     ############### End of Conformation Calculation Supportive Functions #####
     
@@ -2206,7 +2243,7 @@ class Analysis_Confined(Analysis):
         #############
         
         tf = perf_counter() -t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return density_profile
     
@@ -2240,7 +2277,7 @@ class Analysis_Confined(Analysis):
         
         tf = perf_counter() - t0
         
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return orientation   
         
 
@@ -2276,7 +2313,7 @@ class Analysis_Confined(Analysis):
             logger.info('{:s} = {:4.3f}'.format(k,v))
         
         tf = perf_counter() -t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return dens, stats
     
@@ -2287,7 +2324,7 @@ class Analysis_Confined(Analysis):
         nframes = self.loop_trajectory('particle_size',args)
         part_size /= nframes
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return part_size
         
     def calc_dihedral_distribution(self,dads,dmax,binl):
@@ -2307,7 +2344,7 @@ class Analysis_Confined(Analysis):
         dihedral_distr = {k:{lay:np.array(val) for lay,val in dih_distr[k].items()} for k in dih_distr }
         tf = perf_counter() -t0
        
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return dihedral_distr
     
     def calc_chain_characteristics(self,dmin,dmax,binl):
@@ -2336,7 +2373,7 @@ class Analysis_Confined(Analysis):
             chain_chars[k+'(std)'] = np.array([ np.std(chars[k][i]) for i in range(nl) ])
         
         tf= perf_counter() -t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return chain_chars
     
@@ -2353,9 +2390,9 @@ class Analysis_Confined(Analysis):
         
         nframes = self.loop_trajectory('vects_t', args)
                 
-        filt_per_t = rearrange_dict_keys(filt_per_t)
+        filt_per_t = assistant.rearrange_dict_keys(filt_per_t)
         tf = perf_counter()-t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return vec_t,filt_per_t
 
     def chains_CM(self,coords):
@@ -2389,10 +2426,10 @@ class Analysis_Confined(Analysis):
         
         nframes = self.loop_trajectory('dihedrals_t', args)
         
-        filt_per_t = rearrange_dict_keys(filt_per_t)
+        filt_per_t = assistant.rearrange_dict_keys(filt_per_t)
         
         tf = perf_counter()-t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return dihedrals_t,filt_per_t
     
@@ -2416,7 +2453,7 @@ class Analysis_Confined(Analysis):
         
         tf = perf_counter()-t0
         
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         #return {t:v[tot_filt] for t,v in dihedrals_t.items()}
         return Ree_t,filt_per_t
     
@@ -2443,11 +2480,11 @@ class Analysis_Confined(Analysis):
         
         nframes = self.loop_trajectory('chain_dipole_moment',args)
         
-        filters_t = rearrange_dict_keys(filters_t)
+        filters_t = assistant.rearrange_dict_keys(filters_t)
         
         tf = perf_counter() - t0
         
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return dipoles_t,filters_t
     
     def find_segmental_ids(self,ids1,ids2,segbond):
@@ -2477,7 +2514,7 @@ class Analysis_Confined(Analysis):
         seg_ids_numpy = np.array(list(seg_args.values()))
         self.segmental_args = seg_ids_numpy
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return  seg_ids_numpy
     
     def calc_segmental_dipole_moment_t(self,topol_vector,
@@ -2502,11 +2539,11 @@ class Analysis_Confined(Analysis):
         
         nframes = self.loop_trajectory('segmental_dipole_moment',args)
         
-        filters_t = rearrange_dict_keys(filters_t)
+        filters_t = assistant.rearrange_dict_keys(filters_t)
         
         tf = perf_counter() - t0
         
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return dipoles_t,filters_t
     
     def calc_segmental_dipole_moment_correlation(self,topol_vector,
@@ -2540,25 +2577,25 @@ class Analysis_Confined(Analysis):
                 correlations[kf][k] = {'mean':np.mean(c),'std':np.std(c)}
                 
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
     
         return correlations
     
-    def calc_chainCM_t(self,filters={'all':None}, dads=1,option=''):
+    def calc_chainCM_t(self,filters={'all':None}, dads=1,option='',coord_type=None):
         t0 = perf_counter()
         filters = {'chain_'+k: v for k,v in filters.items()} #Need to modify when considering chains
         
         vec_t = dict()
         filt_per_t = dict()
         
-        args = (filters,dads,vec_t,filt_per_t)
+        args = (filters,dads,vec_t,filt_per_t,coord_type)
         
         nframes = self.loop_trajectory('chainCM_t'+option, args)
       
-        filt_per_t = rearrange_dict_keys(filt_per_t)
+        filt_per_t = assistant.rearrange_dict_keys(filt_per_t)
         
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return vec_t,filt_per_t
     
@@ -2577,10 +2614,10 @@ class Analysis_Confined(Analysis):
         
         nframes = self.loop_trajectory('segCM_t'+option, args)
       
-        filt_per_t = rearrange_dict_keys(filt_per_t)
+        filt_per_t = assistant.rearrange_dict_keys(filt_per_t)
         
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return vec_t,filt_per_t
     
@@ -2590,10 +2627,10 @@ class Analysis_Confined(Analysis):
         confs_t = dict()
         args = (dads,confs_t)
         nframes = self.loop_trajectory('confs_t'+option, args)
-        confs_t = rearrange_dict_keys(confs_t)
+        confs_t = assistant.rearrange_dict_keys(confs_t)
         
         tf = perf_counter() - t0
-        print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
     
         return confs_t
     
@@ -2609,7 +2646,7 @@ class Analysis_Confined(Analysis):
                                                          dads)
         
         tf = perf_counter()-t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return segvec_t,filt_per_t
     
     def calc_adsorbed_segments_t(self,topol_vector,dads):
@@ -2621,16 +2658,8 @@ class Analysis_Confined(Analysis):
         segvec_t, adsorbed_segments_t = self.vects_per_t(ids1, ids2,
                                                          filters={'space':(0,dads)})
         tf = perf_counter()-t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         return adsorbed_segments_t[(0,dads)]
-    
-    def calc_adsorbed_chains_t(self,dads,filters={'adsorption':None}):
-        t0 = perf_counter()
-        
-        chvec_t, adsorbed_chains_t = self.calc_chainCM_t(filters=filters,dads=dads)
-        tf = perf_counter()-t0
-        print_time(tf,inspect.currentframe().f_code.co_name)
-        return adsorbed_chains_t['ads']
     
 
     
@@ -2730,7 +2759,7 @@ class Analysis_Confined(Analysis):
         
         tf = perf_counter()-tinit
         #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
-        print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "{}'.format(prop))
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "{}'.format(prop))
         return dynamical_property
     
     def get_Kinetics_inner_kernel_functions(self,wt):
@@ -2769,13 +2798,15 @@ class Analysis_Confined(Analysis):
         kinetic_property = {t:p for t,p in zip(xt,Prop_nump)}
         tf = perf_counter()-tinit
         #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
-        print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "Kinetics')
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "Kinetics')
         return kinetic_property
     
     def get_TACF_inner_kernel_functions(self,prop,filt_option,weights_t):
         
-        inner_mapper = {'cos':'cosCorrelation_kernel'}
-        inner_zero_mapper = {'cos':'fcos_kernel'}
+        inner_mapper = {'cos':'cosCorrelation_kernel',
+                        'sin':'sinCorrelation_kernel'}
+        inner_zero_mapper = {'cos':'fcos_kernel',
+                             'sin':'fsin_kernel'}
         
         inner_func_name = inner_mapper[prop.lower()] 
         inner_zero_func_name = inner_zero_mapper[prop.lower()]
@@ -2861,7 +2892,7 @@ class Analysis_Confined(Analysis):
         TACF_property = {t:p for t,p in zip(xt,Prop_nump)}
         tf = perf_counter()-tinit
         
-        print_time(tf,inspect.currentframe().f_code.co_name)
+        assistant.print_time(tf,inspect.currentframe().f_code.co_name)
         
         return TACF_property
     
@@ -2873,9 +2904,10 @@ class Filters():
     @staticmethod
     def calc_filters(self,filters,*args):
         bool_data = dict()
-        #if filters is None: return bool_data
+        
         for k,filt in filters.items():
             bool_data.update(  getattr(Filters,k)(self, filt, *args)  )
+        
         return bool_data
     
     @staticmethod
@@ -2885,33 +2917,35 @@ class Filters():
     def chain_all(self,filt,*args):
         return {'all':np.ones(len(self.chain_args),dtype=bool)}
     @staticmethod
-    def space(self,layers,ids1,ids2,coords,cm,*args):
+    def space(self,layers,ids1,ids2,coords,*args):
         rm = 0.5*(coords[ids1] + coords[ids2])
-        d = self.dfun(rm,cm)
+        d = self.get_periodic_distance_from_particle(rm)
         return Filters.filtLayers(layers,d)
     
     @staticmethod
     def filtLayers(layers,d):
-        if iterable(layers):
-            if iterable(layers[0]):
+        if assistant.iterable(layers):
+            if assistant.iterable(layers[0]):
                 return {dl : filt_uplow(d , dl[0], dl[1]) for dl in layers}
             else:
                 return {layers: filt_uplow(d , layers[0], layers[1])}
         return dict()
+    
     @staticmethod
     def filtLayers_inclucive(layers,d):
-        if iterable(layers):
-            if iterable(layers[0]):
+        if assistant.iterable(layers):
+            if assistant.iterable(layers[0]):
                 return {dl : filt_uplow_inclucive(d , dl[0], dl[1]) for dl in layers}
             else:
                 return {layers: filt_uplow_inclucive(d , layers[0], layers[1])}
         return dict()
+    
     @staticmethod
-    def BondsTrainFrom(self,bondlayers,ids1,ids2,coords,cm,dads,box,*args):
+    def BondsTrainFrom(self,bondlayers,ids1,ids2,coords,dads,*args):
         #t0 = perf_counter()
-        #d = self.dfun(coords,cm)
+        
         ds_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords)
         
         args_rest_train = np.concatenate( (args_tail,args_loop,args_bridge ) )
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_rest_train)
@@ -2920,7 +2954,7 @@ class Filters():
         
         return Filters.filtLayers_inclucive(bondlayers,nbonds)
     
-    def BondsFromEndGroups(self,bondlayers,ids1,ids2,coords,cm,dads,box,*args):
+    def BondsFromEndGroups(self,bondlayers,ids1,ids2,coords,dads,*args):
         #t0 = perf_counter()
         args_endGroups = self.get_EndGroup_args()
         
@@ -2931,11 +2965,11 @@ class Filters():
         return Filters.filtLayers_inclucive(bondlayers,nbonds)
     
     @staticmethod
-    def BondsFromTrain(self,bondlayers,ids1,ids2,coords,cm,dads,box,*args):
+    def BondsFromTrain(self,bondlayers,ids1,ids2,coords,dads,*args):
         #t0 = perf_counter()
-        #d = self.dfun(coords,cm)
+        
         ds_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords)
         
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_train)
         nbonds2 = self.ids_nbondsFrom_args(ids2,args_train)
@@ -2944,11 +2978,11 @@ class Filters():
         return Filters.filtLayers_inclucive(bondlayers,nbonds)
 
     @staticmethod
-    def conformationDistribution(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
+    def conformationDistribution(self,fconfs,ids1,ids2,coords,dads,*args):
         
-        #d = self.dfun(coords,cm)
+        
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords)
        
         filt = dict()
         for conf,intervals in fconfs.items():
@@ -2977,13 +3011,10 @@ class Filters():
         return filt
     
     @staticmethod
-    def conformations(self,fconfs,ids1,ids2,coords,cm,dads,box,*args):
-        #rm = 0.5*(coords[ids1] + coords[ids2])
-        # = perf_counter()
-        #d = self.dfun(coords,cm)
+    def conformations(self,fconfs,ids1,ids2,coords,dads,*args):
         
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords,box)
+        args_loop, args_bridge = self.conformations(dads,coords)
         
         all_not_free = np.concatenate((args_train,args_tail,args_loop,args_bridge))
         
@@ -2991,14 +3022,14 @@ class Filters():
         args_free = all_args [ np.logical_not( np.isin(all_args, all_not_free) ) ]
 
         filt = dict()
-        if iterable(fconfs):
+        if assistant.iterable(fconfs):
             for conf in fconfs:
                 conf_args = locals()['args_'+conf]
                 filt[conf] = Filters.filt_bothEndsIn(ids1, ids2, conf_args)
         elif type(fconfs) is str:
             conf_args = locals()['args_'+fconfs]
             filt[fconfs] = Filters.filt_bothEndsIn(ids1, ids2, conf_args)
-        #print_time(perf_counter()-t0,inspect.currentframe().f_code.co_name)
+        #assistant.print_time(perf_counter()-t0,inspect.currentframe().f_code.co_name)
         return filt
     
     @staticmethod
@@ -3017,8 +3048,8 @@ class Filters():
         return filt_sc
     
     @staticmethod
-    def chain_space(self,layers,chain_cm,part_cm,*args):
-        d = self.dfun(chain_cm,part_cm)
+    def chain_space(self,layers,chain_cm,*args):
+        d = self.get_periodic_distance_from_particle(chain_cm)
         return Filters.filtLayers(layers, d)
     
     @staticmethod
@@ -3044,43 +3075,39 @@ class Filters():
         return characteristic
             
     @staticmethod
-    def get_ads_degree(self,part_cm,coords,dads,*args):
+    def get_ads_degree(self,coords,dads):
         chain_arg_keys = self.chain_args.keys()
         cads = np.empty(len(chain_arg_keys),dtype=bool)
         degree = np.empty(cads.shape[0],dtype=float)
-        
-        for i,args in enumerate(self.chain_args.values()):
-            d = self.dfun(coords[args], part_cm)
-            f = filt_uplow(d, 0, dads)
+        d = self.get_periodic_distance_from_particle(coords)
+        fd = filt_uplow(d,0,dads)
+        for i,args in enumerate(self.chain_args.values()):   
+            f = fd[args]
             cads[i] = f.any()
             degree[i] = np.count_nonzero(f)/f.shape[0]
         
         return degree,cads
     @staticmethod
-    def chain_adsorption(self,ads_degree, chain_cm, part_cm, coords, dads,*args):
+    def chain_adsorption(self,ads_degree, chain_cm, coords, dads,*args):
         
-        degree,cads = Filters.get_ads_degree(self,part_cm,coords,dads)
+        
+        degree,cads = Filters.get_ads_degree(self,coords,dads)
             
         filt_ads = dict()
+        
         filt_ads.update( Filters.filtLayers(ads_degree,degree) )
-        
-        filt_ads.update({'ads':cads,'free':np.logical_not(cads)})
-        
-        return filt_ads
-    def chain_weight_ads(self,dumb_value, chain_cm, part_cm, coords, dads,*args):
-        
-        degree,cads = Filters.get_ads_degree(self,part_cm,coords,dads)
-        filt_ads = {'ads':cads,'free':np.logical_not(cads),'weights':degree} 
+        filt_ads.update({'ads':cads,'free':np.logical_not(cads),'degree':degree})
         
         return filt_ads
     
 class coreFunctions():
     def __init__():
         pass
+    
     @staticmethod
-    def particle_size(self,frame,part_size):
+    def particle_size(self,part_size):
+        frame = self.current_frame
         coords = self.get_coords(frame)
-        
         box = self.get_box(frame)
         coords = self.translate_particle_in_box_middle(coords,box)
         part_coords = coords[self.particle_filt]
@@ -3088,32 +3115,29 @@ class coreFunctions():
         #logger.debug('frame = {:d} --> part size = {} '.format(frame,part_s))
         part_size += part_s
         return 
+    
     @staticmethod
-    def theFilt(self,frame,filters,dads,ids1,ids2,filt_per_t):
-        
+    def theFilt(self,filters,dads,ids1,ids2,filt_per_t):
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
         
-        box = self.get_box(frame)
         time = self.get_time(frame)
-        
-        cm = self.centerfun( CM( coords[self.particle_filt], 
-                self.atom_mass[self.particle_filt]) )
-        
+       
         if frame == self.first_frame:
             self.time_zero=time
         
         key = self.get_timekey(time,self.time_zero)
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                                    ids1,ids2,coords,cm,dads,box)
+                                    ids1,ids2,coords,dads)
+        return
+    
     @staticmethod
-    def theChainFilt(self,frame,filters,dads,filt_per_t):
+    def theChainFilt(self,filters,dads,filt_per_t):
         
+        frame = self.current_frame
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
-        
-        part_cm = self.centerfun( CM( coords[self.particle_filt], 
-                self.atom_mass[self.particle_filt]) )
         
         chain_cm = self.chains_CM(coords)
         
@@ -3123,21 +3147,25 @@ class coreFunctions():
         
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, part_cm, coords, dads)
+                            chain_cm, coords, dads)
         
         return 
     @staticmethod
-    def box_mean(self,frame,box):
+    def box_mean(self,box):
+        frame = self.current_frame
         box+=self.get_box(frame)
         return
+    
     @staticmethod
-    def box_var(self,frame,box_var,box_mean_squared):
+    def box_var(self,box_var,box_mean_squared):
+        frame = self.current_frame
         box_var += self.get_box(frame)**2 - box_mean_squared
         return
+    
     @staticmethod
-    def vector_correlations(self,frame,vec_t,filt_t,bk0,bk1,correlation):
+    def vector_correlations(self,vec_t,filt_t,bk0,bk1,correlation):
             
-            
+        frame = self.current_frame
         timekey = self.get_time(frame) - self.get_time(self.first_frame)
         vec = vec_t[timekey]
         for kf in correlation:
@@ -3149,31 +3177,24 @@ class coreFunctions():
                 f01 = np.logical_and(f[b0],f[b1])
                 v0 = vec[b0][f01]
                 v1 = vec[b1][f01]
-                
-               # tf = perf_counter()
-              #  print_time(tf-t0,'{}:{} :manipulating data'.format(kf,k))
+              
                 try:
                     costh = costh__parallelkernel(v0,v1)
                     correlation[kf][k].append( costh )
                 except ZeroDivisionError:
-              #      logger.warning('In frame {:d} --> For {} and bond distance {:d} there are no statistics'.format(frame,kf,k))
                     pass
-            #    tf2 = perf_counter()
-             #   print_time(tf2-tf,'{}:{} :computationsa'.format(kf,k))
         return
                 
     @staticmethod
-    def segmental_dipole_moment(self,frame,filters,dads,ids1,ids2,
+    def segmental_dipole_moment(self,filters,dads,ids1,ids2,
                                 segment_args,dipoles_t,filt_per_t):
         
-            
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
-        #coords = self.get_coords(frame)
+        
         box = self.get_box(frame)
         time = self.get_time(frame)
         
-        cm = self.centerfun( CM( coords[self.particle_filt], 
-                self.atom_mass[self.particle_filt]) )
 
         if frame == self.first_frame:
             self.time_zero=time
@@ -3190,19 +3211,17 @@ class coreFunctions():
         dipoles_t[key] = dipoles  
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                                    ids1,ids2,coords,cm,dads,box)
+                                    ids1,ids2,coords,dads)
         
         return
     @staticmethod
-    def chain_dipole_moment(self,frame,filters,dads,dipoles_t,filt_per_t):
+    def chain_dipole_moment(self,filters,dads,dipoles_t,filt_per_t):
         
-            
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
         
-        part_cm = self.centerfun( CM( coords[self.particle_filt], 
-                self.atom_mass[self.particle_filt]) )
         
         chain_cm = self.chains_CM(coords)
         
@@ -3222,16 +3241,16 @@ class coreFunctions():
         dipoles_t[key] = dipoles  
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, part_cm, coords, dads)
+                            chain_cm, coords, dads)
         
         return
     
     @staticmethod
-    def mass_density_profile__pertype(self,frame,nbins,bins,
+    def mass_density_profile__pertype(self,nbins,bins,
                                   rho,rho_per_atom_type,ftt,mass_pol):
         
-
-        coords,box,d,cs = self.get_frame_essentials(frame)
+        frame = self.current_frame
+        coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
         
         #2) Caclulate profile
@@ -3246,10 +3265,10 @@ class coreFunctions():
         return
     
     @staticmethod
-    def mass_density_profile(self,frame,nbins,bins,
+    def mass_density_profile(self,nbins,bins,
                                   rho,mass_pol):
-        
-        coords,box,d,cs = self.get_frame_essentials(frame)
+        frame = self.current_frame
+        coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
         #2) Caclulate profile
         vol_bin = self.volfun(box,bins[0],bins[1])
@@ -3260,10 +3279,10 @@ class coreFunctions():
         return
     
     @staticmethod
-    def mass_density_profile_flux(self,frame,nbins,bins,
+    def mass_density_profile_flux(self,nbins,bins,
                                   rho,mass_pol,rho_mean_sq):
-        
-        coords,box,d,cs = self.get_frame_essentials(frame)
+        frame = self.current_frame
+        coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
         #2) Caclulate profile
         vol_bin = self.volfun(box,bins[0],bins[1])
@@ -3274,13 +3293,12 @@ class coreFunctions():
         return
     
     @staticmethod
-    def mass_density_profile__2side(self,frame,nbins,bins,
+    def mass_density_profile__2side(self,nbins,bins,
                                   rho_up,rho_down,mass_pol):
-        
-        coords = self.frame_coords(frame)
+        frame = self.current_frame
+        coords = self.translated_coords(frame)
         box = self.get_box(frame)
-        cs = self.centerfun(CM( coords[self.particle_filt], 
-                               self.atom_mass[self.particle_filt]))
+        cs = self.get_particle_cm(coords)
         
         dfun = getattr(Distance_Functions,self.conftype +'__2side')
         d = dfun(coords[self.pol_filt],cs) 
@@ -3295,10 +3313,10 @@ class coreFunctions():
         return
     
     @staticmethod
-    def number_density_profile__pertype(self,frame,nbins,bins,
+    def number_density_profile__pertype(self,nbins,bins,
                                   rho,rho_per_atom_type,ftt):
-        
-        coords,box,d,cs = self.get_frame_essentials(frame)
+        frame = self.current_frame
+        coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
         #2) Caclulate profile
         for i in range(nbins):    
@@ -3311,9 +3329,9 @@ class coreFunctions():
                 rho_per_atom_type[t][i] += np.count_nonzero(ft)/vol_bin
     
     @staticmethod
-    def number_density_profile(self,frame,nbins,bins,rho):
-        
-        coords,box,d,cs = self.get_frame_essentials(frame)
+    def number_density_profile(self,nbins,bins,rho):
+        frame = self.current_frame
+        coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
         
         #2) Caclulate profile
@@ -3324,16 +3342,16 @@ class coreFunctions():
         return
   
     @staticmethod
-    def conformation__densityAndstats(self,frame,dads,dlayers,dens,stats):                
-        
+    def conformation__densityAndstats(self,dads,dlayers,dens,stats):                
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(dads,coords)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
-        coreFunctions.conformation_dens(self,frame, dlayers, dens,
+        coreFunctions.conformation_dens(self, dlayers, dens,
                                            ads_chains, args_train, args_tail,
                                            args_loop, args_bridge)
         
@@ -3342,28 +3360,28 @@ class coreFunctions():
         return
     
     @staticmethod
-    def conformation__density(self,frame,dads,dlayers,dens,stats):                
-        
+    def conformation__density(self,dads,dlayers,dens,stats):                
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(dads,coords)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
-        coreFunctions.conformation_dens(self,frame, dlayers, dens,
+        coreFunctions.conformation_dens(self, dlayers, dens,
                                            ads_chains, args_train, args_tail,
                                            args_loop, args_bridge)
         
         return
 
     @staticmethod
-    def conformation__stats(self,frame,dads,dlayers,dens,stats):                
-        
-        coords = self.get_whole_coords(frame)
+    def conformation__stats(self,dads,dlayers,dens,stats):                
+        frame = self.current_frame
+        coords = self.get_coords(frame)
         box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations( dads,coords,box)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(dads,coords)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
@@ -3373,13 +3391,13 @@ class coreFunctions():
         return
     
     @staticmethod
-    def conformation_dens(self,frame, dlayers,dens,
+    def conformation_dens(self, dlayers,dens,
                              ads_chains, args_train, args_tail, 
                              args_loop, args_bridge):
-        
-        coords = self.get_whole_coords(frame)
+        frame = self.current_frame
+        coords = self.get_coords(frame)
         box = self.get_box(frame)
-        d = self.get_minimum_distance_from_particle(coords,box)
+        d = self.get_periodic_distance_from_particle(coords)
         
         
         d_tail = d[args_tail]
@@ -3415,11 +3433,11 @@ class coreFunctions():
         return 
     
     @staticmethod
-    def dihedral_distribution(self,frame,dih_ids,dlayers,dih_distr):
-        
+    def dihedral_distribution(self,dih_ids,dlayers,dih_distr):
+        frame = self.current_frame
         box = self.get_box(frame)
         coords = self.get_whole_coords(frame)
-        cs = self.centerfun(CM( coords[self.particle_filt], self.atom_mass[self.particle_filt]))
+        cs = self.get_particle_cm(coords)
 
         for k,d_ids in dih_ids.items():
             rm = 0.5*( coords[d_ids[:,1]] + coords[d_ids[:,2]] )
@@ -3432,13 +3450,14 @@ class coreFunctions():
         return
     
     @staticmethod
-    def P2(self,frame,ids1,ids2,dlayers,costh,costh_fz):
+    def P2(self,ids1,ids2,dlayers,costh,costh_fz):
+        frame = self.current_frame
         #1) coords
         coords = self.get_whole_coords(frame)
         box =self.get_box(frame)
 
         #2) calc_particle_cm
-        cs = self.centerfun(CM( coords[self.particle_filt], self.atom_mass[self.particle_filt]))
+        cs = self.get_particle_cm(coords)
         
         r1 = coords[ids1]; r2 = coords[ids2]
         
@@ -3455,12 +3474,12 @@ class coreFunctions():
         return   
     
     @staticmethod
-    def chain_characteristics(self,frame,chain_args,dlayers,chars):
+    def chain_characteristics(self,chain_args,dlayers,chars):
         #1) translate the system
-        
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
-        cs = self.centerfun(CM( coords[self.particle_filt], self.atom_mass[self.particle_filt]))
+        cs = self.get_particle_cm(coords)
                    
         for j in chain_args:
             #find chain  center of mass
@@ -3485,14 +3504,14 @@ class coreFunctions():
         return
     
     @staticmethod
-    def dihedrals_t(self,frame,
+    def dihedrals_t(self,
                 dih_ids, ids1, ids2, filters, dads, dihedrals_t, filt_per_t):
         
         t0 = perf_counter()
-        
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
-        cm = self.centerfun( CM( coords[self.particle_filt], 
-                               self.atom_mass[self.particle_filt]) )
+        cm = self.get_particle_cm(coords)
+        
         box = self.get_box(frame)
         time = self.get_time(frame)
         
@@ -3508,22 +3527,19 @@ class coreFunctions():
         tm = perf_counter()
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                                    ids1,ids2,coords,cm,dads,box)
+                                    ids1,ids2,coords,dads)
         tf = perf_counter()
         if frame ==1:
             logger.info('Dihedrals_as_t: Estimate time consuption --> Main: {:2.1f} %, Filters: {:2.1f} %'.format((tm-t0)*100/(tf-t0),(tf-tm)*100/(tf-t0)))
         return
 
     @staticmethod
-    def vects_t(self,frame,ids1,ids2,filters,dads,vec_t,filt_per_t):
-       
+    def vects_t(self,ids1,ids2,filters,dads,vec_t,filt_per_t):
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
-        #coords = self.get_coords(frame)
-        box = self.get_box(frame)
+
         time = self.get_time(frame)
         
-        cm = self.centerfun( CM( coords[self.particle_filt], 
-                self.atom_mass[self.particle_filt]) )
         
         vec = coords[ids2,:] - coords[ids1,:]
         
@@ -3535,18 +3551,18 @@ class coreFunctions():
         vec_t[key] = vec
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            ids1,ids2,coords,cm,dads,box)
+                                    ids1,ids2,coords,dads)
         return     
     
     @staticmethod
-    def confs_t(self,frame,dads,confs_t):
-        
+    def confs_t(self,dads,confs_t):
+        frame = self.current_frame
         coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
         
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(dads,coords,box)
+                                self.conformations(dads,coords)
         x = dict()
         ntot = args_train.shape[0] + args_tail.shape[0] +\
                args_loop.shape[0] + args_bridge.shape[0]
@@ -3564,13 +3580,13 @@ class coreFunctions():
         
         return
     @staticmethod
-    def confs_t__perchain(self,frame,dads,confs_t):
-        
-        coords,box,d,cs = self.get_unwrappedframe_essentials(frame)
+    def confs_t__perchain(self,dads,confs_t):
+        frame = self.current_frame
+        coords,box,d,cs = self.get_whole_frame_basics(frame)
         time = self.get_time(frame)
         
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(dads,coords,box)
+                                self.conformations(dads,coords)
         x = dict()
         for k in ['train','tail','loop','bridge']:
             args = locals()['args_'+k]
@@ -3588,14 +3604,19 @@ class coreFunctions():
         return
     
     @staticmethod
-    def chainCM_t(self,frame,filters,dads,vec_t,filt_per_t):
+    def chainCM_t(self,filters,dads,vec_t,filt_per_t,coord_type=None):
         
-        coords = self.get_coords(frame)
+        frame = self.current_frame
+        if coord_type is None:
+            coords = self.get_coords(frame)
+        elif coord_type =='whole':
+            coords = self.get_whole_coords(frame)
+        
+        
         box = self.get_box(frame)
         time = self.get_time(frame)
         
-        part_cm = self.centerfun( CM( coords[self.particle_filt], 
-                self.atom_mass[self.particle_filt]) )
+
         
         chain_cm = self.chains_CM(coords)
         
@@ -3606,22 +3627,20 @@ class coreFunctions():
         vec_t[key] =  chain_cm
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, part_cm, coords, dads)
+                            chain_cm, coords, dads)
         
         return 
     
     @staticmethod
-    def segCM_t(self,frame,filters,dads,
+    def segCM_t(self,filters,dads,
                   ids1,ids2,segment_ids,
                   vec_t,filt_per_t):
         
+        frame = self.current_frame
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
-        coords_whole = self.get_whole_coords(frame)
-        
-        part_cm = self.centerfun( CM( coords_whole[self.particle_filt], 
-                self.atom_mass[self.particle_filt]) )
+        #coords_whole = self.get_whole_coords(frame)  
         
         seg_cm = self.segs_CM(coords,segment_ids)
         
@@ -3632,12 +3651,13 @@ class coreFunctions():
         vec_t[key] =  seg_cm
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            ids1,ids2,coords_whole,part_cm,dads,box)
+                            ids1,ids2,coords,dads)
         
         return 
     
     @staticmethod
-    def gofr(self,frame,bins,gofr):
+    def gofr(self,bins,gofr):
+        frame = self.current_frame
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         
@@ -3647,11 +3667,11 @@ class coreFunctions():
         pair_dists(coords,box,pd)
         numba_bin_count(pd,bins,gofr)
         
-
         return
+    
     @staticmethod
-    def gofr_type(self,frame,fty,bins,gofr):
-        
+    def gofr_type(self,fty,bins,gofr):
+        frame = self.current_frame
         coords = self.get_coords(frame)[fty]
         box = self.get_box(frame)
         
@@ -3662,9 +3682,10 @@ class coreFunctions():
 
         numba_bin_count(pd,bins,gofr)
         return
+    
     @staticmethod
-    def gofr_type_to_all(self,frame,fty,bins,gofr):
-        
+    def gofr_type_to_all(self,fty,bins,gofr):
+        frame = self.current_frame
         coords = self.get_coords(frame)
         
         coords_ty = coords[fty]
@@ -3681,8 +3702,8 @@ class coreFunctions():
         return
     
     @staticmethod
-    def gofr_type_to_type(self,frame,fty1,fty2,bins,gofr):
-        
+    def gofr_type_to_type(self,fty1,fty2,bins,gofr):
+        frame = self.current_frame
         coords = self.get_coords(frame)
         
         coords_ty1 = coords[fty1]
@@ -4072,11 +4093,24 @@ def fcos_kernel(x):
     return np.cos(x)
 
 @jit(nopython=True,fastmath=True)
+def fsin_kernel(x):
+    return np.sin(x)
+
+@jit(nopython=True,fastmath=True)
 def cosCorrelation_kernel(x1,x2):
     
     c1= np.cos(x1)
     c2 = np.cos(x2)
     return c1*c2
+
+@jit(nopython=True,fastmath=True)
+def sinCorrelation_kernel(x1,x2):
+    
+    s1= np.sin(x1)
+    s2 = np.sin(x2)
+    return s1*s2
+
+
 
 @jit(nopython=True,fastmath=True)
 def cos2th_kernel(r1,r2):
@@ -4088,9 +4122,9 @@ def costh_kernel(r1,r2):
     costh=0 ; rn1 =0 ;rn2=0
     n = r1.shape[0]
     for j in range(n):
-        costh+=r1[j]*r2[j]
-        rn1+=r1[j]*r1[j]
-        rn2+=r2[j]*r2[j]
+        costh += r1[j]*r2[j]
+        rn1 += r1[j]*r1[j]
+        rn2 += r2[j]*r2[j]
     rn1 = rn1**0.5
     rn2 = rn2**0.5
     costh/=rn1*rn2
@@ -4276,23 +4310,26 @@ def CM(coords,mass):
     cm = np.sum(mass*coords.T,axis=1)/mass.sum()
     return cm
 #@jit(nopython=True,fastmath=True)
-def implement_pbc(coords,boxsize,box='rectangular'):
-    cn = coords.copy()
-    if box =='rectangular':
-        fxu = coords[:,0] > boxsize[0]
-        fxl = coords[:,0] < 0
-        fyu = coords[:,1] > boxsize[1]
-        fyl = coords[:,1] < 0
-        fzu = coords[:,2] > boxsize[2]
-        fzl = coords[:,2] < 0
-        cn[:,0] -= boxsize[0]*np.array(fxu,dtype=float)
-        cn[:,0] += boxsize[0]*np.array(fxl,dtype=float)
-        cn[:,1] -= boxsize[1]*np.array(fyu,dtype=float)
-        cn[:,1] += boxsize[1]*np.array(fyl,dtype=float)
-        cn[:,2] -= boxsize[2]*np.array(fzu,dtype=float)
-        cn[:,2] += boxsize[2]*np.array(fzl,dtype=float)
+def implement_pbc(coords,boxsize,inplace=True):
     
-    return cn 
+    if inplace:
+        cn = coords
+    else:
+        cn = coords.copy()
+    fxu = coords[:,0] > boxsize[0]
+    fxl = coords[:,0] < 0
+    fyu = coords[:,1] > boxsize[1]
+    fyl = coords[:,1] < 0
+    fzu = coords[:,2] > boxsize[2]
+    fzl = coords[:,2] < 0
+    cn[:,0] -= boxsize[0]*np.array(fxu,dtype=float)
+    cn[:,0] += boxsize[0]*np.array(fxl,dtype=float)
+    cn[:,1] -= boxsize[1]*np.array(fyu,dtype=float)
+    cn[:,1] += boxsize[1]*np.array(fyl,dtype=float)
+    cn[:,2] -= boxsize[2]*np.array(fzu,dtype=float)
+    cn[:,2] += boxsize[2]*np.array(fzl,dtype=float)
+
+    return cn
 
 @jit(nopython=True,fastmath=True)
 def square_diff(x,c):
@@ -4339,31 +4376,7 @@ def calc_dihedral(r1,r2,r3,r4):
 
 
 
-def rearrange_dict_keys(dictionary):
-    '''
-    Changes the order of the keys to access data
-    Parameters
-    ----------
-    d : Dictionary of dictionaries with the same keys.
-    Returns
-    -------
-    x : Dictionary with the second set of keys being now first.
 
-    '''
-    x = {k2 : {k1:None for k1 in dictionary} for k2 in dictionary[list(dictionary.keys())[0]]}
-    for k1 in dictionary:
-        for k2 in dictionary[k1]:
-            x[k2][k1] = dictionary[k1][k2]
-    return x
-  
-def check_occurances(a):
-    x = set()
-    for i in a:
-        if i not in x:
-            x.add(i)
-        else:
-            raise Exception('{} is more than once in the array'.format(i))
-    return
 
 class maps:
     charge_map = {'CD':-0.266,'C':0.154,'CE':0.164,
@@ -4421,3 +4434,13 @@ def numba_CM(coords,ids,mass,cm):
         ji = ids[i]
         cm[i] = CM(coords[ji],mass[ji])
     return
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def numba_elementwise_minimum(x1,x2):
+    xmin = np.empty_like(x1)
+    for i in prange(x1.shape[0]):
+        if x1[i]<x2[i]:
+            xmin[i] = x1[i]
+        else:
+            xmin[i] = x2[i]
+    return xmin
