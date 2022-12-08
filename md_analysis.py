@@ -127,17 +127,20 @@ class ass():
         return np.intersect1d(k1,k2)
     @staticmethod
     def trunc_at(dold,dnew):
-        common_keys = ass.common_keys(dold, dnew)
         
+        new_key_first = list(dnew.keys())[1]
+        dko = ass.numpy_keys(dold)
+        if len(dold) ==0:
+            return 0
         try:
-            fck = common_keys[1]
+            fa = dko< new_key_first
         except:
-            return float('inf')
+            return 0
         else:
-            ko = ass.numpy_keys(dold)
-            
-            itrunc = np.where(ko==fck)[0][0]
+            dl = dko[fa]
+            itrunc = np.where(dl[-1] == dko)[0][0]
             return itrunc
+    
     @staticmethod
     def clear_logs():
         logs.logger.handlers.clear()
@@ -2135,7 +2138,7 @@ class Analysis_Confined(Analysis):
         
         return ftrain,image_trains
     
-    def get_periodic_distance_from_particle(self,r=None,ids=None):
+    def get_minimum_image_distance_from_particle(self,r=None,ids=None):
         frame = self.current_frame
         
         box = self.get_box(frame)
@@ -3049,8 +3052,8 @@ class Filters():
     def space(self,layers,ids1,ids2,coords,*args):
         #coords = self.get_whole_coords(self.current_frame)
 
-        d1 = self.get_periodic_distance_from_particle(ids = ids1)
-        d2 = self.get_periodic_distance_from_particle(ids =ids2)
+        d1 = self.get_minimum_image_distance_from_particle(ids = ids1)
+        d2 = self.get_minimum_image_distance_from_particle(ids =ids2)
         
         f1 = Filters.filtLayers(layers,d1)
         f2 = Filters.filtLayers(layers,d2)
@@ -3183,7 +3186,7 @@ class Filters():
     
     @staticmethod
     def chain_space(self,layers,chain_cm,*args):
-        d = self.get_periodic_distance_from_particle(chain_cm)
+        d = self.get_minimum_image_distance_from_particle(chain_cm)
         return Filters.filtLayers(layers, d)
     
     @staticmethod
@@ -3213,7 +3216,7 @@ class Filters():
         chain_arg_keys = self.chain_args.keys()
         cads = np.empty(len(chain_arg_keys),dtype=bool)
         degree = np.empty(cads.shape[0],dtype=float)
-        d = self.get_periodic_distance_from_particle(coords)
+        d = self.get_minimum_image_distance_from_particle(coords)
         fd = filt_uplow(d,0,dads)
         for i,args in enumerate(self.chain_args.values()):   
             f = fd[args]
@@ -3531,7 +3534,7 @@ class coreFunctions():
         frame = self.current_frame
         coords = self.get_coords(frame)
         box = self.get_box(frame)
-        d = self.get_periodic_distance_from_particle(coords)
+        d = self.get_minimum_image_distance_from_particle(coords)
         
         
         d_tail = d[args_tail]
