@@ -59,27 +59,42 @@ class logs():
 
 class ass():
     class colors():
-        class dinstictive():                
+        class qualitative():                
             colors4 = ['#e41a1c','#377eb8','#4daf4a','#984ea3']
+            colors5 = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00']
+            colors6 = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33']            
+            colors9 = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33','#a65628','#f781bf','#999999']
+        class diverging():
+            colors6 = ['#d73027','#fc8d59','#fee090','#ffffbf','#91bfdb','#4575b4']
+        class sequential():
+            colors3 = ['#fee0d2','#fc9272','#de2d26']
     beebbeeb = True
-    
-    linestyles = {
-     'loosely dotted':      (0, (1, 3)),
-     'dotted':               (0, (1, 1)),
-     'densely dotted':       (0, (1, 2)),
+    class linestyles():
+        lst_map = {
+            'loosely dotted':      (0, (1, 3)),
+            'dotted':               (0, (1, 1)),
+            'densely dotted':       (0, (1, 2)),
+            
+            'loosely dashed':       (0, (5, 3)),
+            'dashed':               (0, (4, 2)),
+            'densely dashed':       (0, (3, 1)),
 
-     'loosely dashed':       (0, (5, 3)),
-     'dashed':               (0, (4, 2)),
-     'densely dashed':       (0, (3, 1)),
+         'loosely dashdotted':   (0, (5, 3, 1, 3)),
+         'dashdotted':           (0, (4, 2, 1, 2)),
+         'densely dashdotted':    (0, (3, 1, 1, 1)),
 
-     'loosely dashdotted':   (0, (5, 3, 1, 3)),
-     'dashdotted':           (0, (4, 2, 1, 2)),
-     'densely dashdotted':    (0, (3, 1, 1, 1)),
-
-     'dashdotdotted':         (0, (5, 2, 1, 2, 1, 2)),
-     'loosely dashdotdotted': (0, (4, 3, 1,3, 1, 3)),
-     'densely dashdotdotted': (0, (3, 1, 1, 1, 1, 1))}
-    
+         'dashdotdotted':         (0, (5, 2, 1, 2, 1, 2)),
+         'loosely dashdotdotted': (0, (4, 3, 1,3, 1, 3)),
+         'densely dashdotdotted': (0, (3, 1, 1, 1, 1, 1))
+         }
+        lst4 = [lst_map['densely dotted'],lst_map['loosely dotted'],
+              lst_map['densely dashed'],lst_map['loosely dashed']]
+        lst6 = [lst_map['loosely dotted'],
+                lst_map['dotted'],
+                lst_map['dashed'],
+                lst_map['loosely dashdotted'],
+                lst_map['dashdotted'],
+                lst_map['densely dashdotted']]
     @staticmethod
     def try_beebbeeb():
         if ass.beebbeeb:
@@ -113,7 +128,7 @@ class ass():
     @staticmethod
     def trunc_at(dold,dnew):
         common_keys = ass.common_keys(dold, dnew)
-        print(common_keys)
+        
         try:
             fck = common_keys[1]
         except:
@@ -130,7 +145,7 @@ class ass():
         return
     @staticmethod
     def is_dict_of_dicts(data):
-        ks = ass.numpy_keys(data)
+        ks = list(data.keys())
         try:
             v0 = data[ks[0]]
             if type(v0) is dict:
@@ -158,7 +173,7 @@ class ass():
             
             mult_data.update(trunc_data_old)
             data_old = data
-            
+            logs.logger.info('wrapped file {:s}'.format(file))
         mult_data.update(data)
         if ass.is_dict_of_dicts(mult_data):
             mult_data = ass.rearrange_dict_keys(mult_data)
@@ -2120,13 +2135,16 @@ class Analysis_Confined(Analysis):
         
         return ftrain,image_trains
     
-    def get_periodic_distance_from_particle(self,r):
+    def get_periodic_distance_from_particle(self,r=None,ids=None):
         frame = self.current_frame
+        
         box = self.get_box(frame)
-        cm = self.get_particle_cm(self.get_coords(frame))
+        coords = self.get_coords(frame)
+        if r is None:
+            r = coords[ids]
+        cm = self.get_particle_cm(coords)
         d = np.ones(r.shape[0])*10**9
         for L in self.box_add(box):
-            #d = numba_elementwise_minimum(d,self.dfun(r,cm+L))
             d = np.minimum(d,self.dfun(r,cm+L))
         return d
     
@@ -2862,9 +2880,9 @@ class Analysis_Confined(Analysis):
        
         tf2 = perf_counter()
         if prop.lower() !='p2':
-            dynamical_property = {t:p for t,p in zip(xt,args[3])}
+            dynamical_property = {round(t,4):p for t,p in zip(xt,args[3])}
         else:
-            dynamical_property = {t:0.5*(3*p-1) for t,p in zip(xt,args[3])}
+            dynamical_property = {round(t,4):0.5*(3*p-1) for t,p in zip(xt,args[3])}
         tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
@@ -3026,11 +3044,17 @@ class Filters():
     @staticmethod
     def chain_all(self,filt,*args):
         return {'all':np.ones(len(self.chain_args),dtype=bool)}
+    
     @staticmethod
     def space(self,layers,ids1,ids2,coords,*args):
-        rm = 0.5*(coords[ids1] + coords[ids2])
-        d = self.get_periodic_distance_from_particle(rm)
-        return Filters.filtLayers(layers,d)
+        #coords = self.get_whole_coords(self.current_frame)
+
+        d1 = self.get_periodic_distance_from_particle(ids = ids1)
+        d2 = self.get_periodic_distance_from_particle(ids =ids2)
+        
+        f1 = Filters.filtLayers(layers,d1)
+        f2 = Filters.filtLayers(layers,d2)
+        return np.logical_and(f1,f2)
     
     @staticmethod
     def filtLayers(layers,d):
@@ -3647,7 +3671,7 @@ class coreFunctions():
     def vects_t(self,ids1,ids2,filters,dads,vec_t,filt_per_t):
         frame = self.current_frame
         coords = self.get_whole_coords(frame)
-
+        
         time = self.get_time(frame)
         
         
