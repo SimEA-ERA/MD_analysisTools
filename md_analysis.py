@@ -20,6 +20,9 @@ import coloredlogs
 
 
 class logs():
+    '''
+    A class for modifying the loggers
+    '''
     LOGGING_LEVEL = logging.DEBUG
     
     logger = logging.getLogger(__name__)
@@ -58,6 +61,16 @@ class logs():
                         level_styles=levelstyles)
 
 class ass():
+    '''
+    The ASSISTANT class
+    Contains everything that is needed to assist in the data analysis including
+    1) colors for ploting 
+    2) linestyles
+    3) functions for manipulating data in dictionaries
+    4) The wrapper for using the same function and multyple trajectories on the Dynamic analysis
+    5) printing and logger functions e.g. print_time, clear_logs 
+    
+    '''
     class colors():
         class qualitative():                
             colors4 = ['#e41a1c','#377eb8','#4daf4a','#984ea3']
@@ -283,11 +296,12 @@ class ass():
                 raise Exception('{} is more than once in the array'.format(i))
         return     
     
-    
-@jit(nopython=True,fastmath=True)
+
+@jit(nopython=True,fastmath=True,parallel=True)
 def distance_kernel(d,coords,c):
+    #Kernels for finding distances
     nd = coords.shape[1]
-    for i in range(d.shape[0]):
+    for i in prange(d.shape[0]):
         d[i] = 0
         for j in range(nd):
             rel = coords[i][j]-c[j]
@@ -295,8 +309,10 @@ def distance_kernel(d,coords,c):
         d[i] = d[i]**0.5
     return 
 
+
 @jit(nopython=True,fastmath=True)
 def smaller_distance_kernel(d1,d2,c1,c2):
+    #Kernel for finding the minimum distance between two coords
     for i in range(c1.shape[0]):
         distance_kernel(d2,c2,c1[i])
         d1[i] = 10000000000
@@ -307,6 +323,7 @@ def smaller_distance_kernel(d1,d2,c1,c2):
 
 @jit(nopython=True,fastmath=True)
 def running_average(X,every=1):
+    # curnel to find running average
     n = X.shape[0]
     xrun_mean = np.zeros(n)
     for j in range(0,len(X),every):
@@ -316,6 +333,7 @@ def running_average(X,every=1):
     return xrun_mean
 
 def moving_average(a, n=10) :
+    #moving average kernel
     mov = np.empty_like(a)
     
     n2 = int(n/2)
@@ -332,6 +350,7 @@ def moving_average(a, n=10) :
     return mov
 
 def block_average(a, n=100) :
+    #block average kernel
     bv = np.empty(int(a.shape[0]/n),dtype=float)
     for i in range(bn.shape[0]):
         x = a[i*n:(i+1)*n]
@@ -339,6 +358,7 @@ def block_average(a, n=100) :
     return bv
 
 def block_std(a, n=100) :
+    #block standard diviation
     bstd = np.empty(int(a.shape[0]/n),dtype=float)
     for i in range(bn.shape[0]):
         x = a[i*n:(i+1)*n]
@@ -347,7 +367,10 @@ def block_std(a, n=100) :
 
 
 class Energetic_Analysis():
-    
+    '''
+    class to analyze gromacs energy files
+    Currently needs improvement
+    '''    
     def __init__(self,file):
         self.data_file = file
         if self.data_file[-4:] =='.xvg':
@@ -476,6 +499,11 @@ class Analytical_Expressions():
     
 @jitclass
 class Analytical_Functions():
+    '''
+    This class is used exclucively to add hydrogens on correct locations
+    and be able to compute all atom properties like dipole momement
+    Currently works well for PB
+    '''
     def __init__(self):
         pass
 
@@ -628,6 +656,12 @@ class Analytical_Functions():
         return rh
 
 class add_atoms():
+    '''
+    This class is used to add atoms to the system
+    Currently works well to add hydrogens to PB
+    It should be easy to extend adding hydrogens to other polymers
+    and other kind of atoms maybe
+    '''
     def __init__(self):
         pass
     
@@ -853,6 +887,12 @@ class add_atoms():
         return new_atoms_info
 
 class Box_Additions():
+    '''
+    Depending on the confinemnt type one of these functions
+    will be called.
+    These class functions are used to calculate 
+    the minimum image distance
+    '''
     @staticmethod
     def zdir(box):
         return [box[2],0,-box[2]]
@@ -874,6 +914,12 @@ class Box_Additions():
         return [0]
         
 class Distance_Functions():
+    '''
+    Depending on the confinemnt type one of these functions
+    will be called.
+    These class functions are used to calculate 
+    the Distance between coords and a center position (usually particle center of mass is passed)
+    '''
     @staticmethod
     def zdir(self,coords,zc):
         return np.abs(coords[:,2]-zc)
@@ -912,11 +958,18 @@ class Distance_Functions():
     @staticmethod
     def zcylindrical(self,coords,c):
          d = Distance_Functions.distance(coords[:,0:2],c[0:2])
+         #r = coords[:,0:2]-c[0:2] ; d = np.sqrt(np.sum(r*r,axis=1))
          d = self.global_cylindrical_radius-d
          #logs.logger.debug('{:d} and {:d}'.format(d.shape[0],c.shape[0]))
          return d
      
 class bin_Volume_Functions():
+    '''
+    Depending on the confinemnt type one of these functions
+    will be called.
+    These class functions are used to calculate 
+    the volume of each bin when needed (e.g. for density profile calculations) 
+    '''
     @staticmethod
     def zdir(self,box,bin_low,bin_up):
         binl = bin_up-bin_low
@@ -948,7 +1001,15 @@ class bin_Volume_Functions():
         return  v
     
 class Periodic_image_Functions():
-    #functions return True for bridge
+    '''
+    Depending on the confinemnt type one of these functions
+    will be called.
+    These class functions distinguish loops from bridges 
+    by checking if the one end is on the image and the other on the "real" particle
+    Needs a more robust implementation
+    return True for bridge
+    '''
+    
     @staticmethod
     def zdir(self,r0,re,dads):
         return abs(re[2]-r0[2]) > dads
@@ -968,7 +1029,14 @@ class Periodic_image_Functions():
         return False
     
 class Different_Particle_Functions():
-    #functions return True for bridge
+    '''
+    Depending on the confinemnt type one of these functions
+    will be called.
+    These class functions distinguish loops from bridges 
+    by checking if one end is in one particle and another in other
+    Needs to be checked and a robust implementation
+    return True for bridge
+    '''
     @staticmethod
     def core_zyx_dir(d,r0,re,dads,CMs):
         x0=r0[d]
@@ -1000,6 +1068,15 @@ class Different_Particle_Functions():
 
 
 class Center_Functions():
+    '''
+    Depending on the confinemnt type one of these functions
+    will be called.
+    returns the nessary coordinates of the center. 
+    For example for confinement of flat surfaces on the z-direction (zdir)
+    it returns just the z coordinate.
+    For cylindrical on z returns the xy directions
+    This is necessary to broadcast correctly and fast the relevant distances within the algorithm
+    '''
     @staticmethod
     def zdir(c):
         return c[2]
@@ -1017,7 +1094,11 @@ class Center_Functions():
         return c
     
 class unit_vector_Functions():
-    
+    '''
+    Depending on the confinemnt type one of these functions
+    will be called.
+    A unit vector for computing bond order is defined
+    '''
     @staticmethod
     def zdir(r,c):
         uv = np.zeros((r.shape[0],3))
@@ -1046,10 +1127,12 @@ class unit_vector_Functions():
         return uv
     
 class Analysis:
-    
+    '''
+    The mother class. It's for simple polymer systems not confined ones
+    '''
     def __init__(self,
-                 trajectory_file, # gro for now
-                 connectivity_info, #itp or mol2
+                 trajectory_file, # gro/trr for now
+                 connectivity_info, #itp
                  gro_file = None,
                  memory_demanding=False,
                  types_from_itp=True):
@@ -1058,7 +1141,13 @@ class Analysis:
         self.connectivity_info = connectivity_info
         self.memory_demanding = memory_demanding
         self.types_from_itp = types_from_itp
-        
+        '''
+        trajectory_file: the file to analyze
+        'connectivity_info': itp or list of itps. From the bonds it finds angles and dihedrals
+        'gro_file': one frame gro file to read the topology (can be extended to other formats). It reads molecule name,molecule id, atom type
+        memory_demanding: If True each time we loop over frames, these are readen from the disk and are not stored in memory
+        types_from_itp: if different types excist in itp and gro then the itp ones are kept
+        '''
         
         
         if '.gro' == trajectory_file[-4:]:
@@ -1093,7 +1182,11 @@ class Analysis:
         return 
     
     def analysis_initialization(self):
-        
+        '''
+        Finds some essential information for the system and stores it in self
+        like angles,dihedrals
+        Also makes some data manipulation that might be used later
+        '''
         t0 = perf_counter()
         #Now we want to find the connectivity,angles and dihedrals
         
@@ -1526,6 +1619,9 @@ class Analysis:
         return 
     
     def charge_from_maps(self):
+        '''
+        Updates a dictionary which contains charges for elements from the maps class
+        '''
         self.charge_map.update(maps.charge_map)
         return
     
@@ -1742,7 +1838,18 @@ class Analysis:
             
     
     def unwrap_coords(self,coords,box):   
+        '''
+        Do not trust this function. Works only for linear polymers
+        Parameters
+        ----------
+        coords : 
+        box : 
 
+        Returns
+        -------
+        unc : Unrwap coordinates.
+
+        '''
         unc = coords.copy()
         b2 =  box/2
         k0 = self.sorted_connectivity_keys[:,0]
@@ -1763,6 +1870,22 @@ class Analysis:
     
 
     def loop_trajectory(self,fun,args):
+        '''
+        It's a Wrapper for looping over trajectories
+        It takes a "core" function and it's arguments
+        Then it loops over all trajectory calling the same
+        function with it's arguments
+
+        Parameters
+        ----------
+        fun : Function
+        args : tuple of function arguments
+
+        Returns
+        -------
+        nframes : the number of frames it had looped
+        '''
+        
         funtocall = getattr(coreFunctions,fun)
         if len(self.timeframes) == 0 or self.memory_demanding:
             with self.traj_opener(*self.traj_opener_args) as ofile:
@@ -1786,6 +1909,19 @@ class Analysis:
             return 0
     
     def cut_timeframes(self,num_start=None,num_end=None):
+        '''
+        Used to cut the trajectory
+
+        Parameters
+        ----------
+        num_start : int, frame the trajectory starts
+        num_end :  int, frame the trajectory ends
+
+        Returns
+        -------
+        None.
+
+        '''
         if num_start is None and num_end is None:
             raise Exception('Give either a number to cut from the start or from the end for the timeframes dictionary')
         if num_start is not None:
@@ -1819,7 +1955,36 @@ class Analysis:
     
     def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
                                density='number'):
-        
+        '''
+        Used to calculate pair distribution functions between two atom types
+        Could be the same type
+
+        Parameters
+        ----------
+        binl : FLOAT
+            Binning legth.
+        dmax : float
+            maximum distance to calculate.
+        type1 : string 
+            . The default is None.
+        type2 : string
+            . The default is None.
+        density : string
+            DESCRIPTION. The default is 'number'.
+            'number' is to return number density [ 1/nm^3 ]
+            'probability' returns probability density
+
+        Raises
+        ------
+        NotImplementedError
+            DESCRIPTION.
+
+        Returns
+        -------
+        pair_distribution : TYPE
+            DESCRIPTION.
+
+        '''
         t0 = perf_counter()   
         
         if density not in ['number','probability']:
@@ -1893,6 +2058,19 @@ class Analysis:
         return coords
     
     def bond_distance_matrix(self,ids):
+        '''
+        takes an array of atom ids and finds how many bonds 
+        are between each atom id with the rest on the array
+
+        Parameters
+        ----------
+        ids : numpy array of int
+
+        Returns
+        -------
+        distmatrix : numpy array shape = (ids.shape[0],ids.shape[0])
+        
+        '''
         t0 = perf_counter()
         size = ids.shape[0]
         distmatrix = np.zeros((size,size),dtype=int)
@@ -1904,6 +2082,23 @@ class Analysis:
         return distmatrix
     
     def bond_distance_id_to_ids(self,i,ids):
+        '''
+        takes an atom id and find the number of bonds between it 
+        and the rest of ids. 
+        If it is not connected the returns a very
+        large number
+        
+        Parameters
+        ----------
+        i : int
+        ids : array of int
+
+        Returns
+        -------
+        nbonds : int array of same shape as ids
+            number of bonds of atom i and atoms ids
+
+        '''
         chunk = {i}
         n = ids.shape[0]
         nbonds = np.ones(n)*(-1)
@@ -1925,7 +2120,22 @@ class Analysis:
 
                 
     def ids_nbondsFrom_args(self,ids,args):
-        
+        '''
+        This function finds the minimum number of bonds
+        that each atom id in ids has from args.
+        If an id is not connected in any way with any of the args then
+        a very large number is return within the nbonds array
+
+        Parameters
+        ----------
+        ids : int array
+        args : int array
+
+        Returns
+        -------
+        nbonds : int array of shape as ids
+
+        '''
         n = ids.shape[0]
         nbonds = np.ones(n)*10**10
         
@@ -1958,6 +2168,18 @@ class Analysis:
         return nbonds
     
     def append_timeframes(self,object2):
+        '''
+        Used to append one trajectory to another
+        !It assumes that time of the second starts at the end of the first
+        Parameters
+        ----------
+        object2 : A second object of the class Analysis
+
+        Returns
+        -------
+        None.
+
+        '''
         tlast = self.get_time(self.nframes-1)
         nfr = self.nframes
         for i,frame in enumerate(object2.timeframes):
@@ -1966,7 +2188,10 @@ class Analysis:
         return
 
 class Analysis_Confined(Analysis):
-    
+    '''
+    Class for performing the analysis of confined systems
+    Includes functions for Structure and Dynamics
+    '''
     
     def __init__(self, trajectory_file,   
                  connectivity_info,       # itp or mol2
@@ -2058,7 +2283,14 @@ class Analysis_Confined(Analysis):
         return coords
    
     def confined_system_initialization(self):
-        
+        '''
+        IMPORTANT Function
+        This function gets the prober functions depending
+        on the confinment type from a number of classes. 
+        This is done in initialization to increase speed and modularity
+        at the same time        
+
+        '''
         t0 = perf_counter()
         self.find_particle_filt()
         self.nparticle = self.mol_ids[self.particle_filt].shape[0]
@@ -2069,6 +2301,7 @@ class Analysis_Confined(Analysis):
         self.get_masses()
         self.unique_atom_types = np.unique(self.at_types)
         
+        #Getting the prober functions
         self.dfun = self.get_class_function(Distance_Functions,self.conftype)
         self.box_add = self.get_class_function(Box_Additions,self.conftype)
         self.volfun = self.get_class_function(bin_Volume_Functions,self.conftype)
@@ -2076,6 +2309,7 @@ class Analysis_Confined(Analysis):
         self.is_periodic_image = self.get_class_function(Periodic_image_Functions,self.conftype)
         self.is_different_particle = self.get_class_function(Different_Particle_Functions,self.conftype)
         self.unit_vectorFun = self.get_class_function(unit_vector_Functions,self.conftype)
+        ##########
         
         self.find_args_per_residue(self.pol_filt,'chain_args')
         self.find_connectivity_per_chain()
@@ -2112,6 +2346,18 @@ class Analysis_Confined(Analysis):
 
 
     def get_particle_cm(self,coords):
+        '''
+        gets particles center of mass
+
+        Parameters
+        ----------
+        coords : system coordinates
+
+        Returns
+        -------
+        cm : center of mass (the number of coordinates depends on the confinment type)
+
+        '''
         cm =self.centerfun(CM( coords[self.particle_filt], 
                                self.atom_mass[self.particle_filt]))
         return cm
@@ -2163,6 +2409,22 @@ class Analysis_Confined(Analysis):
         return ids1,ids2
     
     def find_vector_ids(self,topol_vector,exclude=[]):
+        '''
+        
+
+        Parameters
+        ----------
+        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
+            Used to find e.g. the segmental vector ids
+        exclude : TYPE, optional
+            DESCRIPTION. The default is [].
+
+        Returns
+        -------
+        ids1 : int array of atom ids
+        ids2 : int array of atom ids
+
+        '''
         #t0 = perf_counter()
         ty = type(topol_vector)
         if ty is list or ty is tuple:
@@ -2179,9 +2441,7 @@ class Analysis_Confined(Analysis):
    
     def check_if_ends_belong_to_periodic_image(self,istart,iend,periodic_image_args):
         
-        
-        #perimage = self.is_periodic_image(self,r0,re,dads)
-        
+        #used to distinguish loops from bridges
         e = iend in periodic_image_args 
         s = istart in periodic_image_args
         
@@ -2198,7 +2458,7 @@ class Analysis_Confined(Analysis):
         return self.is_different_particle(self,r0,re,dads,CMs)
    
     def is_bridge(self,coords,istart,iend,dads,periodic_image_args):
-        
+        # used to distinguish loops from bridges
         if self.nparticles !=1:
             same_particle = self.check_if_ends_belong_to_different_particle(coords, istart, iend,dads,)
         else:
@@ -2213,6 +2473,21 @@ class Analysis_Confined(Analysis):
         return False
     
     def get_filt_train(self,dads,coords,box):
+        '''
+        
+
+        Parameters
+        ----------
+        dads : float. below this distance everything is adsorbed
+        coords : system coords
+        box : systems box
+
+        Returns
+        -------
+        ftrain : bool array (shape = coords.shape[0])
+        image_trains : bool_array() (shape = coords.shape[0])
+
+        '''
         ftrain = False
        
         for L in self.box_add(box):
@@ -2228,6 +2503,24 @@ class Analysis_Confined(Analysis):
         return ftrain,image_trains
     
     def get_minimum_image_distance_from_particle(self,r=None,ids=None):
+        '''
+        Give either r or ids
+        If you give r then the 
+        minimum image distance of r from particle will be found
+        
+        Parameters
+        ----------
+        r : coordinates (float array shape=(n,3) ).
+        ids : int array
+
+        Returns
+        -------
+        d : minimum image distance (float array shape = (n,) )
+            Depends on the confinment type
+            e.g. for flat surfaces parallel on the xy plane 
+            only the z direction is considered
+
+        '''
         frame = self.current_frame
         
         box = self.get_box(frame)
@@ -2241,7 +2534,30 @@ class Analysis_Confined(Analysis):
         return d
     
     def conformations(self,dads,coords):
-        
+        '''
+        Returns the ids of trains,loops,tails 
+        and bridges given the coords
+
+        Parameters
+        ----------
+        dads : float 
+            adsorption distance
+        coords : coordinates (float array shape=(n,3) )
+
+        Returns
+        -------
+        ads_chains : int array
+            ids of adsorbeds chains.
+        args_train : int array
+            ids of trains
+        args_tail : int array
+            ids of tails
+        args_loop : int array
+            ids of loops
+        args_bridge : int arry
+            ids of bridges
+
+        '''
         box = self.get_box(self.current_frame)
         
         ftrain,image_trains = self.get_filt_train(dads, coords, box)
@@ -2359,7 +2675,19 @@ class Analysis_Confined(Analysis):
         
         return ads_chains,args_train,args_tail,args_loop,args_bridge
     
-    def conf_chunks(self,args):
+    def connected_chunks(self,args):
+        '''
+        takes a set of ids and finds the connected chunks from it
+        It is very usefull to find conformation size distributions
+        Parameters
+        ----------
+        args : int array of atom ids
+        
+        Returns
+        -------
+        chunks : list of sets. Each set has the ids of the connected chunks
+
+        '''
         #t0 = perf_counter()
         set_args = set(args)
         chunks = []
@@ -2392,14 +2720,49 @@ class Analysis_Confined(Analysis):
             set_args.difference_update(new_set_a)
         
             #aold = a
-        #ass.print_time(perf_counter()-t0,'conf_chunks')
+        #ass.print_time(perf_counter()-t0,'connected_chunks')
         return chunks
     ############### End of Conformation Calculation Supportive Functions #####
     
     ######## Main calculation Functions for structural properties ############      
     
     def calc_density_profile(self,binl,dmax,mode='mass',option='',flux=None):
-        
+        '''
+        Master function to compute the density profile
+
+        Parameters
+        ----------
+        binl : float
+            binningl legth
+        dmax : float
+            maximum distance to calculate
+        mode : string
+            'mass' for mass density
+            'number' for number density
+        option : string
+            '__pertype' decomposes the density to each atomic type contribution
+            '__2side' computes the profile to both sides.
+                Only valid for one directional confinement (e.g. zdir) 
+        flux : bool
+            if True it calculates density fluxuations
+            by first calling this function to compute the density
+            density fluctuations are computed by the standard deviation
+
+        Returns
+        -------
+        density_profile : dictionary containing 
+            discription :  key  |  value
+            the distance: 'd'  | float array 
+            the density: 'rho' | float array
+            density of  'type1' | float array1
+            density of 'type2' | float array2
+                          .
+                          .
+                          .
+            density of 'typen' | float arrayn
+            density fluctuations: 'rho_flux' | float array
+
+        '''
         t0 = perf_counter()
         
         #initialize
@@ -2470,6 +2833,31 @@ class Analysis_Confined(Analysis):
 
     
     def calc_P2(self,binl,dmax,topol_vector):
+        '''
+        Calculates P2 bond parameter
+        The unit vector is predifined by the type of confinement
+        
+        Parameters
+        ----------
+        binl : float
+            binning legth
+        dmax : float
+            maximum distance.
+        topol_vector : int or list of atom types
+            int is 2,3,4 for 1-2, 1-3, 1-4 bond vectors respectively
+            with a list of atom types it will look 
+            the connectivity for len(topol_vector) ==2
+            the angles for len(topol_vector) ==3
+            the dihedrals for len(topol_vector) ==4
+            and it will get the given vectors
+
+        Returns
+        -------
+        orientation : dictionary containing
+        discription :  key  |  value
+        the distance: 'd'  | float array
+        the function: 'P2' | float array
+        '''
         t0 = perf_counter()
 
         bins  =   np.arange(0, dmax, binl)
@@ -2502,7 +2890,37 @@ class Analysis_Confined(Analysis):
         
 
     def calc_conformation_density(self,dads,dmax,binl,option='__densityAndstats'):
-        
+        '''
+        calculates mass and  probability density per conformation
+
+        Parameters
+        ----------
+        dads : float
+            adsorption distance
+        dmax : float
+            maximum distance
+        binl : float
+            binning length
+        option : what to return
+            '__densityAndstats' returns both density and stats
+            '__stats' return only stats
+            '__density' return only density
+
+        Returns
+        -------
+        dens : dictionary containing             
+            discription :  key  |  value
+            the distance: 'd'  | float array
+            conformation mass  density keys 
+            -->mtail,mloop and mbridge
+            conformation probability density keys
+            --> ntail, nloop and nbridge
+            the values are float arrays
+        stats : disctionary 
+        statistics of conformations and adsorbed chains
+        values are floats
+
+        '''
         t0 = perf_counter()
         
         #initialize
@@ -2548,6 +2966,22 @@ class Analysis_Confined(Analysis):
         return part_size
         
     def calc_dihedral_distribution(self,dads,dmax,binl):
+        '''
+        Computes dihedral distributions as a function of distance
+        Parameters
+        ----------
+        dads : float
+          adsorption distance
+        dmax : float
+            maximum distance
+        binl : float
+            binning length
+
+        Returns
+        -------
+        dihedral_distr : dictionary
+
+        '''
         t0 = perf_counter()
         
         dlayers = self.get_layers(dads,dmax,binl)
@@ -2568,7 +3002,23 @@ class Analysis_Confined(Analysis):
         return dihedral_distr
     
     def calc_chain_characteristics(self,dmin,dmax,binl):
-        
+        '''
+        Chain characteristics as a function of distance of chain center of mass
+        Parameters
+        ----------
+        dmin : float
+            minimum distance
+        dmax : float
+            maximumum distance
+        binl : float
+            binning length
+
+        Returns
+        -------
+        chain_chars : dictionary with keys the characteristics in strings
+            and values float arrays. Also the distance is included
+
+        '''
         t0 = perf_counter()
         
         bins = np.arange(dmin,dmax,binl)
@@ -2602,6 +3052,25 @@ class Analysis_Confined(Analysis):
     def vects_per_t(self,ids1,ids2,
                          filters={},
                          dads=0):
+        '''
+        Takes two int arrays  of atom ids and finds 
+        the vectors per time between them
+
+        Parameters
+        ----------
+        ids1 : int array of atom ids 1
+        ids2 : int array of atom ids 2
+        filters : dictionary of filters. See filter documentation
+        dads : float
+            adsorption distance
+
+        Returns
+        -------
+        vec_t : dictionary of keys the time and values the vectors in numpy array of shape (n,3)
+        filt_per_t : dictionary of keys the filt name and values
+            dictionary of keys the times and boolian arrays
+
+        '''
         t0 = perf_counter()
         vec_t = dict()
         filt_per_t = dict()
@@ -2616,6 +3085,18 @@ class Analysis_Confined(Analysis):
         return vec_t,filt_per_t
 
     def chains_CM(self,coords):
+        '''
+        Given the coordinates finds the chains center of mass
+
+        Parameters
+        ----------
+        coords : system coordinates
+
+        Returns
+        -------
+        chain_cm : float array (nchains,3)
+
+        '''
         chain_arg_keys = self.chain_args.keys()
         
         chain_cm = np.empty((len(chain_arg_keys),3),dtype=float)
@@ -2626,6 +3107,20 @@ class Analysis_Confined(Analysis):
         return chain_cm
 
     def segs_CM(self,coords,segids):
+        '''
+        
+        Given the coordinates and the segmental ids finds the segmental center of mass
+        
+        Parameters
+        ----------
+        coords : system coordinates 
+        segids : int array (nsegments,nids_per_segment)
+
+        Returns
+        -------
+        segcm : float array (nsegments,3)
+
+        '''
         n = segids.shape[0]
         segcm = np.empty((n,3),dtype=float)
         numba_CM(coords,segids,self.atom_mass,segcm)
@@ -2634,6 +3129,26 @@ class Analysis_Confined(Analysis):
 
     def calc_dihedrals_t(self,dih_type,
                              dads=0,filters={'all':None}):
+        '''
+        Dihedrals per time
+
+        Parameters
+        ----------
+        dih_type : list of 4 strings
+            dihedral type
+        dads : float
+            adsorption distance
+        filters : dictionary
+            see filters documentation.
+
+        Returns
+        -------
+        dihedrals_t : dictionary 
+        keys: times
+        values: float array (ndihedrals,)
+        filt_per_t : see filters documentation
+
+        '''
         t0 = perf_counter()
         
         dihedrals_t = dict()
@@ -2657,6 +3172,25 @@ class Analysis_Confined(Analysis):
 
     def calc_Ree_t(self,filters,
                        dads=0):
+        '''
+        End to End vectors as a function of time
+
+        Parameters
+        ----------
+        filters : dictionary
+            see filter documentation
+        dads : adsorption distance
+            adsorption distance
+
+        Returns
+        -------
+        Ree_t : dictionary
+            keys times
+            values: float arrays (nchains,3)
+        filt_per_t : dictionary
+            see filter documentation
+
+        '''
         t0 = perf_counter()
         #filters = {'chain_'+k: v for k,v in filters.items()}
         chain_is = []
@@ -2687,6 +3221,25 @@ class Analysis_Confined(Analysis):
         return
     
     def calc_chain_dipole_moment_t(self,filters={'all':None},dads=1):
+        '''
+        Chain dipole moment as a function of t
+
+        Parameters
+        ----------
+        filters : dictionary
+            see filter documentation.
+        dads : float
+            adsorption distance.
+
+        Returns
+        -------
+        dipoles_t : dictionary
+            keys: times
+            values: float array (nchains,3)
+        filters_t : dictionary
+            see filter documentation
+
+        '''
         t0 = perf_counter()
         
         filters = {'chain_'+k : v for k,v in filters.items()}
@@ -2708,6 +3261,24 @@ class Analysis_Confined(Analysis):
         return dipoles_t,filters_t
     
     def find_segmental_ids(self,ids1,ids2,segbond):
+        '''
+        Used to find the segmental ids
+        Works for linear polymers at the moment
+        
+        Parameters
+        ----------
+        ids1 : int array
+            atom ids 1
+        ids2 : int array
+            atom ids 2
+        segbond : tuple of two stings 
+            the type of bond that connects the segments 
+        Returns
+        -------
+        seg_ids_numpy : int array (nsegments,nids_per_segment)
+            an array with the ids of each segment
+
+        '''
         t0 = perf_counter()
         conn_cleaned = {k:v for k,v in self.connectivity.items()
                         if v != ('C','C')
@@ -2740,6 +3311,29 @@ class Analysis_Confined(Analysis):
     def calc_segmental_dipole_moment_t(self,topol_vector,
                                        segbond,filters={'all':None},
                                        dads=1):
+        '''
+        Calculates dipole moment vectors as a function of time
+
+
+        Parameters
+        ----------
+        topol_vector : list of 4 strings
+            finds the segment edge ids
+        segbond : tuple of 2 strings
+            the bond type connecting the segments
+        filters : dictionary
+            see filter documentation
+        dads : float
+            adsorption distance
+        Returns
+        -------
+        dipoles_t : dictionary
+            keys: times
+            values: float array (nvector,3)
+        filters_t : dictionary
+            see filter documentatin
+
+        '''
         t0 = perf_counter()
         
         if not hasattr(self,'partial_charge'):
@@ -2769,6 +3363,29 @@ class Analysis_Confined(Analysis):
     def calc_segmental_dipole_moment_correlation(self,topol_vector,
                                        segbond,filters={'all':None},
                                        dads=1.025):
+        '''
+        Computes static correlation between segments
+        
+         Parameters
+        ----------
+        topol_vector : list of 4 strings
+            finds the segment edge ids
+        segbond : tuple of 2 strings
+            the bond type connecting the segments
+        filters : dictionary
+            see filter documentation
+        dads : float
+            adsorption distance
+
+        Returns
+        -------
+        correlations : dictionary
+            keys   : depent on filter 
+            values : dictionary
+                    keys: number of bonds connecting the segments
+                    values: static correlation
+
+        '''
         t0 = perf_counter()
         dipoles_t,filters_t = self.calc_segmental_dipole_moment_t(topol_vector,
                                        segbond,filters,dads=1)
@@ -2802,6 +3419,28 @@ class Analysis_Confined(Analysis):
         return correlations
     
     def calc_chainCM_t(self,filters={'all':None}, dads=1,option='',coord_type=None):
+        '''
+        Computes chains center of mass as a function of time
+        Parameters
+        ----------
+        filters : dictionary
+            see filter documentation
+        dads : float
+            adsorption distance
+        option : string
+            for feature use
+        coord_type : TYPE, optional
+            DESCRIPTION. The default is None.
+
+        Returns
+        -------
+        vec_t : dictionary
+            keys: times
+            values: float array (nchains,3)
+        filt_per_t : dictionary
+            see filter documentation
+
+        '''
         t0 = perf_counter()
         filters = {'chain_'+k: v for k,v in filters.items()} #Need to modify when considering chains
         
@@ -2821,6 +3460,31 @@ class Analysis_Confined(Analysis):
     
     def calc_segCM_t(self,topol_vector,segbond,
                      filters={'all':None}, dads=1,option=''):
+        '''
+        Returns the segment center of mass as a function of time
+
+        Parameters
+        ----------
+        topol_vector : list of 4 strings
+            finds the segment edge ids
+        segbond : tuple of 2 strings
+            the bond type connecting the segments
+        filters : dictionary
+            see filter documentation
+        dads : float
+            adsorption distance
+        option: string
+            for feature use
+
+        Returns
+        -------
+        vec_t : dictionary
+            keys: times
+            values: float array (nsegments,3)
+        filt_per_t : dictionary
+            see filter documentation
+
+        '''
         t0 = perf_counter()
      
         ids1,ids2 = self.find_vector_ids(topol_vector)
@@ -2842,6 +3506,25 @@ class Analysis_Confined(Analysis):
         return vec_t,filt_per_t
     
     def calc_conformations_t(self,dads,option=''):
+        '''
+        computes conformations as a function of time
+
+        Parameters
+        ----------
+        dads : float
+            adsorption distance.
+        option : string
+            for feature use
+
+        Returns
+        -------
+        confs_t : dictionary
+            keys: strings (conformations)
+            values: dictionary
+                keys: times
+                values: number of atoms on the specific conformation
+
+        '''
         t0 = perf_counter()
         
         confs_t = dict()
@@ -2856,7 +3539,25 @@ class Analysis_Confined(Analysis):
     
     def calc_segmental_vectors_t(self,topol_vector,filters=None,
                                      dads=0):
-       
+       '''
+        Calculates 1-2,1-3 or 1-4 segmental vectors as a function of time
+        Parameters
+        ----------
+        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
+            Used to find e.g. the segmental vector ids
+        filters : dictionary.
+            see filters documentation
+        dads : float
+            adsorption distance
+
+        Returns
+        -------
+        segvec_t : dictionary
+            keys: times
+            values: float array (nsegments,3)
+        filt_per_t : dictionary
+            see filter documentation
+        '''
         ids1,ids2 = self.find_vector_ids(topol_vector)
         
         t0 = perf_counter()
@@ -2870,7 +3571,23 @@ class Analysis_Confined(Analysis):
         return segvec_t,filt_per_t
     
     def calc_adsorbed_segments_t(self,topol_vector,dads):
-        
+        '''
+        Calculates adsorbed segments as a function of time
+
+        Parameters
+        ----------
+        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
+            Used to find e.g. the segmental vector ids
+        dads : float
+            adsorption distance.
+
+        Returns
+        -------
+        dictionary
+            keys: times
+            values: bool array (nsegments,)
+
+        '''
         t0 = perf_counter()
         
         ids1,ids2 = self.find_vector_ids(topol_vector)
@@ -2881,9 +3598,25 @@ class Analysis_Confined(Analysis):
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return adsorbed_segments_t[(0,dads)]
     
-
     
     def init_xt(self,xt,dtype=float):
+        '''
+        takes a dictionary of keys times and values some array
+        and converts it to numby
+
+        Parameters
+        ----------
+        xt : dictionary
+            keys: times
+            values: array
+        dtype : type
+            type of the array.
+
+        Returns
+        -------
+        x_nump : numpy array of type dtype
+
+        '''
         x0 =xt[0]
         nfr = len(xt)
         shape = (nfr,*x0.shape)
@@ -2895,12 +3628,53 @@ class Analysis_Confined(Analysis):
         return  x_nump
     
     def init_prop(self,xt):
+        '''
+        Allocates the arrays to fill the dynamical or kinetic property
+        that will be calculated
+
+        Parameters
+        ----------
+        xt : dictionary
+            keys: times
+            values: array
+            It is the input.
+
+        Returns
+        -------
+        Prop_nump : float array
+        nv : float array, is used as a counter
+        '''
         nfr = len(xt)
         Prop_nump = np.zeros(nfr,dtype=float)
         nv = np.zeros(nfr,dtype=float)
         return Prop_nump,nv
   
     def get_Dynamics_inner_kernel_functions(self,prop,filt_option,weights_t):
+        '''
+        gets the options to set up the prober functions for
+        the Dynamics kernel
+
+        Parameters
+        ----------
+        prop : string
+            P1: p1 dynamics
+            P2: p2 dynamics
+            MSD: mean square displacement
+            
+        filt_option : string
+            simple: consider the population based on time origin
+            strict: consider the population based on time origin and  time t
+            change: consider the population based on time origin and changed on time t
+        weights_t : dictionary
+            keys: time
+            values: float array (total population,)
+        Returns
+        -------
+        funcs : the main kernel function, 
+                the function which sets the arguments
+                the inner function
+
+        '''
         mapper = {'p1':'costh_kernel',
                   'p2':'cos2th_kernel',
                   'msd':'norm_square_kernel'}
@@ -2931,7 +3705,43 @@ class Analysis_Confined(Analysis):
   
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
                  filt_option='simple', block_average=False):
+        '''
         
+
+        Parameters
+        ----------
+        prop : string
+            P1: p1 dynamics
+            P2: p2 dynamics
+            MSD: mean square displacement
+        xt : dictionary
+            keys: times
+            values: vector array (total population,nd) where nd =1,2,3
+            It is the input.
+
+        filt_t : dictionary
+            keys: times
+            values: boolean array
+        weights_t : dictionary
+            keys: time
+            values: float array (total population,)
+        filt_option : string
+            simple: consider the population based on time origin
+            strict: consider the population based on time origin and  time t
+            change: consider the population based on time origin and changed on time t
+
+        block_average : bool
+            Ways of averaginf
+            True  <  < >|population  >|time origins
+            False < >|population,time origins
+
+        Returns
+        -------
+        dynamical_property : dictionary
+            keys: time
+            values: float
+
+        '''
         tinit = perf_counter()
         
         Prop_nump,nv = self.init_prop(xt)
@@ -2983,7 +3793,22 @@ class Analysis_Confined(Analysis):
         return dynamical_property
     
     def get_Kinetics_inner_kernel_functions(self,wt):
+        '''
         
+
+        Parameters
+        ----------
+        wt :  dictionary
+            keys: time
+            values: float array (total population,)
+
+        Returns
+        -------
+        returns function to call in kinetics kernel,
+                function to set the arguments
+        
+
+        '''
         if wt is None:
             func_args = 'get__args'
             func_name = 'Kinetics_inner__kernel'
@@ -2996,7 +3821,27 @@ class Analysis_Confined(Analysis):
         return globals()[func_name],globals()[func_args]
     
     def Kinetics(self,xt,wt=None,block_average=False):
-        
+        '''
+
+        Parameters
+        ----------
+        xt : dictionary
+            keys:times
+            values: boolean array (total population,)
+        wt : dictionary
+            keys: time
+            values: float array (total population,)
+        block_average : bool
+            Ways of averaginf
+            True  <  < >|population  >|time origins
+            False < >|population,time origins
+
+        Returns
+        -------
+        kinetic_property :dictionary
+            keys: time
+            values: float (it represents the percentage of state change)
+        '''
         tinit = perf_counter()
         
         Prop_nump,nv = self.init_prop(xt)
@@ -3022,7 +3867,26 @@ class Analysis_Confined(Analysis):
         return kinetic_property
     
     def get_TACF_inner_kernel_functions(self,prop,filt_option,weights_t):
+        '''
         
+
+        Parameters
+        ----------
+        prop : string
+            cos: cos function
+            sin: sin function
+
+        filt_t : dictionary
+            keys: times
+            values: boolean array
+        weights_t: dictionary
+            keys: time
+            values: float array (total population,)
+        Returns
+        -------
+        funcs : 7 functions for the TACF kernel
+
+        '''
         inner_mapper = {'cos':'cosCorrelation_kernel',
                         'sin':'sinCorrelation_kernel'}
         inner_zero_mapper = {'cos':'fcos_kernel',
@@ -3073,7 +3937,38 @@ class Analysis_Confined(Analysis):
   
     def TACF(self,prop,xt,filt_t=None,
              wt=None,filt_option=None,block_average=False):
+        '''
         
+
+        Parameters
+        ----------
+        prop : string
+            cos: cos function
+            sin: sin function
+        xt : TYPE
+            DESCRIPTION.
+        filt_t : dictionary
+            keys: times
+            values: boolean array
+        wt: dictionary
+            keys: time
+            values: float array (total population,)
+        filt_option : string
+            simple: consider the population based on time origin
+            strict: consider the population based on time origin and  time t
+            change: consider the population based on time origin and changed on time t
+        block_average : bool
+            Ways of averaginf
+            True  <  < >|population  >|time origins
+            False < >|population,time origins
+
+        Returns
+        -------
+        TACF_property : dictionary
+            keys: time
+            value: float 
+
+        '''
         tinit = perf_counter()
         
         Prop_nump,nv = self.init_prop(xt)
@@ -3118,6 +4013,11 @@ class Analysis_Confined(Analysis):
     
 
 class Filters():
+    '''
+    The Filters class contains the functions that produce
+    boolean arrays ("filters") that are used to distinguish the 
+    population, e.g. segments to trains, loops ..., chains at distance etc ...
+    '''
     def __init__(self):
         pass
     
@@ -3215,9 +4115,9 @@ class Filters():
             
             args = locals()['args_'+conf]
             
-            conf_chunks = self.conf_chunks(args)
+            connected_chunks = self.connected_chunks(args)
             
-            sizes = np.array([len(chunk) for chunk in conf_chunks])
+            sizes = np.array([len(chunk) for chunk in connected_chunks])
             
             
             filt['{}:distr'.format(conf)] = sizes
@@ -3225,7 +4125,7 @@ class Filters():
             for inter in intervals:
                 
                 chunk_int =set()
-                for chunk, size in zip(conf_chunks,sizes):
+                for chunk, size in zip(connected_chunks,sizes):
                     if inter[0]<=size<inter[1]:
                         chunk_int = chunk_int | chunk
                         
@@ -3327,6 +4227,14 @@ class Filters():
         return filt_ads
     
 class coreFunctions():
+    '''
+    This class contains all functions that are called during 
+    looping the trajectory frames. In this way the main functions are
+    more compact and we do not have to rewrite the same looping
+    method for each property. This functions fill dictionaries or arrays 
+    allocated from the function that they
+    were called (Usuallay starting with the word 'calc_')
+    '''
     def __init__():
         pass
     
@@ -3951,8 +4859,6 @@ class coreFunctions():
         numba_bin_count(pd,bins,gofr)
 
         return
-    
-
 
 @jit(nopython=True,fastmath=True)
 def fill_property(prop,nv,i,j,value,mi,block_average):
