@@ -20,7 +20,7 @@ import coloredlogs
 
 
 class logs():
-    LOGGING_LEVEL = logging.INFO
+    LOGGING_LEVEL = logging.DEBUG
     
     logger = logging.getLogger(__name__)
     logger.setLevel(LOGGING_LEVEL)
@@ -875,29 +875,25 @@ class Box_Additions():
         
 class Distance_Functions():
     @staticmethod
-    def zdir(coords,zc):
+    def zdir(self,coords,zc):
         return np.abs(coords[:,2]-zc)
     @staticmethod
-    def ydir(coords,yc):
+    def ydir(self,coords,yc):
         return np.abs(coords[:,1]-yc)
     @staticmethod
-    def xdir(coords,xc):
+    def xdir(self,coords,xc):
         return np.abs(coords[:,0]-xc)
     
-    @staticmethod
-    def zcylindrical(coords,c):
-         d = Distance_Functions.distance(coords[:,0:2],c)
-         #d = d.max()-d
-         return d
+
     
     @staticmethod
-    def zdir__2side(coords,zc):
+    def zdir__2side(self,coords,zc):
         return coords[:,2]-zc
     @staticmethod
-    def ydir__2side(coords,yc):
+    def ydir__2side(self,coords,yc):
         return coords[:,1]-yc
     @staticmethod
-    def xdir__2side(coords,xc):
+    def xdir__2side(self,coords,xc):
         return coords[:,0]-xc
     
     @staticmethod
@@ -907,41 +903,45 @@ class Distance_Functions():
         return d
     
     @staticmethod
-    def minimum_distance(coords1,coords2):
+    def minimum_distance(self,coords1,coords2):
         d1 = np.empty(coords1.shape[0])
         d2 = np.empty(coords2.shape[0])
         smaller_distance_kernel(d1,d2,coords1,coords2)
         return d1
-
+    
+    @staticmethod
+    def zcylindrical(self,coords,c):
+         d = Distance_Functions.distance(coords[:,0:2],c[0:2])
+         d = self.global_cylindrical_radius-d
+         #logs.logger.debug('{:d} and {:d}'.format(d.shape[0],c.shape[0]))
+         return d
+     
 class bin_Volume_Functions():
     @staticmethod
-    def zdir(box,bin_low,bin_up,*args):
+    def zdir(self,box,bin_low,bin_up):
         binl = bin_up-bin_low
         return 2*box[0]*box[1]*binl
     
     @staticmethod
-    def ydir(box,bin_low,bin_up,*args):
+    def ydir(self,box,bin_low,bin_up):
         binl = bin_up-bin_low
         return 2*box[0]*box[2]*binl
     
     @staticmethod
-    def xdir(box,bin_low,bin_up,*args):
+    def xdir(self,box,bin_low,bin_up):
         binl = bin_up-bin_low
         return 2*box[1]*box[2]*binl
-    '''
+
     @staticmethod
-    def zcylindrical(box,bin_low,bin_up,L):
+    def zcylindrical(self,box,bin_low,bin_up):
         binl = bin_up - bin_low
-        rm = L-bin_low + 0.5*binl        
-        return 2*np.pi*rm*binl*box[2]
-    '''
-    @staticmethod
-    def zcylindrical(box,bin_low,bin_up,L):
-        binl = bin_up - bin_low
-        rm = bin_low + 0.5*binl        
+        rm = self.global_cylindrical_radius -(bin_low + 0.5*binl)
+        if rm<0: return 1e16
+        #rm =(bin_low + 0.5*binl)
+        #logs.logger.debug('rm = {:4.5f}, bin_low = {:4.4f}'.format(rm,bin_low))
         return 2*np.pi*rm*binl*box[2]
     @staticmethod
-    def distance(box,bin_low,bin_up,*args):
+    def distance(self,box,bin_low,bin_up):
         dr = bin_up-bin_low
         rm = 0.5*(bin_up+bin_low)
         v = dr*(4*np.pi*rm**2)
@@ -1976,7 +1976,8 @@ class Analysis_Confined(Analysis):
                  particle_filt=None,
                  particle_name=None,
                  pol_filt=None,
-                 pol_name=None):
+                 pol_name=None,
+                 **kwargs):
         super().__init__(trajectory_file,
                          connectivity_info,
                          gro_file,
@@ -1986,12 +1987,16 @@ class Analysis_Confined(Analysis):
         self.particle_filt = particle_filt
         self.pol_name = pol_name
         self.pol_filt = pol_filt
-        
+        if self.conftype =='zcylindrical':
+            self.global_cylindrical_radius = kwargs['radius']
+            
+            
         self.confined_system_initialization()
         
 
         return
-    
+
+        
     ############## General Supportive functions Section #####################
     def find_args_per_residue(self,filt,attr_name):
         args = dict()
@@ -2094,14 +2099,14 @@ class Analysis_Confined(Analysis):
         coords = self.translated_coords(frame)
         box  = self.get_box(frame)          
         cm = self.get_particle_cm(coords)
-        d = self.dfun(coords,cm)
+        d = self.dfun(self,coords[self.pol_filt],cm)
         return coords,box,d,cm
     
     def get_whole_frame_basics(self,frame):
         coords = self.get_whole_coords(frame)
         box  = self.get_box(frame)          
         cm = self.get_particle_cm(coords)
-        d = self.dfun(coords,cm)
+        d = self.dfun(self,coords,cm)
         return coords,box,d,cm
 
 
@@ -2212,12 +2217,12 @@ class Analysis_Confined(Analysis):
        
         for L in self.box_add(box):
             cm = self.get_particle_cm(coords+L)
-            d = self.dfun(coords,cm)
+            d = self.dfun(self,coords,cm)
             ftrain = np.logical_or(ftrain,np.less_equal(d,dads))
         ftrain = np.logical_and(ftrain,self.pol_filt)
         
         self_trains = np.less_equal(
-            self.dfun(coords,self.get_particle_cm(coords)),dads)
+            self.dfun(self,coords,self.get_particle_cm(coords)),dads)
         image_trains = np.logical_and(ftrain,np.logical_not(self_trains))
         
         return ftrain,image_trains
@@ -2232,7 +2237,7 @@ class Analysis_Confined(Analysis):
         cm = self.get_particle_cm(coords)
         d = np.ones(r.shape[0])*10**9
         for L in self.box_add(box):
-            d = np.minimum(d,self.dfun(r,cm+L))
+            d = np.minimum(d,self.dfun(self,r,cm+L))
         return d
     
     def conformations(self,dads,coords):
@@ -3467,16 +3472,32 @@ class coreFunctions():
         return
     
     @staticmethod
+    def mass_density_profile(self,nbins,bins,
+                                  rho,mass_pol):
+        frame = self.current_frame
+        
+        coords,box,d,cs = self.get_frame_basics(frame)
+        if self.conftype =='zcylindrical': L = 8
+        else: L = None
+        #2) Caclulate profile
+  
+        
+        for i in range(nbins):    
+            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
+            fin_bin = filt_uplow(d,bins[i],bins[i+1])
+            rho[i] += np.sum(mass_pol[fin_bin])/vol_bin
+        return
+    
+    @staticmethod
     def mass_density_profile__pertype(self,nbins,bins,
                                   rho,rho_per_atom_type,ftt,mass_pol):
         
         frame = self.current_frame
         coords,box,d,cs = self.get_frame_basics(frame)
-        d = d[self.pol_filt]
-        dmax = d.max()
+       
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(box,bins[i],bins[i+1],dmax)
+            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
             fin_bin = filt_uplow(d, bins[i], bins[i+1])
             rho[i] += numba_sum(mass_pol[fin_bin])/vol_bin
   
@@ -3485,35 +3506,18 @@ class coreFunctions():
                 rho_per_atom_type[t][i] += numba_sum(mass_pol[ft])/vol_bin
         return
     
-    @staticmethod
-    def mass_density_profile(self,nbins,bins,
-                                  rho,mass_pol):
-        frame = self.current_frame
-        
-        coords,box,d,cs = self.get_frame_basics(frame)
-        if self.conftype =='zcylindrical':
-            L= d.max()
-        else: L=None
-        d = d[self.pol_filt]
-        #2) Caclulate profile
-  
-        
-        for i in range(nbins):    
-            vol_bin = self.volfun(box,bins[i],bins[i+1],L)
-            fin_bin = filt_uplow(d,bins[i],bins[i+1])
-            rho[i] += np.sum(mass_pol[fin_bin])/vol_bin
-        return
+
     
     @staticmethod
     def mass_density_profile_flux(self,nbins,bins,
                                   rho,mass_pol,rho_mean_sq):
         frame = self.current_frame
         coords,box,d,cs = self.get_frame_basics(frame)
-        d = d[self.pol_filt]
+      
         #2) Caclulate profile
         
         for i in range(nbins):     
-            vol_bin = self.volfun(box,bins[i],bins[i+1])
+            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
             fin_bin = filt_uplow(d,bins[i],bins[i+1])
             rho[i] += (np.sum(mass_pol[fin_bin])/vol_bin)**2-rho_mean_sq[i]
         return
@@ -3532,7 +3536,7 @@ class coreFunctions():
         #2) Caclulate profile
         
         for i in range(nbins):
-            vol_bin = self.volfun(box,bins[i],bins[i+1])*0.5
+            vol_bin = self.volfun(self,box,bins[i],bins[i+1])*0.5
             fin_bin_up =   filt_uplow(d,bins[i],bins[i+1])
             fin_bin_down = filt_uplow(d,-bins[i+1],-bins[i])
             rho_up[i] += np.sum(mass_pol[fin_bin_up])/vol_bin
@@ -3545,11 +3549,10 @@ class coreFunctions():
                                   rho,rho_per_atom_type,ftt):
         frame = self.current_frame
         coords,box,d,cs = self.get_frame_basics(frame)
-        d = d[self.pol_filt]
-        dmax = d.max()
+       
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(box,bins[i],bins[i+1],dmax)
+            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
             fin_bin = filt_uplow(d, bins[i], bins[i+1])
             rho[i] += np.count_nonzero(fin_bin)/vol_bin
   
@@ -3561,11 +3564,10 @@ class coreFunctions():
     def number_density_profile(self,nbins,bins,rho):
         frame = self.current_frame
         coords,box,d,cs = self.get_frame_basics(frame)
-        d = d[self.pol_filt]
-        dmax = d.max()
+        
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(box,bins[i],bins[i+1],dmax)
+            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
             fin_bin = filt_uplow(d,bins[i],bins[i+1])
             rho[i] += np.count_nonzero(fin_bin)/vol_bin
         return
@@ -3633,13 +3635,12 @@ class coreFunctions():
         d_loop = d[args_loop]          
         d_bridge = d[args_bridge]
         
-        dmax = d.max()
         for l,dl in enumerate(dlayers):
             args_tl = args_tail[filt_uplow(d_tail, dl[0], dl[1])]
             args_lp = args_loop[filt_uplow(d_loop, dl[0], dl[1])]
             args_br =  args_bridge[filt_uplow(d_bridge, dl[0], dl[1])]
             
-            vol_bin=self.volfun(box,dl[0],dl[1],dmax)
+            vol_bin=self.volfun(self,box,dl[0],dl[1])
             
             dens['ntail'][l] += args_tl.shape[0]/vol_bin
             dens['nloop'][l] += args_lp.shape[0]/vol_bin
@@ -3671,7 +3672,7 @@ class coreFunctions():
 
         for k,d_ids in dih_ids.items():
             rm = 0.5*( coords[d_ids[:,1]] + coords[d_ids[:,2]] )
-            d = self.dfun(rm,cs)
+            d = self.dfun(self,rm,cs)
             dih_val = np.empty(d_ids.shape[0],dtype=float)
             dihedral_values_kernel(d_ids,coords,dih_val)
             for lay in dlayers:
@@ -3692,7 +3693,7 @@ class coreFunctions():
         r1 = coords[ids1]; r2 = coords[ids2]
         
         rm = 0.5*(r1+r2)
-        d = self.dfun(rm, cs)
+        d = self.dfun(self,rm, cs)
         uv = self.unit_vectorFun(rm,cs)
         
         costhsquare__kernel(costh,r2-r1,uv)
@@ -3725,7 +3726,7 @@ class coreFunctions():
             Rg = Rg2**0.5
             local_dict = locals()
             #Assign values
-            d = self.dfun(ch_cm.reshape((1,3)),cs) #scalar
+            d = self.dfun(self,ch_cm.reshape((1,3)),cs) #scalar
             for i,dl in enumerate(dlayers):
                 if dl[0]< d[0] <=dl[1]:
                     for char in chars:
