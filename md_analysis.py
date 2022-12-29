@@ -66,6 +66,8 @@ class ass():
             colors9 = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33','#a65628','#f781bf','#999999']
         class diverging():
             colors6 = ['#d73027','#fc8d59','#fee090','#ffffbf','#91bfdb','#4575b4']
+            colors9 = ['#d73027','#f46d43','#fdae61','#fee08b','#ffffbf','#d9ef8b','#a6d96a','#66bd63','#1a9850']
+            colors7 = ['#d73027','#fc8d59','#fee08b','#ffffbf','#d9ef8b','#91cf60','#1a9850']
         class sequential():
             colors3 = ['#fee0d2','#fc9272','#de2d26']
     beebbeeb = True
@@ -73,7 +75,7 @@ class ass():
         lst_map = {
             'loosely dotted':      (0, (1, 3)),
             'dotted':               (0, (1, 1)),
-            'densely dotted':       (0, (1, 2)),
+            'densely dotted':       (0, (2, 1)),
             
             'loosely dashed':       (0, (5, 3)),
             'dashed':               (0, (4, 2)),
@@ -87,6 +89,8 @@ class ass():
          'loosely dashdotdotted': (0, (4, 3, 1,3, 1, 3)),
          'densely dashdotdotted': (0, (3, 1, 1, 1, 1, 1))
          }
+        lst3 = [lst_map['densely dotted'],lst_map['loosely dashed'],
+              lst_map['densely dashed']]
         lst4 = [lst_map['densely dotted'],lst_map['loosely dotted'],
               lst_map['densely dashed'],lst_map['loosely dashed']]
         lst6 = [lst_map['loosely dotted'],
@@ -95,6 +99,13 @@ class ass():
                 lst_map['loosely dashdotted'],
                 lst_map['dashdotted'],
                 lst_map['densely dashdotted']]
+        lst7 = [lst_map['loosely dotted'],
+                lst_map['dotted'],
+                lst_map['dashed'],
+                lst_map['loosely dashdotted'],
+                lst_map['dashdotted'],
+                lst_map['densely dashdotted'],
+                lst_map['densely dotted']]
     @staticmethod
     def try_beebbeeb():
         if ass.beebbeeb:
@@ -108,7 +119,15 @@ class ass():
                 pass
         return
     
-
+    @staticmethod
+    def change_key(d,keyold,keynew):
+        try:
+            value = d[keyold]
+        except KeyError as e:
+            raise Exception('{} This key "{}" does not belong to the dictionary'.format(e,keyold))
+        d[keynew] = value
+        del d[keyold]
+        return 
     
     @staticmethod
     def dict_slice(d,i1,i2):
@@ -267,13 +286,15 @@ class ass():
     
 @jit(nopython=True,fastmath=True)
 def distance_kernel(d,coords,c):
+    nd = coords.shape[1]
     for i in range(d.shape[0]):
         d[i] = 0
-        for j in range(3):
+        for j in range(nd):
             rel = coords[i][j]-c[j]
             d[i] += rel*rel
         d[i] = d[i]**0.5
     return 
+
 @jit(nopython=True,fastmath=True)
 def smaller_distance_kernel(d1,d2,c1,c2):
     for i in range(c1.shape[0]):
@@ -377,6 +398,20 @@ class Energetic_Analysis():
         plt.show()
 
 class Analytical_Expressions():
+    @staticmethod
+    def KWW_simple(t,beta,tww):
+        #Kohlrausch–Williams–Watts
+        #A is initial point shift
+        #tc changes the shape of the fast motion(slow times)
+        #beta changes the shape of the curve. 
+        #very small beta makes the curve linear.
+        #the larger the beta the sharpest the curve
+        #all curves regardless beta pass through the same point
+        phi = np.exp( -(t/tww )**beta )
+        return phi
+    
+    
+    
     @staticmethod
     def KWW(t,A,tc,beta,tww):
         #Kohlrausch–Williams–Watts
@@ -827,12 +862,16 @@ class Box_Additions():
     @staticmethod
     def xdir(box):
         return [box[0],0,-box[0]]
+    @staticmethod
     def minimum_distance(box):
         zd = Box_Additions.zdir(box)
         yd = Box_Additions.ydir(box)
         xd = Box_Additions.xdir(box)
         ls = [np.array([x,y,z]) for x in xd for y in yd for z in zd]
         return ls
+    @staticmethod
+    def zcylindrical(box):
+        return [0]
         
 class Distance_Functions():
     @staticmethod
@@ -844,6 +883,12 @@ class Distance_Functions():
     @staticmethod
     def xdir(coords,xc):
         return np.abs(coords[:,0]-xc)
+    
+    @staticmethod
+    def zcylindrical(coords,c):
+         d = Distance_Functions.distance(coords[:,0:2],c)
+         #d = d.max()-d
+         return d
     
     @staticmethod
     def zdir__2side(coords,zc):
@@ -870,22 +915,33 @@ class Distance_Functions():
 
 class bin_Volume_Functions():
     @staticmethod
-    def zdir(box,bin_low,bin_up):
+    def zdir(box,bin_low,bin_up,*args):
         binl = bin_up-bin_low
         return 2*box[0]*box[1]*binl
     
     @staticmethod
-    def ydir(box,bin_low,bin_up):
+    def ydir(box,bin_low,bin_up,*args):
         binl = bin_up-bin_low
         return 2*box[0]*box[2]*binl
     
     @staticmethod
-    def xdir(box,bin_low,bin_up):
+    def xdir(box,bin_low,bin_up,*args):
         binl = bin_up-bin_low
         return 2*box[1]*box[2]*binl
-    
+    '''
     @staticmethod
-    def distance(box,bin_low,bin_up):
+    def zcylindrical(box,bin_low,bin_up,L):
+        binl = bin_up - bin_low
+        rm = L-bin_low + 0.5*binl        
+        return 2*np.pi*rm*binl*box[2]
+    '''
+    @staticmethod
+    def zcylindrical(box,bin_low,bin_up,L):
+        binl = bin_up - bin_low
+        rm = bin_low + 0.5*binl        
+        return 2*np.pi*rm*binl*box[2]
+    @staticmethod
+    def distance(box,bin_low,bin_up,*args):
         dr = bin_up-bin_low
         rm = 0.5*(bin_up+bin_low)
         v = dr*(4*np.pi*rm**2)
@@ -906,7 +962,11 @@ class Periodic_image_Functions():
     def distance(self,r0,re,dads): 
         raise NotImplementedError('This function is not yet implemented')
         return  ( abs(re) > box ).any() or ( abs(r0) > box ).any()
-
+    
+    @staticmethod
+    def zcylindrical(self,*args):
+        return False
+    
 class Different_Particle_Functions():
     #functions return True for bridge
     @staticmethod
@@ -934,7 +994,9 @@ class Different_Particle_Functions():
     def xdir(self,r0,re,dads,CMs):
         d = 0
         return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
-   
+    @staticmethod
+    def zcylindrical(self,*args):
+        return False
 
 
 class Center_Functions():
@@ -950,8 +1012,12 @@ class Center_Functions():
     @staticmethod
     def distance(c):
         return c
-
+    @staticmethod
+    def zcylindrical(c):
+        return c
+    
 class unit_vector_Functions():
+    
     @staticmethod
     def zdir(r,c):
         uv = np.zeros((r.shape[0],3))
@@ -967,9 +1033,16 @@ class unit_vector_Functions():
         uv = np.zeros((r.shape[0],3))
         uv[:,2] = 0
         return uv
+    
     @staticmethod
     def distance(r,c):
         uv = r-c 
+        return uv
+    
+    @staticmethod
+    def zcylindrical(r,c):
+        uv = np.ones((r.shape[0],3))
+        uv[:,2] = 0
         return uv
     
 class Analysis:
@@ -1691,12 +1764,12 @@ class Analysis:
 
     def loop_trajectory(self,fun,args):
         funtocall = getattr(coreFunctions,fun)
-        if len(self.timeframes) == 0:# or self.memory_demanding:
+        if len(self.timeframes) == 0 or self.memory_demanding:
             with self.traj_opener(*self.traj_opener_args) as ofile:
                 nframes=0
                 while(self.read_from_disk_or_mem(ofile,nframes)):
                     self.current_frame = nframes
-                    funtocall(self,nframes,*args)      
+                    funtocall(self,*args)      
                     if self.memory_demanding:
                         del self.timeframes[nframes]
                     nframes+=1
@@ -1707,7 +1780,10 @@ class Analysis:
     
     @property
     def first_frame(self):
-        return list(self.timeframes.keys())[0]
+        if not self.memory_demanding:
+            return list(self.timeframes.keys())[0]
+        else:
+            return 0
     
     def cut_timeframes(self,num_start=None,num_end=None):
         if num_start is None and num_end is None:
@@ -1881,6 +1957,14 @@ class Analysis:
             
         return nbonds
     
+    def append_timeframes(self,object2):
+        tlast = self.get_time(self.nframes-1)
+        nfr = self.nframes
+        for i,frame in enumerate(object2.timeframes):
+            self.timeframes[nfr+i] = object2.timeframes[frame]
+            self.timeframes[nfr+i]['time']+=tlast
+        return
+
 class Analysis_Confined(Analysis):
     
     
@@ -3389,10 +3473,10 @@ class coreFunctions():
         frame = self.current_frame
         coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
-        
+        dmax = d.max()
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(box,bins[i],bins[i+1])
+            vol_bin = self.volfun(box,bins[i],bins[i+1],dmax)
             fin_bin = filt_uplow(d, bins[i], bins[i+1])
             rho[i] += numba_sum(mass_pol[fin_bin])/vol_bin
   
@@ -3405,12 +3489,17 @@ class coreFunctions():
     def mass_density_profile(self,nbins,bins,
                                   rho,mass_pol):
         frame = self.current_frame
+        
         coords,box,d,cs = self.get_frame_basics(frame)
+        if self.conftype =='zcylindrical':
+            L= d.max()
+        else: L=None
         d = d[self.pol_filt]
         #2) Caclulate profile
-        vol_bin = self.volfun(box,bins[0],bins[1])
+  
         
-        for i in range(nbins):     
+        for i in range(nbins):    
+            vol_bin = self.volfun(box,bins[i],bins[i+1],L)
             fin_bin = filt_uplow(d,bins[i],bins[i+1])
             rho[i] += np.sum(mass_pol[fin_bin])/vol_bin
         return
@@ -3422,9 +3511,9 @@ class coreFunctions():
         coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
         #2) Caclulate profile
-        vol_bin = self.volfun(box,bins[0],bins[1])
         
         for i in range(nbins):     
+            vol_bin = self.volfun(box,bins[i],bins[i+1])
             fin_bin = filt_uplow(d,bins[i],bins[i+1])
             rho[i] += (np.sum(mass_pol[fin_bin])/vol_bin)**2-rho_mean_sq[i]
         return
@@ -3439,9 +3528,11 @@ class coreFunctions():
         
         dfun = getattr(Distance_Functions,self.conftype +'__2side')
         d = dfun(coords[self.pol_filt],cs) 
-        vol_bin = self.volfun(box,bins[0],bins[1])*0.5 # needed because in volfun the volume of each bin is multiplied by 2
+         # needed because in volfun the volume of each bin is multiplied by 2
         #2) Caclulate profile
-        for i in range(nbins):    
+        
+        for i in range(nbins):
+            vol_bin = self.volfun(box,bins[i],bins[i+1])*0.5
             fin_bin_up =   filt_uplow(d,bins[i],bins[i+1])
             fin_bin_down = filt_uplow(d,-bins[i+1],-bins[i])
             rho_up[i] += np.sum(mass_pol[fin_bin_up])/vol_bin
@@ -3455,9 +3546,10 @@ class coreFunctions():
         frame = self.current_frame
         coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
+        dmax = d.max()
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(box,bins[i],bins[i+1])
+            vol_bin = self.volfun(box,bins[i],bins[i+1],dmax)
             fin_bin = filt_uplow(d, bins[i], bins[i+1])
             rho[i] += np.count_nonzero(fin_bin)/vol_bin
   
@@ -3470,10 +3562,10 @@ class coreFunctions():
         frame = self.current_frame
         coords,box,d,cs = self.get_frame_basics(frame)
         d = d[self.pol_filt]
-        
+        dmax = d.max()
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(box,bins[i],bins[i+1])
+            vol_bin = self.volfun(box,bins[i],bins[i+1],dmax)
             fin_bin = filt_uplow(d,bins[i],bins[i+1])
             rho[i] += np.count_nonzero(fin_bin)/vol_bin
         return
@@ -3541,12 +3633,13 @@ class coreFunctions():
         d_loop = d[args_loop]          
         d_bridge = d[args_bridge]
         
+        dmax = d.max()
         for l,dl in enumerate(dlayers):
             args_tl = args_tail[filt_uplow(d_tail, dl[0], dl[1])]
             args_lp = args_loop[filt_uplow(d_loop, dl[0], dl[1])]
             args_br =  args_bridge[filt_uplow(d_bridge, dl[0], dl[1])]
             
-            vol_bin=self.volfun(box,dl[0],dl[1])
+            vol_bin=self.volfun(box,dl[0],dl[1],dmax)
             
             dens['ntail'][l] += args_tl.shape[0]/vol_bin
             dens['nloop'][l] += args_lp.shape[0]/vol_bin
@@ -3562,11 +3655,11 @@ class coreFunctions():
     def conformation_stats(stats,ads_chains, args_train, args_tail, 
                              args_loop, args_bridge):
         stats['train'] += args_train.shape[0]
-        stats['adschains']+= ads_chains.shape[0] 
-        stats['looptailbridge']+= (args_loop.shape[0]+args_tail.shape[0]+args_bridge.shape[0])
-        stats['tail']+=args_tail.shape[0]
-        stats['loop']+=args_loop.shape[0]
-        stats['bridge']+=args_bridge.shape[0]
+        stats['adschains'] += ads_chains.shape[0] 
+        stats['looptailbridge'] += (args_loop.shape[0]+args_tail.shape[0]+args_bridge.shape[0])
+        stats['tail'] += args_tail.shape[0]
+        stats['loop'] += args_loop.shape[0]
+        stats['bridge'] += args_bridge.shape[0]
         return 
     
     @staticmethod
@@ -3673,7 +3766,7 @@ class coreFunctions():
     @staticmethod
     def vects_t(self,ids1,ids2,filters,dads,vec_t,filt_per_t):
         frame = self.current_frame
-        coords = self.get_whole_coords(frame)
+        coords = self.get_coords(frame)
         
         time = self.get_time(frame)
         
@@ -3694,7 +3787,7 @@ class coreFunctions():
     @staticmethod
     def confs_t(self,dads,confs_t):
         frame = self.current_frame
-        coords = self.get_whole_coords(frame)
+        coords = self.get_coords(frame)
         box = self.get_box(frame)
         time = self.get_time(frame)
         
@@ -3705,8 +3798,10 @@ class coreFunctions():
                args_loop.shape[0] + args_bridge.shape[0]
         for k in ['train','tail','loop','bridge']:
             args = locals()['args_'+k]
-            x[k] = args.shape[0]/ntot
-        x['ads_chains'] = ads_chains.shape[0]/len(self.chain_args)
+            x['x_'+k] = args.shape[0]/ntot
+            x['n_'+k] = args.shape[0]
+        x['x_ads_chains'] = ads_chains.shape[0]/len(self.chain_args)
+        x['n_ads_chains'] = ads_chains.shape[0]
         
         if frame == self.first_frame:
             self.time_zero = time
