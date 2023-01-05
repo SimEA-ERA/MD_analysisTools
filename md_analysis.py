@@ -17,7 +17,7 @@ import multiprocessing
 import pandas as pd
 import logging
 import coloredlogs
-
+import matplotlib
 
 class logs():
     '''
@@ -274,7 +274,7 @@ class ass():
         Changes the order of the keys to access data
         Parameters
         ----------
-        d : Dictionary of dictionaries with the same keys.
+        dictionary : Dictionary of dictionaries with the same keys.
         Returns
         -------
         x : Dictionary with the second set of keys being now first.
@@ -420,6 +420,246 @@ class Energetic_Analysis():
         if save_figs:plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
         plt.show()
 
+class fitData():
+    from scipy.optimize import dual_annealing,minimize
+    def __init__(self,xdata,ydata,func,costf='simple',init_params=None,
+                 npars=None,bounds=None):
+        self.ydata = ydata
+        self.xdata = xdata
+        self.func = getattr(Analytical_Expressions,func)
+        self.costf = getattr(fitData, costf)
+        if init_params is not None:
+            self.init_params = init_params
+            self.npars = len(init_params)
+        if bounds is not None:
+            self.bounds = bounds
+            
+
+    def fit(self,method ='SLSQP',reg=0,params_distr=False,
+            constraints=None,*args,**kwargs):
+        args = (self.xdata,self.ydata,self.func)
+        if self.costf != self.simple:
+            args = (*args,reg)
+        if method == 'dual_annealing':
+            try:
+                x0 = self.init_params
+            except: 
+                res = dual_annealing(self.costf,bounds=self.bounds,
+                             args=args)
+            else:
+                res = dual_annealing(self.costf, self.bounds,
+                             args=args,x0=x0)
+        else:
+            try:
+                x0 = self.init_params
+            except: 
+                x0 = np.ones(len(self.bounds))
+            if constraints is None:
+                constraints = []
+            if params_distr:
+               
+                x0[2:] /= np.sum(x0[2:])
+                constraints.append( {'type':'eq','fun':lambda x: np.sum(x[2:])-1})
+                constraints.append({'type':'eq','fun':lambda x: x[2]})
+                constraints.append({'type':'eq','fun':lambda x: x[-1]})
+            constraints = tuple(constraints)
+            logs.logger.debug('Constraints are --> {}'.format(constraints))
+            
+            res = minimize(self.costf,x0,bounds=self.bounds,
+                                 args=args,method = method,
+                                 constraints=constraints)
+        self.params = res.x
+        if self.func == Analytical_Expressions.wexp:
+            tau = Analytical_Expressions.get_times(self.params[0],self.params[1],self.params[2:].shape[0])
+            self.relaxation_times = tau
+        return res
+    def search_best(self,a,b,n,regd=1):
+        self.crit = []
+        self.smv = []
+        self.crv = []
+        self.regs = []
+        self.iter = 0
+        irs = (1e0,1e8)
+        rgbest_old = -50
+        for i in range(3):
+            try: rgbest_old = rgbest 
+            except: pass
+            self.search_reg(a,b,n,regd,irs)
+            irs = self.last_regs[np.argsort(self.last_crit)[0:2]]
+            irs.sort()
+            rgbest = self.bestreg
+            if rgbest_old == rgbest:
+                break
+        self.exactFit(a,b,n,regd,rgbest)
+        return
+    def search_reg(self,a,b,n,regd=1,irs=(1e-3,1e8)):
+        lreg = np.logspace(np.log10(irs[0]),
+                           np.log10(irs[1]),base=10,num=12)
+        
+        self.last_regs = lreg
+        self.last_crit = []
+        for lr in lreg:
+            self.exactFit(a,b,n,regd,lr)
+           # print('lr = {:.3e}'.format(lr))
+            self.report()
+            s = self.smoothness ; c = self.con_res
+            self.smv.append(s) ; self.crv.append(c)
+            self.regs.append(lr) ;
+            crit = np.sqrt(s**2 + regd*c**2)
+            self.crit.append( crit)
+            self.last_crit.append(crit)
+            #self.show_relaxation_times(title='lr = {:.3e}'.format(lr))
+        return
+    def exactFit(self,a,b,n,regd=1,regs=1,distr=True,zeroEdge=True):
+        tau = Analytical_Expressions.get_times(a,b,n)
+        dlogtau = np.log10(tau[1]/tau[0]) 
+        x = self.xdata.copy()
+        y = self.ydata.copy()
+        
+        A = np.exp(-np.outer(x,(1/tau)))
+        
+        if distr:
+            A = np.concatenate( (A, regd*np.ones((1,tau.shape[0])) ) )
+            y = np.concatenate((y,regd*np.ones(1)))
+        if zeroEdge:
+            c1 = np.zeros((2,tau.shape[0]))
+            c1[0][0] = regd
+            c1[1][-1] = regd
+            A = np.concatenate((A,c1))
+            y = np.concatenate((y,np.zeros(2)))
+        
+        constraints = [ {'type':'eq',
+                         'fun':lambda w:np.sum((np.dot(A,w)-y)**2)/y.shape[0]
+                        } 
+                      ]
+        bounds = [(0,1) for i in range(n)]
+        costf = lambda w: np.sum(w*w)/w.shape[0]
+        costf = lambda w: regs*np.sum((w[2:]-2*w[1:-1]+w[0:-2])**2)/dlogtau**2
+        res = minimize(costf,np.ones(n),bounds=bounds,method = 'SLSQP',
+                                 constraints=constraints,
+                                 options = {'maxiter':1000,'disp':True})
+        
+        isd = 1-res.x.sum() ; bl = res.x[0] ; bu = res.x[1]
+        self.data_res = constraints[0]['fun'](res.x)
+        self.params = res.x
+        self.opt_res = res
+        self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
+        self.relaxation_times = tau
+        self.smoothness = costf(res.x)/regs
+        self.con_res = np.sqrt(isd**2+bl**2+bu**2+self.data_res)
+        return res
+    
+    def report(self):
+        for k in ['prob_distr','con_res','data_res','smoothness']:
+            a = getattr(self,k)
+            print('{:s} = {}'.format(k,a))
+        return
+    @property
+    def bestreg(self):
+        return self.regs[np.argmin(self.crit)]
+        
+    def show_Pareto_front(self,size=3.5,ylim=1,xlim=10,
+                              title=None,color='magenta',fname=None):
+        
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        c = np.array(self.crv)
+        ylim = c[c<ylim].max()
+        s = np.array(self.smv)
+        xlim = s[s<xlim].max()
+        plt.ylim([0,ylim*1.05])
+        plt.xlim([0,xlim*1.05])
+        plt.yticks(fontsize=2.5*size)
+        locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+        ax.xaxis.set_minor_locator(locmin)
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        plt.xlabel(r'smoothness',fontsize=3*size)
+        plt.ylabel(r'constraints residual',fontsize=3*size)
+        if title is None:
+            plt.title('Pareto Front')
+        else:
+            plt.title(title)
+        plt.plot(self.smv,self.crv,
+                 ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
+        
+        plt.plot([self.smoothness],[self.con_res],marker='o',color='red',markersize=1.7*size)
+        plt.plot([self.smoothness,xlim],[self.con_res,self.con_res],lw=size/5,ls='--',color='k')
+        plt.plot([self.smoothness,self.smoothness],[self.con_res,ylim],lw=size/5,ls='--',color='k')
+        plt.xticks(fontsize=2.5*size)
+        if fname is not None:
+            plt.savefig(fname,bbox_inches='tight')
+        plt.show()
+        return
+    
+    def show_relaxation_times(self,size=3.5,units='ns',
+                              title=None,color='red',fname=None):
+        
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.xscale('log')
+        
+        plt.yticks(fontsize=2.5*size)
+        locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+        ax.xaxis.set_minor_locator(locmin)
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        plt.ylabel('w',fontsize=3*size)
+        plt.xlabel(r'$\tau$ / {:s}'.format(units),fontsize=3*size)
+        if title is None:
+            plt.title('Relaxation times distribution')
+        else:
+            plt.title(title)
+        plt.plot(self.relaxation_times,self.params,
+                 ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
+        xticks = [10**x for x in range(-10,20) if self.bounds[0]<=10**x<=self.bounds[1] ]
+        plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
+        if fname is not None:
+            plt.savefig(fname,bbox_inches='tight')
+        plt.show()
+        return
+    def fitted_data(self):
+        return self.func(self.xdata,*self.params)
+    def fitted_curve(self,x):
+        
+        return self.func(x,self.bounds[0],self.bounds[1],self.params)
+    @staticmethod
+    def simple(params,xdata,ydata,func):
+        cost = func(xdata,*params) - ydata
+        return np.sum(cost*cost)/cost.shape[0]
+    @staticmethod
+    def lasso(params,xdata,ydata,func,reg):
+        cost = fitData.simple(params,xdata,ydata,func) + reg*np.count_nonzero(params[2:])
+        return cost 
+
+    @staticmethod
+    def ridge(params,xdata,ydata,func,reg):
+        cost = fitData.simple(params,xdata,ydata,func) + reg*np.sum(params[2:]**2)
+        return cost
+    @staticmethod
+    def fgradient(params,xdata,ydata,func,reg):
+        cost = fitData.simple(params,xdata,ydata,func)
+        fx = func(xdata,*params)
+        fg = fx[2:]-fx[0:-2] - (ydata[2:]-ydata[0:-2])
+        cg = np.sum(fg*fg)/fg.shape[0]
+        return cost +reg*cg
+    @staticmethod
+    def fgradient_smooth(params,xdata,ydata,func,reg):
+        c1 = fitData.fgradient(params,xdata,ydata,func,reg[0])
+        c2 = fitData.smooth(params,xdata,ydata,func,reg[1])
+        return c1 + c2
+    @staticmethod
+    def smooth(params,xdata,ydata,func,reg):
+        cost = fitData.simple(params,xdata,ydata,func) 
+        smooth = (params[4:]-2*params[3:-1]+params[2:-2])
+        cost+=reg*np.sum(smooth*smooth)/params[2:].shape[0]
+        return cost 
 class Analytical_Expressions():
     @staticmethod
     def KWW_simple(t,beta,tww):
@@ -432,11 +672,29 @@ class Analytical_Expressions():
         #all curves regardless beta pass through the same point
         phi = np.exp( -(t/tww )**beta )
         return phi
-    
-    
+    @staticmethod
+    def get_times(a,b,n):
+        tau = np.logspace(np.log10(a),np.log10(b),base=10,num=n)
+        return tau
     
     @staticmethod
-    def KWW(t,A,tc,beta,tww):
+    def wexp(t,*w):
+        tau = Analytical_Expressions.get_times(w[0],w[1],len(w[2:]))
+        w = w[2:]
+        s=0
+        for i,tw in enumerate(tau):
+            s+= w[i]*Analytical_Expressions.expDecay_simple(t,tw)
+        return s
+    @staticmethod
+    def wexp(t,a,b,w):
+        tau = Analytical_Expressions.get_times(a,b,len(w))
+        s=0
+        for i,tw in enumerate(tau):
+            s+= w[i]*Analytical_Expressions.expDecay_simple(t,tw)
+        return s
+    
+    @staticmethod
+    def KWW(t,A,beta,tww):
         #Kohlrausch–Williams–Watts
         #A is initial point shift
         #tc changes the shape of the fast motion(slow times)
@@ -444,17 +702,17 @@ class Analytical_Expressions():
         #very small beta makes the curve linear.
         #the larger the beta the sharpest the curve
         #all curves regardless beta pass through the same point
-        phi = A*np.exp( -((t-tc)/tww )**beta )
+        phi = A*np.exp( -(t/tww )**beta )
         return phi
+    
     @staticmethod
-    def KWW_sum(t,tww,beta):
+    def KWW2(t,tw1,tw2,b1,b2,A):
         s = 0 
-        tww = np.array(tww)
-        beta =np.array(beta)
-        for j,b in enumerate(beta):
-            for i,tw in enumerate(tww):
-                s+= Analytical_Expressions.KWW(t,1,0,b,tw)
-        return s/(tww.shape[0]*beta.shape[0])
+        tww = np.array([tw1,tw2])
+        beta =np.array([b1,b2])
+        for tw,b in zip(tww,beta):
+            s+= Analytical_Expressions.KWW(t,A,b,tw)
+        return s
     
     @staticmethod
     def expDecay_sum(t,t0v):
@@ -3539,7 +3797,7 @@ class Analysis_Confined(Analysis):
     
     def calc_segmental_vectors_t(self,topol_vector,filters=None,
                                      dads=0):
-       '''
+        '''
         Calculates 1-2,1-3 or 1-4 segmental vectors as a function of time
         Parameters
         ----------
@@ -4044,9 +4302,8 @@ class Filters():
         d1 = self.get_minimum_image_distance_from_particle(ids = ids1)
         d2 = self.get_minimum_image_distance_from_particle(ids =ids2)
         
-        f1 = Filters.filtLayers(layers,d1)
-        f2 = Filters.filtLayers(layers,d2)
-        return np.logical_and(f1,f2)
+        f1 = Filters.filtLayers(layers,0.5*(d1+d2))
+        return f1
     
     @staticmethod
     def filtLayers(layers,d):
