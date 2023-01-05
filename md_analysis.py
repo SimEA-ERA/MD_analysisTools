@@ -510,6 +510,7 @@ class fitData():
             self.last_crit.append(crit)
             #self.show_relaxation_times(title='lr = {:.3e}'.format(lr))
         return
+    
     def exactFit(self,a,b,n,regd=1,regs=1,distr=True,zeroEdge=True):
         tau = Analytical_Expressions.get_times(a,b,n)
         dlogtau = np.log10(tau[1]/tau[0]) 
@@ -557,8 +558,12 @@ class fitData():
     @property
     def bestreg(self):
         return self.regs[np.argmin(self.crit)]
-        
-    def show_Pareto_front(self,size=3.5,ylim=1,xlim=10,
+      
+    def print_reg(self):
+        print('best reg = {:.6e}'.format(self.bestreg))
+        return
+    
+    def show_Pareto_front(self,size=3.5,ylim=1,xlim=1,
                               title=None,color='magenta',fname=None):
         
         figsize = (size,size)
@@ -574,21 +579,29 @@ class fitData():
         plt.ylim([0,ylim*1.05])
         plt.xlim([0,xlim*1.05])
         plt.yticks(fontsize=2.5*size)
-        locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
-        ax.xaxis.set_minor_locator(locmin)
-        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         plt.xlabel(r'smoothness',fontsize=3*size)
         plt.ylabel(r'constraints residual',fontsize=3*size)
         if title is None:
             plt.title('Pareto Front')
         else:
             plt.title(title)
-        plt.plot(self.smv,self.crv,
+        plt.plot(s,c,
                  ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
         
+        pareto = []
+        for i,(si,ci) in enumerate(zip(s,c)):
+            fs = si > s 
+            fc = ci > c
+            f = np.logical_and(fs,fc)
+            if f.any(): continue
+            pareto.append(i)
+        p = np.array(pareto,dtype=int)
+        sp = s[p] ; cp =c[p]
+        ser = sp.argsort()
+        sp = sp[ser] ; cp = cp[ser]
+        plt.plot(sp,cp,ls='--',color='k',lw=size/5)
         plt.plot([self.smoothness],[self.con_res],marker='o',color='red',markersize=1.7*size)
-        plt.plot([self.smoothness,xlim],[self.con_res,self.con_res],lw=size/5,ls='--',color='k')
-        plt.plot([self.smoothness,self.smoothness],[self.con_res,ylim],lw=size/5,ls='--',color='k')
+        
         plt.xticks(fontsize=2.5*size)
         if fname is not None:
             plt.savefig(fname,bbox_inches='tight')
