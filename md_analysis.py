@@ -420,6 +420,122 @@ class Energetic_Analysis():
         if save_figs:plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
         plt.show()
 
+class plotter():
+    def __init__(self):
+        return
+    @staticmethod
+    def relaxation_time_distributions(datadict,
+                                      size=3.5,fname=None,title=None,
+                                      cmap=None,xlim=(-6,6),
+                                      units='ns'):
+        
+        if cmap is None:
+            c = ass.colors.qualitative.colors9
+            cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.xscale('log')
+        if title is not None: 
+            plt.title(title)
+        xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
+        plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
+        plt.yticks(fontsize=2.5*size)
+        plt.xlabel(r'$\tau /{:s}$'.format(units),fontsize=2*size)
+        plt.ylabel(r'$w$',fontsize=3*size)
+        locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+        ax.xaxis.set_minor_locator(locmin)
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        for i,(k,f) in enumerate(datadict.items()):
+            plt.plot(f.relaxation_times,f.params,ls='--',marker = 'o',
+            markersize=size*1.2,fillstyle='none',color=cmap[k],label=k)
+        plt.legend(frameon=False,fontsize=2.3*size)
+        if fname is not None:
+            plt.savefig(fname,bbox_inches='tight')
+        plt.show()
+        return 
+    
+    @staticmethod
+    def sample_logarithmically_array(x,midtime=None,num=50,first_ten=True):
+        
+        if first_ten:
+            args = np.array([j for j in range(10)])
+            num -=10
+        else:
+            args = np.array([])
+        if midtime is None:
+            mid = x.shape[0]
+            num =int(num/2)
+        else:
+            mid = x[x<=midtime].shape[0]
+            num-=10
+            num =int(num/2)
+        args = np.concatenate( (args,
+                np.logspace(1,np.log10(mid),num=num,dtype=int)))
+        if midtime is None:
+            return args[args<x.shape[0]]
+        else:
+            if first_ten:
+                args = np.concatenate((args, [j for j in range(mid,mid+10)]))
+            lgsp = np.logspace(np.log10(mid),np.log10(x.shape[0]-1),num=num,dtype=int)
+            args = np.concatenate((args,lgsp))
+        return args[args<x.shape[0]]
+    
+    @staticmethod
+    def fits(datadict,fitteddict,
+             fname =None,title=None,size=3.5,xlim=(-6,6),
+             cmap = None,ylabel=None,units='ns',midtime=None,
+             num=50,cutf=None):
+        if cmap is None:
+            c = ass.colors.qualitative.colors9
+            cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
+        if ylabel is None:
+            ylabel =r'$P_1(t)$'
+        else:
+            ylabel=ylabel
+        if cutf is None:
+            cutf ={k:10**10 for k in fitteddict}
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.xscale('log')
+        
+        xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
+        plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
+        plt.yticks(fontsize=2.5*size)
+        plt.xlabel(r'$t ({})$'.format(units),fontsize=3*size)
+        plt.ylabel(ylabel,fontsize=3*size)
+        locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+        ax.xaxis.set_minor_locator(locmin)
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        for i,(k,fitd) in enumerate(fitteddict.items()):
+            dy = datadict[k]
+            x = ass.numpy_keys(dy)/1000
+            y = ass.numpy_values(dy)
+            t = x<=cutf[k]
+            x = x[t][2:]
+            y = y[t][2:]
+            
+            args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
+
+ 
+            xf = np.logspace(xlim[0],xlim[1],base=10,num=10000)
+            yee =fitd.fitted_curve(xf)
+            plt.plot(xf,yee,ls ='-.',color=cmap[k],label ='fit {}'.format(k))
+            
+            plt.plot(x[args],y[args],ls='none',marker = 'o',
+            markersize=size*0.8,fillstyle='none',color=cmap[k],label=k)
+        plt.legend(frameon=False,fontsize=2.3*size)
+        if fname is not None:plt.savefig(fname,bbox_inches='tight')
+        plt.show()
+        return
+    
 class fitData():
     from scipy.optimize import dual_annealing,minimize
     def __init__(self,xdata,ydata,func,costf='simple',init_params=None,
@@ -473,6 +589,7 @@ class fitData():
             tau = Analytical_Expressions.get_times(self.params[0],self.params[1],self.params[2:].shape[0])
             self.relaxation_times = tau
         return res
+    
     def search_best(self,a,b,n,regd=1):
         self.crit = []
         self.smv = []
@@ -563,7 +680,7 @@ class fitData():
         print('best reg = {:.6e}'.format(self.bestreg))
         return
     
-    def show_Pareto_front(self,size=3.5,ylim=1,xlim=1,
+    def show_Pareto_front(self,size=3.5,
                               title=None,color='magenta',fname=None):
         
         figsize = (size,size)
@@ -573,11 +690,10 @@ class fitData():
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
         c = np.array(self.crv)
-        ylim = c[c<ylim].max()
         s = np.array(self.smv)
-        xlim = s[s<xlim].max()
-        plt.ylim([0,ylim*1.05])
-        plt.xlim([0,xlim*1.05])
+
+        plt.xscale('log')
+        plt.yscale('log')
         plt.yticks(fontsize=2.5*size)
         plt.xlabel(r'smoothness',fontsize=3*size)
         plt.ylabel(r'constraints residual',fontsize=3*size)
@@ -599,6 +715,8 @@ class fitData():
         sp = s[p] ; cp =c[p]
         ser = sp.argsort()
         sp = sp[ser] ; cp = cp[ser]
+        plt.ylim([0,cp.max()*1.05])
+        plt.xlim([0,sp.max()*1.05])
         plt.plot(sp,cp,ls='--',color='k',lw=size/5)
         plt.plot([self.smoothness],[self.con_res],marker='o',color='red',markersize=1.7*size)
         

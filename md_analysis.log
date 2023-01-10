@@ -1,0 +1,7 @@
+2023-01-09 15:04:13,296
+[ INFO ]
+[md_analysis.py -> print_time() -> line 228]
+Function "MAIN"
+ Time/frame --> 0h : 0' : 0" : 0.464"'
+ Total time --> 0h : 7' : 43" : 0.526"'
+ --------
