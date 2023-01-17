@@ -427,7 +427,7 @@ class plotter():
     def relaxation_time_distributions(datadict,
                                       size=3.5,fname=None,title=None,
                                       cmap=None,xlim=(-6,6),
-                                      units='ns'):
+                                      units='ns',mode='tau'):
         
         if cmap is None:
             c = ass.colors.qualitative.colors9
@@ -444,14 +444,24 @@ class plotter():
         xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
         plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
         plt.yticks(fontsize=2.5*size)
-        plt.xlabel(r'$\tau /{:s}$'.format(units),fontsize=2*size)
-        plt.ylabel(r'$w$',fontsize=3*size)
+        if mode =='f': 
+            units = '{:s}^{:s}'.format(units,'{-1}')
+            xlabel = 'f'
+        else:
+            xlabel='\tau'
+        plt.xlabel(r'${:s}$ / ${:s}$'.format(mode,units),fontsize=2*size)
+        #plt.ylabel(r'$w$',fontsize=3*size)
         locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
         ax.xaxis.set_minor_locator(locmin)
         ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         for i,(k,f) in enumerate(datadict.items()):
-            plt.plot(f.relaxation_times,f.params,ls='--',marker = 'o',
-            markersize=size*1.2,fillstyle='none',color=cmap[k],label=k)
+            if mode =='f':
+                xax = 1/f.relaxation_times
+            else:
+                xax = f.relaxation_times
+            plt.plot(xax,f.params,ls='--',lw=0.25*size,marker = 'o',
+                markersize=size*1.2,markeredgewidth=0.15*size,fillstyle='none',color=cmap[k],label=k)
+            #plt.plot(f.relaxation_times,f.params,ls='--',label=k,color=cmap[k])
         plt.legend(frameon=False,fontsize=2.3*size)
         if fname is not None:
             plt.savefig(fname,bbox_inches='tight')
@@ -459,7 +469,36 @@ class plotter():
         return 
     
     @staticmethod
-    def sample_logarithmically_array(x,midtime=None,num=50,first_ten=True):
+    def write_xy_forXPCS(fname,x,y):
+        data = np.zeros((x.shape[0],3),dtype=float)
+        data[:,0] = x
+        data[:,1] = y
+        data[:,2]+= np.random.uniform(0,1e-9,x.shape[0])
+        np.savetxt(fname,data)
+        return
+    @staticmethod
+    def write_data_forXPCS(datadict,path='XPCS_data',cutf=None,midtime=None,num=100):
+        
+        if cutf is None:
+            cutf ={k:10**10 for k in fitteddict}
+        for k,dy in datadict.items():
+            
+            fn = '{:s}\\xy_{:s}.txt'.format(path,k)
+            
+            x = ass.numpy_keys(dy)/1000
+            y = ass.numpy_values(dy)
+            t = x<=cutf[k]
+            x = x[t]
+            y = y[t]
+            
+            args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
+            xw = x[args]
+            yw = y[args]
+            plotter.write_xy_forXPCS(fn, xw,yw+1)
+        return
+        
+    @staticmethod
+    def sample_logarithmically_array(x,midtime=None,num=100,first_ten=True):
         
         if first_ten:
             args = np.array([j for j in range(10)])
@@ -482,13 +521,17 @@ class plotter():
                 args = np.concatenate((args, [j for j in range(mid,mid+10)]))
             lgsp = np.logspace(np.log10(mid),np.log10(x.shape[0]-1),num=num,dtype=int)
             args = np.concatenate((args,lgsp))
-        return args[args<x.shape[0]]
-    
+        return np.unique(args[args<x.shape[0]])
+
     @staticmethod
-    def fits(datadict,fitteddict,
+    def fits(datadict,fitteddict,locleg='lower left',ncolleg=1,
              fname =None,title=None,size=3.5,xlim=(-6,6),
              cmap = None,ylabel=None,units='ns',midtime=None,
-             num=50,cutf=None):
+             num=100,cutf=None,write_plot_data=False):
+
+        if write_plot_data:
+            plotter.write_data_forXPCS(datadict,cutf=cutf,midtime=midtime)
+        
         if cmap is None:
             c = ass.colors.qualitative.colors9
             cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
@@ -498,6 +541,7 @@ class plotter():
             ylabel=ylabel
         if cutf is None:
             cutf ={k:10**10 for k in fitteddict}
+        
         figsize = (size,size)
         dpi = 300
         fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
@@ -529,9 +573,9 @@ class plotter():
             yee =fitd.fitted_curve(xf)
             plt.plot(xf,yee,ls ='-.',color=cmap[k],label ='fit {}'.format(k))
             
-            plt.plot(x[args],y[args],ls='none',marker = 'o',
-            markersize=size*0.8,fillstyle='none',color=cmap[k],label=k)
-        plt.legend(frameon=False,fontsize=2.3*size)
+            plt.plot(x[args],y[args],ls='none',marker = 'o',markeredgewidth=0.2*size,
+        markersize=size*1.2,fillstyle='none',color=cmap[k],label=k)
+        plt.legend(frameon=False,fontsize=2.0*size,loc=locleg,ncol=ncolleg)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
@@ -590,7 +634,7 @@ class fitData():
             self.relaxation_times = tau
         return res
     
-    def search_best(self,a,b,n,regd=1):
+    def search_best(self,a,b,n,regres=1.0,regd=1000):
         self.crit = []
         self.smv = []
         self.crv = []
@@ -601,7 +645,7 @@ class fitData():
         for i in range(3):
             try: rgbest_old = rgbest 
             except: pass
-            self.search_reg(a,b,n,regd,irs)
+            self.search_reg(a,b,n,regres,regd,irs)
             irs = self.last_regs[np.argsort(self.last_crit)[0:2]]
             irs.sort()
             rgbest = self.bestreg
@@ -609,33 +653,34 @@ class fitData():
                 break
         self.exactFit(a,b,n,regd,rgbest)
         return
-    def search_reg(self,a,b,n,regd=1,irs=(1e-3,1e8)):
+    def search_reg(self,a,b,n,regres=1.0,regd=1000,irs=(1e-3,1e8)):
         lreg = np.logspace(np.log10(irs[0]),
                            np.log10(irs[1]),base=10,num=12)
         
         self.last_regs = lreg
         self.last_crit = []
         for lr in lreg:
+            self.current_regs = lr
             self.exactFit(a,b,n,regd,lr)
            # print('lr = {:.3e}'.format(lr))
             self.report()
             s = self.smoothness ; c = self.con_res
             self.smv.append(s) ; self.crv.append(c)
             self.regs.append(lr) ;
-            crit = np.sqrt(s**2 + regd*c**2)
+            crit = np.sqrt(s**2 + regres*c**2)
             self.crit.append( crit)
             self.last_crit.append(crit)
             #self.show_relaxation_times(title='lr = {:.3e}'.format(lr))
         return
     
-    def exactFit(self,a,b,n,regd=1,regs=1,distr=True,zeroEdge=True):
+    def exactFit(self,a,b,n,regd=1000,regs=1,distr=True,zeroEdge=True):
         tau = Analytical_Expressions.get_times(a,b,n)
         dlogtau = np.log10(tau[1]/tau[0]) 
         x = self.xdata.copy()
         y = self.ydata.copy()
         
-        A = np.exp(-np.outer(x,(1/tau)))
-        
+        #A = np.exp(-np.outer(x,(1/tau)))
+        A = np.exp(-np.outer(x,tau))
         if distr:
             A = np.concatenate( (A, regd*np.ones((1,tau.shape[0])) ) )
             y = np.concatenate((y,regd*np.ones(1)))
@@ -651,11 +696,11 @@ class fitData():
                         } 
                       ]
         bounds = [(0,1) for i in range(n)]
-        costf = lambda w: np.sum(w*w)/w.shape[0]
+        #costf = lambda w: np.sum(w*w)/w.shape[0]
         costf = lambda w: regs*np.sum((w[2:]-2*w[1:-1]+w[0:-2])**2)/dlogtau**2
         res = minimize(costf,np.ones(n),bounds=bounds,method = 'SLSQP',
                                  constraints=constraints,
-                                 options = {'maxiter':1000,'disp':True})
+                                 options = {'maxiter':200,'disp':True})
         
         isd = 1-res.x.sum() ; bl = res.x[0] ; bu = res.x[1]
         self.data_res = constraints[0]['fun'](res.x)
@@ -663,12 +708,12 @@ class fitData():
         self.opt_res = res
         self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
         self.relaxation_times = tau
-        self.smoothness = costf(res.x)/regs
-        self.con_res = np.sqrt(isd**2+bl**2+bu**2+self.data_res)
+        self.smoothness = np.sqrt(costf(res.x))/regs
+        self.con_res = np.sqrt(self.data_res)
         return res
     
     def report(self):
-        for k in ['prob_distr','con_res','data_res','smoothness']:
+        for k in ['prob_distr','con_res','data_res','smoothness','current_regs']:
             a = getattr(self,k)
             print('{:s} = {}'.format(k,a))
         return
@@ -696,7 +741,7 @@ class fitData():
         plt.yscale('log')
         plt.yticks(fontsize=2.5*size)
         plt.xlabel(r'smoothness',fontsize=3*size)
-        plt.ylabel(r'constraints residual',fontsize=3*size)
+        plt.ylabel(r'data residual',fontsize=3*size)
         if title is None:
             plt.title('Pareto Front')
         else:
