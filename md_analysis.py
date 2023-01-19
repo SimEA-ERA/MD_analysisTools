@@ -399,6 +399,7 @@ class Energetic_Analysis():
         data = np.array([line.split() for line in lines[last_legend+1:]],dtype=float)
         self.data = pd.DataFrame(data,columns=columns)
         return
+    
     def simple_plot(ycols,xcol='time',size = 3.5,dpi = 300, 
              title='',func=None,
              xlabel=['time (ps)'],save_figs=False,fname=None,path=None):
@@ -419,7 +420,52 @@ class Energetic_Analysis():
         plt.legend(frameon=False)
         if save_figs:plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
         plt.show()
-
+class XPCS_Reader():
+    def __init__(self,fname):
+        self.relaxation_modes = []
+        self.params = []
+        self.params_std = []
+        self.func = fitFuncs.freq
+        with open( fname,'r') as f:
+            lines = f.readlines()
+            f.closed
+            
+        for i,line in enumerate(lines):
+            l = line.strip() 
+            if 'Background' in l:
+                self.background= float(l.split(':')[1])
+            if 'log Lagrange Multiplier' in l:
+                self.reg = float(l.split(':')[1])
+            if 'log(Upsilon)' in line:
+                linum = i+2
+        
+        for i,line in enumerate(lines[linum:]):
+            l = line.strip().split()
+            if '----' in line: break
+            self.relaxation_modes.append(float(l[0]))
+            self.params.append(float(l[1]))
+            self.params_std.append(float(l[2]))
+        
+        self.params = np.array(self.params)
+        self.params_std= np.array(self.params_std)
+        
+        dlogtau = self.relaxation_modes[1]-self.relaxation_modes[0]
+        w = self.params
+        
+        self.smoothness = np.sqrt (np.sum( (w[2:]-2*w[1:-1]+w[0:-2])**2)/dlogtau**4)
+        self.relaxation_modes = 10**np.array(self.relaxation_modes)
+        f = self.relaxation_modes
+        self.bounds=(f[0],f[-1])
+        return
+    def fitted_curve(self,x):
+        fc = self.func(x,self.bounds[0],self.bounds[1],self.params)
+        try:
+            fc += self.background
+        except AttributeError:
+            pass
+        
+        return fc
+    
 class plotter():
     def __init__(self):
         return
@@ -444,29 +490,61 @@ class plotter():
         xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
         plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
         plt.yticks(fontsize=2.5*size)
-        if mode =='f': 
+        if mode =='freq': 
             units = '{:s}^{:s}'.format(units,'{-1}')
-            xlabel = 'f'
+            lab = 'freq'
         else:
-            xlabel='\tau'
-        plt.xlabel(r'${:s}$ / ${:s}$'.format(mode,units),fontsize=2*size)
+            lab='\tau'
+        plt.xlabel(r'${:s}$ / ${:s}$'.format(lab,units),fontsize=2*size)
         #plt.ylabel(r'$w$',fontsize=3*size)
         locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
         ax.xaxis.set_minor_locator(locmin)
         ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         for i,(k,f) in enumerate(datadict.items()):
-            if mode =='f':
-                xax = 1/f.relaxation_times
-            else:
-                xax = f.relaxation_times
-            plt.plot(xax,f.params,ls='--',lw=0.25*size,marker = 'o',
+
+            plt.plot(f.relaxation_modes,f.params,ls='--',lw=0.25*size,marker = 'o',
                 markersize=size*1.2,markeredgewidth=0.15*size,fillstyle='none',color=cmap[k],label=k)
-            #plt.plot(f.relaxation_times,f.params,ls='--',label=k,color=cmap[k])
+            #plt.plot(f.relaxation_modes,f.params,ls='--',label=k,color=cmap[k])
         plt.legend(frameon=False,fontsize=2.3*size)
         if fname is not None:
             plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return 
+    @staticmethod
+    def compare_data(data1,data2,plot_args=[],**kwargs):
+        if type(data1) is dict:
+            if type(data2) is dict:
+                multiple_data=True
+            else:
+                raise Exception('Either give both data as objects or as dicts')
+            if len(data1) != len(data2):
+                raise Exception('Data dicts must be of the same size')
+        else:
+            multiple_data = False
+
+            
+        if multiple_data == True:
+            for i in range(len(data1)):
+                if i>=len(plot_args):
+                    plot_args.append(dict())
+                
+                plot_args[i] = {**kwargs,**plot_args[i]}
+                
+            for (k1,d1),(k2,d2),pargs in zip(data1.items(),data2.items(),plot_args):
+                dc = {k1:d1,k2:d2}
+                plotter.relaxation_time_distributions(dc,**pargs)
+        else:
+           dc = {'data1':data1,'data2':data2}
+           plotter.relaxation_time_distributions(dc,**kwargs) 
+        return                
+    @staticmethod
+    def ReadPlot_XPCSdistribution(files,**plot_kwargs):
+        datadict = dict()
+        for file in files:
+            key = file.split('\\')[-1].split('.')[0]
+            datadict[key] = XPCS_Reader(file)
+        plotter.relaxation_time_distributions(datadict,**plot_kwargs)
+        return datadict
     
     @staticmethod
     def write_xy_forXPCS(fname,x,y):
@@ -476,11 +554,12 @@ class plotter():
         data[:,2]+= np.random.uniform(0,1e-9,x.shape[0])
         np.savetxt(fname,data)
         return
+    
     @staticmethod
     def write_data_forXPCS(datadict,path='XPCS_data',cutf=None,midtime=None,num=100):
         
         if cutf is None:
-            cutf ={k:10**10 for k in fitteddict}
+            cutf ={k:10**10 for k in dataddict}
         for k,dy in datadict.items():
             
             fn = '{:s}\\xy_{:s}.txt'.format(path,k)
@@ -581,110 +660,148 @@ class plotter():
         return
     
 class fitData():
+    
     from scipy.optimize import dual_annealing,minimize
-    def __init__(self,xdata,ydata,func,costf='simple',init_params=None,
-                 npars=None,bounds=None):
+    
+    def __init__(self,xdata,ydata,func,method='distribution',bounds=None,
+                 search_grid=None,reg_bounds=None,minimum_res=1e-2,
+                 nw=50,regd=1000,maxiter=200,**options):
         self.ydata = ydata
         self.xdata = xdata
-        self.func = getattr(Analytical_Expressions,func)
-        self.costf = getattr(fitData, costf)
-        if init_params is not None:
-            self.init_params = init_params
-            self.npars = len(init_params)
+        self.mode = func
+        self.func = getattr(fitFuncs,func)
+        
+        if method == 'distribution':
+            self.kernel = getattr(fitKernels,func)
+        
         if bounds is not None:
             self.bounds = bounds
-            
-
-    def fit(self,method ='SLSQP',reg=0,params_distr=False,
-            constraints=None,*args,**kwargs):
-        args = (self.xdata,self.ydata,self.func)
-        if self.costf != self.simple:
-            args = (*args,reg)
-        if method == 'dual_annealing':
-            try:
-                x0 = self.init_params
-            except: 
-                res = dual_annealing(self.costf,bounds=self.bounds,
-                             args=args)
-            else:
-                res = dual_annealing(self.costf, self.bounds,
-                             args=args,x0=x0)
         else:
-            try:
-                x0 = self.init_params
-            except: 
-                x0 = np.ones(len(self.bounds))
-            if constraints is None:
-                constraints = []
-            if params_distr:
-               
-                x0[2:] /= np.sum(x0[2:])
-                constraints.append( {'type':'eq','fun':lambda x: np.sum(x[2:])-1})
-                constraints.append({'type':'eq','fun':lambda x: x[2]})
-                constraints.append({'type':'eq','fun':lambda x: x[-1]})
-            constraints = tuple(constraints)
-            logs.logger.debug('Constraints are --> {}'.format(constraints))
+            self.bounds = (1e-7,1e7)
+        if search_grid is not None:
+            self.search_grid= search_grid
+        else:
+            self.search_grid= (12,4,4)
+        if reg_bounds is not None:
+            self.reg_bounds = reg_bounds
+        else:
+            self.reg_bounds = (1e0,1e8)
+        self.minimum_res = minimum_res
+        self.nw = nw
+        self.maxiter=maxiter
+        self.regd = regd
+        
+        if 'is_distribution' in options:
+            self.is_distribution = options['is_distribution']
+        else:
+            self.is_distribution = True
             
-            res = minimize(self.costf,x0,bounds=self.bounds,
-                                 args=args,method = method,
-                                 constraints=constraints)
-        self.params = res.x
-        if self.func == Analytical_Expressions.wexp:
-            tau = Analytical_Expressions.get_times(self.params[0],self.params[1],self.params[2:].shape[0])
-            self.relaxation_times = tau
-        return res
-    
-    def search_best(self,a,b,n,regres=1.0,regd=1000):
+        if 'zeroEdge_distribution' in options:
+            self.zeroEdge_distribution = options['zeroEdge_distribution']
+        else:
+            self.zeroEdge_distribution = True
+        
+        if 'show_report' in options:
+            self.show_report = options['show_report']
+        else:
+            self.show_report = True
+        if 'init_method' in options:
+            self.init_method = options['init_method']
+        else:
+            self.init_method = 'ones'
+            
+        if 'opt_method' in options:
+            self.opt_method = options['opt_method']
+        else:
+            self.opt_method = 'SLSQP'
+        return
+            
+    def search_best(self):
         self.crit = []
         self.smv = []
-        self.crv = []
+        self.drv = []
         self.regs = []
-        self.iter = 0
-        irs = (1e0,1e8)
-        rgbest_old = -50
-        for i in range(3):
-            try: rgbest_old = rgbest 
-            except: pass
-            self.search_reg(a,b,n,regres,regd,irs)
+        
+        irs = self.reg_bounds
+        a = self.bounds[0]
+        b = self.bounds[1]
+        for numreg in self.search_grid:
+            self.search_reg(a,b,numreg,irs)
             irs = self.last_regs[np.argsort(self.last_crit)[0:2]]
             irs.sort()
-            rgbest = self.bestreg
-            if rgbest_old == rgbest:
-                break
-        self.exactFit(a,b,n,regd,rgbest)
-        return
-    def search_reg(self,a,b,n,regres=1.0,regd=1000,irs=(1e-3,1e8)):
-        lreg = np.logspace(np.log10(irs[0]),
-                           np.log10(irs[1]),base=10,num=12)
-        
-        self.last_regs = lreg
-        self.last_crit = []
-        for lr in lreg:
-            self.current_regs = lr
-            self.exactFit(a,b,n,regd,lr)
-           # print('lr = {:.3e}'.format(lr))
-            self.report()
-            s = self.smoothness ; c = self.con_res
-            self.smv.append(s) ; self.crv.append(c)
-            self.regs.append(lr) ;
-            crit = np.sqrt(s**2 + regres*c**2)
-            self.crit.append( crit)
-            self.last_crit.append(crit)
-            #self.show_relaxation_times(title='lr = {:.3e}'.format(lr))
+        rgbest = self.bestreg
+        #self.maxiter = 10000
+        self.exactFit(a,b,self.nw,rgbest)
         return
     
-    def exactFit(self,a,b,n,regd=1000,regs=1,distr=True,zeroEdge=True):
-        tau = Analytical_Expressions.get_times(a,b,n)
+    def search_reg(self,a,b,numreg,irs=(1e0,1e8)):
+        
+        for attr in ['crit','smv','drv','regs']:
+            try:
+                dump = getattr(self,attr)
+            except AttributeError:
+                setattr(self,attr,[])
+                
+        lreg = np.logspace(np.log10(irs[0]),np.log10(irs[1]),base=10,num=numreg)
+        #lreg = np.linspace(irs[0],irs[1],num=numreg)
+        self.last_regs = lreg
+        self.last_crit = []
+        n = self.nw
+        a = self.bounds[0]
+        b = self.bounds[1]
+        
+        for reg in lreg:
+            self.current_reg = reg
+            self.exactFit(a,b,n,reg)
+           # print('lr = {:.3e}'.format(lr))
+
+            s = self.smoothness ; d = self.data_res
+            crit = np.sqrt(s**2 + d**2)
+            
+            self.smv.append(s) ; self.drv.append(d)
+            self.regs.append(reg) ;
+            self.crit.append( crit)
+            self.last_crit.append(crit)
+            self.nsearches = len(self.regs)
+            if self.show_report:
+                self.report()
+            #self.show_relaxation_modes(title='lr = {:.3e}'.format(lr))
+        return
+    
+    @staticmethod
+    def get_logtimes(a,b,n):
+        tau = np.logspace(np.log10(a),np.log10(b),base=10,num=n)
+        return tau
+    
+    def initial_params(self):
+        if self.init_method =='uniform':
+            pars = np.ones(self.nw)/self.nw
+        elif self.init_method =='from_previous':
+            try:
+                pars = self.params
+            except:
+                pars =  np.ones(self.nw)/self.nw
+        elif self.init_method =='ones':
+            pars = np.ones(self.nw)
+        return pars
+    
+    def exactFit(self,a,b,n,regs=1):
+        
+        tau = fitData.get_logtimes(a,b,n)
         dlogtau = np.log10(tau[1]/tau[0]) 
         x = self.xdata.copy()
         y = self.ydata.copy()
+        ya = y.copy()
         
-        #A = np.exp(-np.outer(x,(1/tau)))
-        A = np.exp(-np.outer(x,tau))
-        if distr:
+        A = self.kernel(x,tau)
+        Da = A.copy()
+        
+        regd = self.regd
+        if self.is_distribution:
             A = np.concatenate( (A, regd*np.ones((1,tau.shape[0])) ) )
             y = np.concatenate((y,regd*np.ones(1)))
-        if zeroEdge:
+        
+        if self.zeroEdge_distribution:
             c1 = np.zeros((2,tau.shape[0]))
             c1[0][0] = regd
             c1[1][-1] = regd
@@ -696,30 +813,45 @@ class fitData():
                         } 
                       ]
         bounds = [(0,1) for i in range(n)]
-        #costf = lambda w: np.sum(w*w)/w.shape[0]
-        costf = lambda w: regs*np.sum((w[2:]-2*w[1:-1]+w[0:-2])**2)/dlogtau**2
-        res = minimize(costf,np.ones(n),bounds=bounds,method = 'SLSQP',
-                                 constraints=constraints,
-                                 options = {'maxiter':200,'disp':True})
+        regcost = regs/dlogtau**4
         
-        isd = 1-res.x.sum() ; bl = res.x[0] ; bu = res.x[1]
-        self.data_res = constraints[0]['fun'](res.x)
-        self.params = res.x
-        self.opt_res = res
+        costf = lambda w: regcost*np.sum( (w[2:]-2*w[1:-1]+w[0:-2])**2)
+        p0 = self.initial_params()   
+        opt_res = minimize(costf,p0,bounds=bounds,method = self.opt_method,
+                          constraints=constraints,
+                          options = {'maxiter':self.maxiter,'disp':self.show_report})
+        
+        isd = 1-opt_res.x.sum() ; bl = opt_res.x[0] ; bu = opt_res.x[1]
+        self.con_res = constraints[0]['fun'](opt_res.x)
+        self.params = opt_res.x
+        self.opt_res = opt_res
         self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
-        self.relaxation_times = tau
-        self.smoothness = np.sqrt(costf(res.x))/regs
-        self.con_res = np.sqrt(self.data_res)
-        return res
+        self.relaxation_modes = tau
+        self.smoothness = np.sqrt (costf(opt_res.x)/regs)
+        self.data_res = np.sqrt(np.sum((np.dot(Da,opt_res.x)-ya)**2)/ya.shape[0] )
+        return opt_res
     
     def report(self):
-        for k in ['prob_distr','con_res','data_res','smoothness','current_regs']:
+        for k in ['prob_distr','con_res','data_res','smoothness',
+                  'current_reg','nsearches']:
             a = getattr(self,k)
             print('{:s} = {}'.format(k,a))
         return
     @property
     def bestreg(self):
-        return self.regs[np.argmin(self.crit)]
+        regs = np.array(self.regs)
+        d = np.array(self.drv)
+        print(regs.shape,d.shape)
+        filt = d<self.minimum_res
+        regs = regs[filt]
+        crit = np.array(self.crit)[filt]
+        print(regs.shape,crit.shape)
+        try:
+            regbest =  regs[np.argmin(crit)]
+        except Exception as err:
+            logs.logger.debug('Something strange happend --> {}'.format(err))
+            raise Exception(err)
+        return regbest
       
     def print_reg(self):
         print('best reg = {:.6e}'.format(self.bestreg))
@@ -734,7 +866,7 @@ class fitData():
         plt.minorticks_on()
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
-        c = np.array(self.crv)
+        d = np.array(self.drv)
         s = np.array(self.smv)
 
         plt.xscale('log')
@@ -746,24 +878,24 @@ class fitData():
             plt.title('Pareto Front')
         else:
             plt.title(title)
-        plt.plot(s,c,
+        plt.plot(s,d,
                  ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
         
         pareto = []
-        for i,(si,ci) in enumerate(zip(s,c)):
+        for i,(si,di) in enumerate(zip(s,d)):
             fs = si > s 
-            fc = ci > c
-            f = np.logical_and(fs,fc)
+            fd = di > d
+            f = np.logical_and(fs,fd)
             if f.any(): continue
             pareto.append(i)
         p = np.array(pareto,dtype=int)
-        sp = s[p] ; cp =c[p]
+        sp = s[p] ; dp =d[p]
         ser = sp.argsort()
-        sp = sp[ser] ; cp = cp[ser]
-        plt.ylim([0,cp.max()*1.05])
+        sp = sp[ser] ; dp = dp[ser]
+        plt.ylim([0,dp.max()*1.05])
         plt.xlim([0,sp.max()*1.05])
-        plt.plot(sp,cp,ls='--',color='k',lw=size/5)
-        plt.plot([self.smoothness],[self.con_res],marker='o',color='red',markersize=1.7*size)
+        plt.plot(sp,dp,ls='--',color='k',lw=size/5)
+        plt.plot([self.smoothness],[self.data_res],marker='o',color='red',markersize=1.7*size)
         
         plt.xticks(fontsize=2.5*size)
         if fname is not None:
@@ -771,7 +903,7 @@ class fitData():
         plt.show()
         return
     
-    def show_relaxation_times(self,size=3.5,units='ns',
+    def show_relaxation_modes(self,size=3.5,units='ns',
                               title=None,color='red',fname=None):
         
         figsize = (size,size)
@@ -787,12 +919,17 @@ class fitData():
         ax.xaxis.set_minor_locator(locmin)
         ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         plt.ylabel('w',fontsize=3*size)
-        plt.xlabel(r'$\tau$ / {:s}'.format(units),fontsize=3*size)
+        if self.mode=='freq':
+            units = r'${:s}^{:s}$'.format(units,'{-1}')
+            lab = r'$f$ / {:s}'.format(units)
+        elif mode =='tau':
+            lab = r'$\tau$ / {:s}'.format(units)
+        plt.xlabel(lab,fontsize=3*size)
         if title is None:
             plt.title('Relaxation times distribution')
         else:
             plt.title(title)
-        plt.plot(self.relaxation_times,self.params,
+        plt.plot(self.relaxation_modes,self.params,
                  ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
         xticks = [10**x for x in range(-10,20) if self.bounds[0]<=10**x<=self.bounds[1] ]
         plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
@@ -802,40 +939,35 @@ class fitData():
         return
     def fitted_data(self):
         return self.func(self.xdata,*self.params)
+    
     def fitted_curve(self,x):
         
         return self.func(x,self.bounds[0],self.bounds[1],self.params)
-    @staticmethod
-    def simple(params,xdata,ydata,func):
-        cost = func(xdata,*params) - ydata
-        return np.sum(cost*cost)/cost.shape[0]
-    @staticmethod
-    def lasso(params,xdata,ydata,func,reg):
-        cost = fitData.simple(params,xdata,ydata,func) + reg*np.count_nonzero(params[2:])
-        return cost 
 
+class fitKernels():
     @staticmethod
-    def ridge(params,xdata,ydata,func,reg):
-        cost = fitData.simple(params,xdata,ydata,func) + reg*np.sum(params[2:]**2)
-        return cost
+    def freq(t,f):
+        return np.exp(-np.outer(t,f))
     @staticmethod
-    def fgradient(params,xdata,ydata,func,reg):
-        cost = fitData.simple(params,xdata,ydata,func)
-        fx = func(xdata,*params)
-        fg = fx[2:]-fx[0:-2] - (ydata[2:]-ydata[0:-2])
-        cg = np.sum(fg*fg)/fg.shape[0]
-        return cost +reg*cg
+    def tau(t,tau):
+        return np.exp(-np.outer(t,(1/tau)))
+
+class fitFuncs():
     @staticmethod
-    def fgradient_smooth(params,xdata,ydata,func,reg):
-        c1 = fitData.fgradient(params,xdata,ydata,func,reg[0])
-        c2 = fitData.smooth(params,xdata,ydata,func,reg[1])
-        return c1 + c2
+    def freq(t,a,b,w):
+        frqs = fitData.get_logtimes(a,b,len(w))
+        s=0
+        for i,fr in enumerate(frqs):
+            s+= w[i]*np.exp(-t*fr)
+        return s
     @staticmethod
-    def smooth(params,xdata,ydata,func,reg):
-        cost = fitData.simple(params,xdata,ydata,func) 
-        smooth = (params[4:]-2*params[3:-1]+params[2:-2])
-        cost+=reg*np.sum(smooth*smooth)/params[2:].shape[0]
-        return cost 
+    def tau(t,a,b,w):
+        taus = fitData.get_logtimes(a,b,len(w))
+        s=0
+        for i,ta in enumerate(taus):
+            s+= w[i]*np.exp(-t*ta)
+        return s
+    
 class Analytical_Expressions():
     @staticmethod
     def KWW_simple(t,beta,tww):
@@ -848,27 +980,8 @@ class Analytical_Expressions():
         #all curves regardless beta pass through the same point
         phi = np.exp( -(t/tww )**beta )
         return phi
-    @staticmethod
-    def get_times(a,b,n):
-        tau = np.logspace(np.log10(a),np.log10(b),base=10,num=n)
-        return tau
-    
-    @staticmethod
-    def wexp(t,*w):
-        tau = Analytical_Expressions.get_times(w[0],w[1],len(w[2:]))
-        w = w[2:]
-        s=0
-        for i,tw in enumerate(tau):
-            s+= w[i]*Analytical_Expressions.expDecay_simple(t,tw)
-        return s
-    @staticmethod
-    def wexp(t,a,b,w):
-        tau = Analytical_Expressions.get_times(a,b,len(w))
-        s=0
-        for i,tw in enumerate(tau):
-            s+= w[i]*Analytical_Expressions.expDecay_simple(t,tw)
-        return s
-    
+
+
     @staticmethod
     def KWW(t,A,beta,tww):
         #Kohlrausch–Williams–Watts
