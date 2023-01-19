@@ -18,7 +18,8 @@ import pandas as pd
 import logging
 import coloredlogs
 import matplotlib
-
+import re
+import lammpsreader 
 class logs():
     '''
     A class for modifying the loggers
@@ -418,8 +419,13 @@ class Energetic_Analysis():
             if funcs is not None:
                 plt.plot(x,funcs(y),lab ='{} - {}'.format(ycol,func))
         plt.legend(frameon=False)
-        if save_figs:plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
+        if fname is not None:
+            if path is not None:
+                plt.savefig('{}\{}'.format(path,fname),bbox_inches='tight')
+            else:
+                plt.savefig('{}'.format(fname),bbox_inches='tight')
         plt.show()
+        
 class XPCS_Reader():
     def __init__(self,fname):
         self.relaxation_modes = []
@@ -457,6 +463,7 @@ class XPCS_Reader():
         f = self.relaxation_modes
         self.bounds=(f[0],f[-1])
         return
+    
     def fitted_curve(self,x):
         fc = self.func(x,self.bounds[0],self.bounds[1],self.params)
         try:
@@ -562,7 +569,7 @@ class plotter():
             cutf ={k:10**10 for k in dataddict}
         for k,dy in datadict.items():
             
-            fn = '{:s}\\xy_{:s}.txt'.format(path,k)
+            fn = '{:s}\\xpcs_{:s}.txt'.format(path,k)
             
             x = ass.numpy_keys(dy)/1000
             y = ass.numpy_values(dy)
@@ -1048,8 +1055,10 @@ class Analytical_Expressions():
 class Analytical_Functions():
     '''
     This class is used exclucively to add hydrogens on correct locations
-    and be able to compute all atom properties like dipole momement
-    Currently works well for PB
+    and be able to compute all atom properties like dipole momement vectors (dielectric data)
+    Currently works well for PB. It is NOT tested for anything else. 
+    It needs attention to the geometry calculations and should be used
+    with the add_atoms class.
     '''
     def __init__(self):
         pass
@@ -1206,8 +1215,7 @@ class add_atoms():
     '''
     This class is used to add atoms to the system
     Currently works well to add hydrogens to PB
-    It should be easy to extend adding hydrogens to other polymers
-    and other kind of atoms maybe
+    It needs modification to achieve generality
     '''
     def __init__(self):
         pass
@@ -1672,6 +1680,9 @@ class unit_vector_Functions():
         uv = np.ones((r.shape[0],3))
         uv[:,2] = 0
         return uv
+
+
+
     
 class Analysis:
     '''
@@ -1679,18 +1690,18 @@ class Analysis:
     '''
     def __init__(self,
                  trajectory_file, # gro/trr for now
-                 connectivity_info, #itp
-                 gro_file = None,
+                 connectivity_file, #itp
+                 topol_file = None,
                  memory_demanding=False,
                  types_from_itp=True):
         t0 = perf_counter()
         self.trajectory_file = trajectory_file
-        self.connectivity_info = connectivity_info
+        self.connectivity_file = connectivity_file
         self.memory_demanding = memory_demanding
         self.types_from_itp = types_from_itp
         '''
         trajectory_file: the file to analyze
-        'connectivity_info': itp or list of itps. From the bonds it finds angles and dihedrals
+        'connectivity_file': itp or list of itps. From the bonds it finds angles and dihedrals
         'gro_file': one frame gro file to read the topology (can be extended to other formats). It reads molecule name,molecule id, atom type
         memory_demanding: If True each time we loop over frames, these are readen from the disk and are not stored in memory
         types_from_itp: if different types excist in itp and gro then the itp ones are kept
@@ -1698,29 +1709,36 @@ class Analysis:
         
         
         if '.gro' == trajectory_file[-4:]:
-            self.gro_file = trajectory_file
+            self.traj_file_type = 'gro'
+            self.topol_file = trajectory_file
             self.read_by_frame = self.read_gro_by_frame # function
             self.traj_opener = open
-            self.traj_opener_args = (self.trajectory_file,'r')
+            self.traj_opener_args = LammpsTrajReader
         elif '.trr' == trajectory_file[-4:]:
+            self.traj_file_type ='trr'
             self.read_by_frame =  self.read_trr_by_frame # function
             self.traj_opener = GroTrrReader
             self.traj_opener_args = (self.trajectory_file,)
-            if '.gro' == gro_file[-4:]: 
-                self.gro_file = gro_file
+            if '.gro' == topol_file[-4:]: 
+                self.topol_file = topol_file
             else:
-                s = 'Your  trajectory file is {:s} while your gro file is {:s}.\n \
-                Give the right format for the gro_file.\n \
+                s = 'Your  trajectory file is {:s} while your topol file is {:s}.\n \
+                Give the right format for the topol_file. i.e. ".gro"\n \
                 Only One frame is needed to get the \
                 topology'.format(trajectory_file,gro_file)
                 raise Exception(s)
-            
+        elif '.lammpstrj' == self.trajectory_file[-10:]:
+            self.traj_file_type ='lammpstrj'
+            self.read_by_frame = self.read_lammpstrj_by_frame
+            self.traj_opener = lammpsreader.LammpsTrajReader
+            self.traj_opener_args = (self.trajectory_file,)
+            if topol_file is None:
+               topol_file = self.connectivity_file
+            self.topol_file = topol_file
         else:
             raise NotImplementedError('Trajectory file format ".{:s}" is not yet Implemented'.format(trajectory_file.split('.')[-1]))
-        self.read_gro_topol()
-        #self.get_masses()
-        #find connectivity
-        self.find_connectivity()
+        self.read_topology()
+        
         self.analysis_initialization()
         
         self.timeframes = dict() # we will store the coordinates,box,step and time here
@@ -1735,6 +1753,9 @@ class Analysis:
         Also makes some data manipulation that might be used later
         '''
         t0 = perf_counter()
+        ## We want masses into numpy array
+        self.find_masses()
+        
         #Now we want to find the connectivity,angles and dihedrals
         
         self.find_neibs()
@@ -1781,7 +1802,7 @@ class Analysis:
             x[i,0]=k[0] ; x[i,1]=k[-1]
             
         x = x[x[:,0].argsort()]
-        setattr(self,'sorted_'+attr_name+'_keys',x-self.starts_from)
+        setattr(self,'sorted_'+attr_name+'_keys',x)
         
         tf = perf_counter() - t0 
         #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
@@ -1795,43 +1816,27 @@ class Analysis:
         temp_ids = {i:[] for i in types}
         for k,v in dictionary.items():
             temp_ids[v].append(np.array(k))
-        ids = {v : np.array(temp_ids[v])-self.starts_from for v in types}
+        ids = {v : np.array(temp_ids[v]) for v in types}
         setattr(self,attr_name+'_ids_per_type',ids)
         return 
     
-    def find_connectivity(self):
-        t0 = perf_counter()
-        conn = dict()
-        if ass.iterable(self.connectivity_info):
-            for cf in self.connectivity_info:
+    def find_topology_from_itp(self):
+        #t0 = perf_counter()
+
+        if ass.iterable(self.connectivity_file):
+            for cf in self.connectivity_file:
                 if '.itp' in cf:
                     self.read_atoms_and_connectivity_from_itp(cf)
-                    
+                    itp =True           
                 else:   
                     raise NotImplementedError('Non itp files are not yet implemented')
-                    '''
-                    if len(cf) ==2:
-    
-                        a,t = self.sorted_id_and_type(cf)
-                        conn[a] = t
-                        explicit = True
-                    else:
-                        explicit = False
-                        raise Exception(NotImplemented)
-            try:
-                if explicit:
-                    self.connectivity = conn
-                    return
-            except NameError:
-                pass
-                    '''
                 
         else:
-            if '.itp' in self.connectivity_info:
-                self.read_atoms_and_connectivity_from_itp(self.connectivity_info)
+            if '.itp' == self.connectivity_file[-4:]:
+                self.read_atoms_and_connectivity_from_itp(self.connectivity_file)
+                itp =True
             else:
-                raise NotImplementedError('Non itp files are not yet implemented')
-     
+                raise NotImplementedError('Non itp files are not yet implemented') 
         self.connectivity = dict()
         for j in np.unique(self.mol_ids):
             global_mol_at_ids = self.at_ids[self.mol_ids==j]
@@ -1842,16 +1847,18 @@ class Analysis:
             res_nm = res_nm[0]
             local_connectivity = self.connectivity_per_resname[res_nm]
             
-            for b in local_connectivity:
-                
+            for b in local_connectivity:       
                 id0 = self.loc_id_to_glob[j][b[0]]
                 id1 = self.loc_id_to_glob[j][b[1]]
                 conn_id,c_type = self.sorted_id_and_type((id0,id1))
                 self.connectivity[conn_id] = c_type
-        tf = perf_counter() - t0
+
+        
+        #tf = perf_counter() - t0
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
 
+            
     def find_neibs(self):
         '''
         Computes first (bonded) neihbours of a system in dictionary format
@@ -1927,7 +1934,7 @@ class Analysis:
         return frame_min
     
     def sorted_id_and_type(self,a_id):
-        t = [self.at_types[i-self.starts_from] for i in a_id]
+        t = [self.at_types[i] for i in a_id]
         if t[0]<=t[-1]:
             t = tuple(t)
         else:
@@ -2006,8 +2013,82 @@ class Analysis:
 
     def read_atoms_and_connectivity_from_itp(self,file):
         t0 = perf_counter()
+        
+        def read_atoms_from_itp(file):
+            t0 = perf_counter()
+            with open(file,'r') as f:
+                lines = f.readlines()
+                f.closed
+            for j,line in enumerate(lines):
+                if 'atoms' in line and '[' in line and ']' in line:
+                    jatoms = j
+            at_ids = [] ; res_num=[];at_types = [] ;res_name = [] ; cngr =[] 
+            charge = dict() ; mass=dict()
+            connectivity = dict()
+            atoms = dict()
+            i=0
+            for line in lines[jatoms+1:]:
+                l = line.split()
+                try:
+                    a = int(l[0])
+                except:
+                    pass
+                else:
+                    at_ids.append(i) #already int
+                    res_name.append(l[3])
+                    t = l[1]
+                    cngr.append(l[5])
+                    atoms[l[4]] = t
+                    at_types.append(t)
+                    charge[t] = float(l[6])
+                    mass[t] = float(l[7])
+                    res_num.append(int(l[2]))
+                    i+=1
+                if '[' in line or ']' in line:
+                    break
+                
+            tf = perf_counter() - t0
+            #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+            
+            return np.array(at_ids),np.array(at_types),np.array(res_num),np.array(res_name),atoms,cngr,charge,mass
+ 
+        def read_connectivity_from_itp(file):
+            t0 = perf_counter()
+            with open(file,'r') as f:
+                lines = f.readlines()
+                f.closed
+                
+            for j,line in enumerate(lines):
+                
+                if 'bonds' in line and '[' in line and ']' in line:
+                    jbonds = j
+            bonds = []
+            try:
+                x= jbonds
+            except UnboundLocalError:
+                pass
+            else:
+                for line in lines[jbonds+1:]:
+                    l = line.split()
+                    try:
+                        b = [int(l[0]),int(l[1])]
+                    except:
+                        pass
+                    else:
+                        bonds.append(b)
+                    if '[' in line or ']' in line:
+                        break
+            bonds = np.array(bonds)
+            try:
+                bonds-=bonds.min()
+            except ValueError as e:
+                logs.logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
+            tf = perf_counter()
+            return  bonds
+    
+        
         at_ids,at_types,res_num,res_name,atoms,cngr,charge,mass \
-        = self.read_atoms_from_itp(file)
+        = read_atoms_from_itp(file)
         
         t1 = perf_counter()
         if self.types_from_itp:
@@ -2022,7 +2103,7 @@ class Analysis:
         else:
             for k,m in mass.items():
                 self.mass_map[k] = m
-        bonds = self.read_connectivity_from_itp(file)
+        bonds = read_connectivity_from_itp(file)
         
         connectivity_per_resname = {t:[] for t in np.unique(res_name) }
         
@@ -2043,82 +2124,97 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
     
-    @staticmethod
-    def read_atoms_from_itp(file):
-        t0 = perf_counter()
-        with open(file,'r') as f:
-            lines = f.readlines()
-            f.closed
-        for j,line in enumerate(lines):
-            if 'atoms' in line and '[' in line and ']' in line:
-                jatoms = j
-        at_ids = [] ; res_num=[];at_types = [] ;res_name = [] ; cngr =[] 
-        charge = dict() ; mass=dict()
-        connectivity = dict()
-        atoms = dict()
-        i=0
-        for line in lines[jatoms+1:]:
-            l = line.split()
-            try:
-                a = int(l[0])
-            except:
-                pass
-            else:
-                at_ids.append(i) #already int
-                res_name.append(l[3])
-                t = l[1]
-                cngr.append(l[5])
-                atoms[l[4]] = t
-                at_types.append(t)
-                charge[t] = float(l[6])
-                mass[t] = float(l[7])
-                res_num.append(int(l[2]))
-                i+=1
-            if '[' in line or ']' in line:
-                break
-            
-        tf = perf_counter() - t0
-        #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        
-        return np.array(at_ids),np.array(at_types),np.array(res_num),np.array(res_name),atoms,cngr,charge,mass
 
-    @staticmethod    
-    def read_connectivity_from_itp(file):
+    def read_topology(self):
+        if '.gro' == self.topol_file[-4:]:
+            self.read_gro_topol()  # reads from gro file
+            self.find_topology_from_itp() # reads your itp files to get the connectivity
+        elif '.ltop' == self.topol_file[-5:]:
+            self.read_lammps_topol()
+        return
+    
+    def read_lammps_topol(self):
         t0 = perf_counter()
-        with open(file,'r') as f:
+        with open(self.topol_file,'r') as f:
             lines = f.readlines()
             f.closed
+        
+        def get_value(lines,valuename,dtype=int):
+            for line in lines:
+                if valuename in line:
+                    return dtype(line.split()[0])
+        
+        def get_line_of_header(lines,header):
+            for i,line in enumerate(lines):
+                if header in line:
+                    return i
+        values = ['atoms','bonds','angles','dihedrals','impropers',
+                  'atom types', 'bond types', 'angle types', 
+                  'dihedral types','improper types']
+        headers = ['Masses','Atoms','Bonds','Angles','Dihedrals']
+        
+        numbers = {v:get_value(lines,v) for v in values}
+        
+        header_lines = {hl:get_line_of_header(lines,hl) for hl in headers}
+        
+        natoms = numbers['atoms']
+        mol_ids = np.empty(natoms,dtype=int)
+        mol_nms = np.empty(natoms,dtype=object)
+        at_tys  = np.empty(natoms,dtype=object)
+        at_ids  = np.empty(natoms,dtype=int)
+        hla = header_lines['Atoms']
+        atom_lines = lines[hla+2 : hla+2+natoms]
+        ncols = len(atom_lines[0].split())
+        self.charge_map = dict()
+        for i,line in enumerate(atom_lines):
+            l = line.strip().split()
+            if i==0:
+                starts_from =int(l[0])
+            else:
+                if int(atom_lines[i-1].split()[0])+1 != i+starts_from:
+                    raise Exception('The atoms are not concecutive')
+            mol_ids[i] = int(l[1])
+            mol_nms[i] = l[1]
+            at_tys[i] = l[2]
+            at_ids[i] = i
+            if ncols==4 or ncols ==7:
+                self.charge_map[l[2]] = float(l[3])
             
-        for j,line in enumerate(lines):
-            
-            if 'bonds' in line and '[' in line and ']' in line:
-                jbonds = j
-        bonds = []
-        try:
-            x= jbonds
-        except UnboundLocalError:
-            pass
-        else:
-            for line in lines[jbonds+1:]:
-                l = line.split()
-                try:
-                    b = [int(l[0]),int(l[1])]
-                except:
-                    pass
-                else:
-                    bonds.append(b)
-                if '[' in line or ']' in line:
-                    break
-        bonds = np.array(bonds)
-        try:
-            bonds-=bonds.min()
-        except ValueError as e:
-            logs.logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
-        tf = perf_counter()
-        return  bonds
-            
+        
+        self.mol_ids = mol_ids
+        self.mol_names = mol_nms
+        self.at_types = at_tys
+        self.at_ids = at_ids
+        
+        self.find_locGlob()
+        
+        
+        
+        self.connectivity= dict()
+
+        hlb = header_lines['Bonds'] 
+        nbonds = numbers['bonds']
+        bond_lines = lines[hlb+2:hlb + nbonds+2]
+        for  i,line in enumerate(bond_lines):  
+            b = line.strip().split() 
+            id0 = int(b[-2]) - starts_from
+            id1 = int(b[-1]) - starts_from
+            conn_id,c_type =  self.sorted_id_and_type((id0,id1))
+            self.connectivity[conn_id] = c_type
+        
+        self.mass_map = dict()
+        hlm = header_lines['Masses']
+        
+        for line in lines[hlm+2:+hlm+2+numbers['atom types']]:
+            l = line.strip().split()
+            self.mass_map[l[0]] = float(l[1])
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        return 
+    
     def read_gro_topol(self):
-        with open(self.gro_file,'r') as f:
+        with open(self.topol_file,'r') as f:
             l = f.readline()
             natoms = int(f.readline().strip())
             #allocate memory
@@ -2131,40 +2227,40 @@ class Analysis:
                 mol_ids[i] = int(line[0:5].strip())
                 mol_nms[i] = line[5:10].strip()
                 at_tys[i] = line[10:15].strip()
-                #at_ids[i] = int(line[15:20].strip())
                 at_ids[i] = i
             f.close()
         
-        starts_from = at_ids.min()
-        
-        loc_id_to_glob = dict() ; glob_id_to_loc = dict()
-        for j in np.unique(mol_ids):
-            loc_id_to_glob[j] = dict()
-            glob_id_to_loc[j] = dict()
-            filt = mol_ids== j
-            res_nm = np.unique(mol_nms[filt])
-            if res_nm.shape !=(1,):
-                raise ValueError('many names for a residue, res_id = {:d}'.format(j))
-            else:
-                res_nm = res_nm[0]
-            g_at_id = at_ids[filt]
-            
-            for i,g in enumerate(g_at_id):
-                loc_id = i+starts_from
-                loc_id_to_glob[j][loc_id] = g
-                glob_id_to_loc[j][g] = loc_id
-        
-        self.starts_from = starts_from
-        self.loc_id_to_glob = loc_id_to_glob
-        self.glob_id_to_loc = glob_id_to_loc
-        
-        
+
         self.mol_ids = mol_ids
         self.mol_names = mol_nms
         self.at_types = at_tys
         self.at_ids = at_ids
+        
+        self.find_locGlob()
+ 
         return 
     
+    def find_locGlob(self):
+        loc_id_to_glob = dict() ; glob_id_to_loc = dict()
+        for j in np.unique(self.mol_ids):
+            loc_id_to_glob[j] = dict()
+            glob_id_to_loc[j] = dict()
+            filt = self.mol_ids== j
+            res_nm = np.unique(self.mol_names[filt])
+            if res_nm.shape !=(1,):
+                raise ValueError('many names for a residue, res_id = {:d}'.format(j))
+            else:
+                res_nm = res_nm[0]
+            g_at_id = self.at_ids[filt]
+            
+            for i,g in enumerate(g_at_id):
+                loc_id = i
+                loc_id_to_glob[j][loc_id] = g
+                glob_id_to_loc[j][g] = loc_id
+        
+        self.loc_id_to_glob = loc_id_to_glob
+        self.glob_id_to_loc = glob_id_to_loc 
+        return 
     def charge_from_maps(self):
         '''
         Updates a dictionary which contains charges for elements from the maps class
@@ -2196,7 +2292,7 @@ class Analysis:
     def find_unique_dihedral_types(self):
         self.dihedral_types = self.unique_values(self.dihedrals.values())
     
-    def get_masses(self):
+    def find_masses(self):
         t0 = perf_counter()
         mass = np.empty(self.natoms,dtype=float)
         for i in range(self.natoms):
@@ -2260,7 +2356,30 @@ class Analysis:
         self.timeframes[frame]['boxsize'] = np.diag(data['box'])
         self.timeframes[frame]['coords'] = data['x']
         return True
-    
+   
+    def read_lammpstrj_by_frame(self,reader,frame):
+        conf = reader.readNextStep()
+        if conf is None: 
+            return False
+        if not reader.isSorted(): reader.sort()                
+        uxs = conf['xu']
+        uys = conf['yu']
+        uzs = conf['zu']
+        # allocate 
+        natoms = uxs.shape[0]
+        coords = np.empty((natoms,3))
+        coords[:,0] = uxs ; coords[:,1] = uys ; coords[:,2] = uzs
+        cbox = conf['box_bounds']
+        tricl = cbox[:,2] != 0.0
+        if tricl.any():
+            raise NotImplementedError('Triclinic boxes are not implemented')
+        offset = cbox[:,0]
+        boxsize = cbox[:,1]-cbox[:,0]
+        coords -= offset
+        self.timeframes[frame] = {'conf':conf,
+                                  'boxsize':boxsize,'coords':coords}
+        return True
+
     def read_from_disk_or_mem(self,ofile,frame):
         if self.memory_demanding:
             try:
@@ -2276,7 +2395,19 @@ class Analysis:
                     return False
             except AttributeError:
                 return self.read_by_frame(ofile, frame)
-            
+
+    def read_lammpstrj_file(self):
+        t0 = perf_counter()
+        with lammpsreader.LammpsTrajReader(self.trajectory_file) as ofile:
+            nframes = 0
+            while( self.read_lammpstrj_by_frame(ofile, nframes)):
+                if self.memory_demanding:
+                    del self.timeframes[nframes]
+                nframes += 1
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return
+    
     def read_trr_file(self):
         t0 = perf_counter()
         with GroTrrReader(self.trajectory_file) as ofile:
@@ -2310,8 +2441,12 @@ class Analysis:
         return 
     
     def read_file(self):    
-        if   'gro' in self.trajectory_file: self.read_gro_file()
-        elif 'trr' in self.trajectory_file: self.read_trr_file()
+        if   self.traj_file_type == 'gro':
+            self.read_gro_file()
+        elif self.traj_file_type == 'trr': 
+            self.read_trr_file()
+        elif self.traj_file_type =='lammpstrj':
+            self.read_lammpstrj_file()
         return 
     
     def write_gro_file(self,fname=None,option='',frames=None):
@@ -2448,6 +2583,13 @@ class Analysis:
         del self.current_frame
         return nframes
     
+    def loop_timeframes(self,funtocall,args):
+        for frame in self.timeframes:
+            self.current_frame = frame
+            funtocall(self,*args)
+        nframes = len(self.timeframes)
+        return nframes
+    
     @property
     def first_frame(self):
         if not self.memory_demanding:
@@ -2490,12 +2632,7 @@ class Analysis:
     def dict_slice(d,i1,i2):
         return {k:v for i,(k,v) in enumerate(d.items()) if i1<=i<i2 }
    
-    def loop_timeframes(self,funtocall,args):
-        for frame in self.timeframes:
-            self.current_frame = frame
-            funtocall(self,*args)
-        nframes = len(self.timeframes)
-        return nframes
+
     
 
 
@@ -2741,9 +2878,9 @@ class Analysis_Confined(Analysis):
     '''
     
     def __init__(self, trajectory_file,   
-                 connectivity_info,       # itp or mol2
+                 connectivity_file,       # itp or mol2
                  conftype,
-                 gro_file = None,
+                 topol_file = None,
                  memory_demanding=True, 
                  particle_filt=None,
                  particle_name=None,
@@ -2751,8 +2888,8 @@ class Analysis_Confined(Analysis):
                  pol_name=None,
                  **kwargs):
         super().__init__(trajectory_file,
-                         connectivity_info,
-                         gro_file,
+                         connectivity_file,
+                         topol_file,
                          memory_demanding)
         self.conftype = conftype
         self.particle_name = particle_name
@@ -2845,7 +2982,7 @@ class Analysis_Confined(Analysis):
         self.find_pol_filt()
         self.npol = self.mol_ids[self.pol_filt].shape[0]
     
-        self.get_masses()
+        #self.find_masses()
         self.unique_atom_types = np.unique(self.at_types)
         
         #Getting the prober functions
