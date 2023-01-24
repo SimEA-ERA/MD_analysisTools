@@ -20,6 +20,8 @@ import coloredlogs
 import matplotlib
 import re
 import lammpsreader 
+
+
 class logs():
     '''
     A class for modifying the loggers
@@ -586,29 +588,122 @@ class plotter():
     @staticmethod
     def sample_logarithmically_array(x,midtime=None,num=100,first_ten=True):
         
-        if first_ten:
-            args = np.array([j for j in range(10)])
-            num -=10
+        
+        if midtime is not None:
+            if not ass.iterable(midtime):
+                if type(midtime) is float:
+                    if type(midtime) is not int: 
+                        raise Exception('midtime must be float or iterable of floats')
+                midtime = [float(midtime)]
+            else:
+                midtime = [float(m) for m in midtime]
+            midtime.append(float(x[-1]))
         else:
-            args = np.array([])
-        if midtime is None:
-            mid = x.shape[0]
-            num =int(num/2)
-        else:
-            mid = x[x<=midtime].shape[0]
-            num-=10
-            num =int(num/2)
-        args = np.concatenate( (args,
-                np.logspace(1,np.log10(mid),num=num,dtype=int)))
-        if midtime is None:
-            return args[args<x.shape[0]]
-        else:
+            midtime = [ float(x[-1]) ]
+    
+        nm = len(midtime)
+
+        args = np.array([0])
+        if first_ten: 
+            num-= nm*10
+        num /= nm
+        num = int(num)
+        i=0
+        for midt in midtime:
+   
+            if type(midt) is not float: 
+                    raise Exception('midtime must be float or iterable of floats')
+            mid = x[x<=midt].shape[0]
             if first_ten:
-                args = np.concatenate((args, [j for j in range(mid,mid+10)]))
-            lgsp = np.logspace(np.log10(mid),np.log10(x.shape[0]-1),num=num,dtype=int)
-            args = np.concatenate((args,lgsp))
+                fj = int(round(10**i,0))
+                args = np.concatenate((args,[j for j in range(fj,fj+10)]+[fj-1]))
+            try:
+                lgsample = np.logspace(i,np.log10(mid),num=num).round(0) 
+            
+                args = np.concatenate( (args, np.array(lgsample,dtype=int)) )
+            except ValueError as e:
+                logs.logger.warning('Excepted ValueError{}\nConsider increasing number of sumpling points'.format(e))
+            i=np.log10(mid)
+  
         return np.unique(args[args<x.shape[0]])
 
+    @staticmethod
+    def plotDynamics(datadict,style='points',locleg='best',ncolleg=1,
+             fname =None,title=None,size=3.5,xlim=None,ylim=None,pmap=None,
+             cmap = None,ylabel=None,units='ns',midtime=None,labmap=None,
+             num=100,cutf=None,lstmap=None,write_plot_data=False,yscale=None):
+
+        if labmap is None:
+            labmap  = {k:k for k in datadict}
+        if cmap is None:
+            c = ass.colors.qualitative.colors9
+            cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
+        if lstmap is None:
+            lst = ass.linestyles.lst7*10
+            lstmap = {k:lst[i] for i,k in enumerate(datadict.keys())}
+        elif type(lstmap) is str:
+            lstmap = {k:lstmap for k in datadict}
+        if ylabel is None:
+            ylabel =r'$P_1(t)$'
+        else:
+            ylabel=ylabel
+        if pmap is None:
+            pmap = {k:'o' for k in datadict}
+        if cutf is None:
+            cutf ={k:10**10 for k in datadict}
+        
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.xscale('log')
+        if yscale is not None:
+            plt.yscale(yscale)
+        if xlim is None:
+            plt.xticks(fontsize=2.5*size) 
+        else:
+            xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
+            plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
+            locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+            ax.xaxis.set_minor_locator(locmin)
+            ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        if ylim is None:
+            plt.yticks(fontsize=2.5*size)
+        else:
+            yticks = [10**y for y in range(ylim[0],ylim[1]+1)]
+            plt.yticks(yticks,fontsize=min(2.5*size,2.5*size*8/len(yticks)))
+            locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+            ax.yaxis.set_minor_locator(locmin)
+            ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        plt.xlabel(r'$t ({})$'.format(units),fontsize=3*size)
+        plt.ylabel(ylabel,fontsize=3*size)
+
+        for i,(k,dy) in enumerate(datadict.items()):
+            x = ass.numpy_keys(dy)/1000
+            y = ass.numpy_values(dy)
+            t = x<=cutf[k]
+            x = x[t][1:]
+            y = y[t][1:]
+            args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
+            if style == 'points':
+                plt.plot(x[args],y[args],ls='none',
+                marker = pmap[k],markeredgewidth=0.3*size,
+                label=labmap[k], markersize=size*1.2,fillstyle='none',
+                color=cmap[k])
+            elif style=='lines':
+                plt.plot(x[args],y[args],ls=lstmap[k],lw=size/1.5,
+                label=labmap[k],color=cmap[k])
+            else:
+                raise NotImplemented('Implement here you own plotting style. Use elif statement')
+        
+        plt.legend(frameon=False,fontsize=2.0*size,loc=locleg,ncol=ncolleg)
+        if fname is not None:plt.savefig(fname,bbox_inches='tight')
+        plt.show()
+        return
+
+    
     @staticmethod
     def fits(datadict,fitteddict,locleg='lower left',ncolleg=1,
              fname =None,title=None,size=3.5,xlim=(-6,6),
@@ -1462,8 +1557,15 @@ class Box_Additions():
         zd = Box_Additions.zdir(box)
         yd = Box_Additions.ydir(box)
         xd = Box_Additions.xdir(box)
-        ls = [np.array([x,y,z]) for x in xd for y in yd for z in zd]
-        return ls
+        lst_L = [np.array([x,y,z]) for x in xd for y in yd for z in zd]
+        return lst_L
+    @staticmethod
+    def spherical_particle(box):
+        zd = Box_Additions.zdir(box)
+        yd = Box_Additions.ydir(box)
+        xd = Box_Additions.xdir(box)
+        lst_L = np.array([np.array([x,y,z]) for x in xd for y in yd for z in zd])
+        return lst_L
     @staticmethod
     def zcylindrical(box):
         return [0]
@@ -1498,9 +1600,11 @@ class Distance_Functions():
         return coords[:,0]-xc
     
     @staticmethod
-    def distance(coords,c):
+    def spherical_particle(self,coords,c):
         d = np.zeros(coords.shape[0],dtype=float)
         distance_kernel(d,coords,c)
+        #r = coords -c
+        #d = np.sqrt(np.sum(r*r,axis=1))
         return d
     
     @staticmethod
@@ -1509,7 +1613,7 @@ class Distance_Functions():
         d2 = np.empty(coords2.shape[0])
         smaller_distance_kernel(d1,d2,coords1,coords2)
         return d1
-    
+
     @staticmethod
     def zcylindrical(self,coords,c):
          d = Distance_Functions.distance(coords[:,0:2],c[0:2])
@@ -1526,101 +1630,33 @@ class bin_Volume_Functions():
     the volume of each bin when needed (e.g. for density profile calculations) 
     '''
     @staticmethod
-    def zdir(self,box,bin_low,bin_up):
+    def zdir(self,bin_low,bin_up):
         binl = bin_up-bin_low
         return 2*box[0]*box[1]*binl
     
     @staticmethod
-    def ydir(self,box,bin_low,bin_up):
+    def ydir(self,bin_low,bin_up):
         binl = bin_up-bin_low
         return 2*box[0]*box[2]*binl
     
     @staticmethod
-    def xdir(self,box,bin_low,bin_up):
+    def xdir(self,bin_low,bin_up):
         binl = bin_up-bin_low
         return 2*box[1]*box[2]*binl
 
     @staticmethod
-    def zcylindrical(self,box,bin_low,bin_up):
+    def zcylindrical(self,bin_low,bin_up):
         binl = bin_up - bin_low
         rm = self.global_cylindrical_radius -(bin_low + 0.5*binl)
-        if rm<0: return 1e16
-        #rm =(bin_low + 0.5*binl)
-        #logs.logger.debug('rm = {:4.5f}, bin_low = {:4.4f}'.format(rm,bin_low))
+        if rm<0: return 1e16 # negative has no meaning therefore we give a large number to devide with it and make density zero
         return 2*np.pi*rm*binl*box[2]
+    
     @staticmethod
-    def distance(self,box,bin_low,bin_up):
-        dr = bin_up-bin_low
-        rm = 0.5*(bin_up+bin_low)
-        v = dr*(4*np.pi*rm**2)
+    def spherical_particle(self,bin_low,bin_up):
+        v = 4*np.pi*(bin_up**3-bin_low**3)/3
         return  v
     
-class Periodic_image_Functions():
-    '''
-    Depending on the confinemnt type one of these functions
-    will be called.
-    These class functions distinguish loops from bridges 
-    by checking if the one end is on the image and the other on the "real" particle
-    Needs a more robust implementation
-    return True for bridge
-    '''
     
-    @staticmethod
-    def zdir(self,r0,re,dads):
-        return abs(re[2]-r0[2]) > dads
-    @staticmethod
-    def ydir(self,r0,re,dads):
-        return abs(re[1]-r0[1]) > dads
-    @staticmethod
-    def xdir(self,r0,re,dads):
-        return abs(re[0]-r0[0]) > dads
-    @staticmethod
-    def distance(self,r0,re,dads): 
-        raise NotImplementedError('This function is not yet implemented')
-        return  ( abs(re) > box ).any() or ( abs(r0) > box ).any()
-    
-    @staticmethod
-    def zcylindrical(self,*args):
-        return False
-    
-class Different_Particle_Functions():
-    '''
-    Depending on the confinemnt type one of these functions
-    will be called.
-    These class functions distinguish loops from bridges 
-    by checking if one end is in one particle and another in other
-    Needs to be checked and a robust implementation
-    return True for bridge
-    '''
-    @staticmethod
-    def core_zyx_dir(d,r0,re,dads,CMs):
-        x0=r0[d]
-        xe =re[d]
-        for i in range(CMs.shape[0]):
-            for j in range(i+1,CMs.shape[0]):
-                cmi = CMs[i][d] ; cmj = CMs[j][d]
-                if abs(cmi-cmj)>dads: # if it is indeed a different particle
-                    if (abs(cmi-x0)<dads and abs(cmj-xe)<dads) or \
-                        (abs(cmi-xe)<dads and abs(cmj-x0)<dads):
-                            return False
-        return True
-    
-    @staticmethod
-    def zdir(self,r0,re,dads,CMs):
-        d = 2
-        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
-    @staticmethod
-    def ydir(self,r0,re,dads,CMs):
-        d = 1
-        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
-    @staticmethod
-    def xdir(self,r0,re,dads,CMs):
-        d = 0
-        return Different_Particle_Functions.core_zyx_dir(d,r0,re,dads,CMs)
-    @staticmethod
-    def zcylindrical(self,*args):
-        return False
-
 
 class Center_Functions():
     '''
@@ -1642,7 +1678,7 @@ class Center_Functions():
     def xdir(c):
         return c[0]
     @staticmethod
-    def distance(c):
+    def spherical_particle(c):
         return c
     @staticmethod
     def zcylindrical(c):
@@ -1655,28 +1691,45 @@ class unit_vector_Functions():
     A unit vector for computing bond order is defined
     '''
     @staticmethod
-    def zdir(r,c):
+    def zdir(self,r,c):
         uv = np.zeros((r.shape[0],3))
         uv[:,2] = 1
         return uv
     @staticmethod
-    def ydir(r,c):
+    def ydir(self,r,c):
         uv = np.zeros((r.shape[0],3))
         uv[:,1] = 1
         return uv
+    
     @staticmethod
-    def xdir(r,c):
+    def xdir(self,r,c):
         uv = np.zeros((r.shape[0],3))
-        uv[:,2] = 0
+        uv[:,2] = 1
         return uv
     
     @staticmethod
-    def distance(r,c):
-        uv = r-c 
-        return uv
-    
+    @jit(nopython=True,fastmath =True,parallel=True)
+    def spherical_particle_inner(cperiodic,r,c,box_add):
+        for i in prange(cperiodic.shape[0]):
+            dist_old= 1e16    
+            for j,L in enumerate(box_add):
+                rr = r[i] - (c+L)
+                dist = np.sum(rr*rr)
+                if dist<dist_old:
+                    jmin= j
+                    dist_old = dist
+            cperiodic[i] = c +box_add[jmin]
+        return
     @staticmethod
-    def zcylindrical(r,c):
+    def spherical_particle(self,r,c):
+        box = self.get_box(self.current_frame)
+        box_add = Box_Additions.spherical_particle(box)
+        cperiodic = np.empty(r.shape)
+        unit_vector_Functions.spherical_particle_inner(cperiodic,r,c,box_add)
+        uv = r-cperiodic
+        return uv
+    @staticmethod
+    def zcylindrical(self,r,c):
         uv = np.ones((r.shape[0],3))
         uv[:,2] = 0
         return uv
@@ -1713,7 +1766,7 @@ class Analysis:
             self.topol_file = trajectory_file
             self.read_by_frame = self.read_gro_by_frame # function
             self.traj_opener = open
-            self.traj_opener_args = LammpsTrajReader
+            self.traj_opener_args = (self.trajectory_file,)
         elif '.trr' == trajectory_file[-4:]:
             self.traj_file_type ='trr'
             self.read_by_frame =  self.read_trr_by_frame # function
@@ -1762,9 +1815,9 @@ class Analysis:
         self.find_angles()
         self.find_dihedrals()
         #Find the ids (numpy compatible) of each type and store them
-        self.keys_ids_per_type('connectivity')
-        self.keys_ids_per_type('angles')
-        self.keys_ids_per_type('dihedrals')
+        self.keysTotype('connectivity')
+        self.keysTotype('angles')
+        self.keysTotype('dihedrals')
         
         self.find_unique_bond_types()
         self.find_unique_angle_types()
@@ -1808,7 +1861,7 @@ class Analysis:
         #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return
 
-    def keys_ids_per_type(self,attr_name):
+    def keysTotype(self,attr_name):
         dictionary = getattr(self,attr_name)
         if type(dictionary) is not dict:
             raise TypeError('This function is for working with dictionaries')
@@ -1817,7 +1870,7 @@ class Analysis:
         for k,v in dictionary.items():
             temp_ids[v].append(np.array(k))
         ids = {v : np.array(temp_ids[v]) for v in types}
-        setattr(self,attr_name+'_ids_per_type',ids)
+        setattr(self,attr_name+'_per_type',ids)
         return 
     
     def find_topology_from_itp(self):
@@ -2168,18 +2221,23 @@ class Analysis:
         self.charge_map = dict()
         for i,line in enumerate(atom_lines):
             l = line.strip().split()
-            if i==0:
-                starts_from =int(l[0])
-            else:
-                if int(atom_lines[i-1].split()[0])+1 != i+starts_from:
-                    raise Exception('The atoms are not concecutive')
             mol_ids[i] = int(l[1])
             mol_nms[i] = l[1]
             at_tys[i] = l[2]
-            at_ids[i] = i
-            if ncols==4 or ncols ==7:
+            at_ids[i] = int(l[0])
+            if ncols==4 or ncols ==7 or ncols==10:
                 self.charge_map[l[2]] = float(l[3])
             
+        sort_ids = at_ids.argsort()
+        mol_ids = mol_ids[sort_ids]
+        mol_nms = mol_nms[sort_ids]
+        at_tys = at_tys[sort_ids]
+        at_ids = at_ids[sort_ids]
+        starts_from = at_ids.min()
+        for i in range(1,natoms):
+            if at_ids[i-1]+1 != at_ids[i]:
+                raise Exception('There are missing atoms')
+        at_ids -= starts_from
         
         self.mol_ids = mol_ids
         self.mol_names = mol_nms
@@ -2187,8 +2245,6 @@ class Analysis:
         self.at_ids = at_ids
         
         self.find_locGlob()
-        
-        
         
         self.connectivity= dict()
 
@@ -2200,6 +2256,8 @@ class Analysis:
             id0 = int(b[-2]) - starts_from
             id1 = int(b[-1]) - starts_from
             conn_id,c_type =  self.sorted_id_and_type((id0,id1))
+            if conn_id in self.connectivity:
+                logs.logger.warning('{} is already in connectivity '.format(conn_id))
             self.connectivity[conn_id] = c_type
         
         self.mass_map = dict()
@@ -2271,7 +2329,15 @@ class Analysis:
     @property
     def natoms(self):
         return self.at_ids.shape[0]
-    
+    @property
+    def ndihedrals(self):
+        return len(self.dihedrals)
+    @property
+    def nbonds(self):
+        return len(self.connectivity)
+    @property
+    def nangles(self):
+        return len(self.angles)
     @staticmethod
     def unique_values(iterable):
         try:
@@ -2376,7 +2442,14 @@ class Analysis:
         offset = cbox[:,0]
         boxsize = cbox[:,1]-cbox[:,0]
         coords -= offset
-        self.timeframes[frame] = {'conf':conf,
+        #make nm
+        boxsize/=10
+        coords/=10
+        try:
+            dt = self.kwargs['dt']
+        except KeyError:
+            dt =1e-6
+        self.timeframes[frame] = {'conf':conf,'time':conf['step_no']*dt,'step':conf['step_no'],
                                   'boxsize':boxsize,'coords':coords}
         return True
 
@@ -2456,7 +2529,7 @@ class Analysis:
             raise ValueError('Available options are : {:s}'.format(', '.join(options)))
         
         if fname is None:
-            fname = 'Analyisis_written__'+''.join(self.trajectory_file.split('.')[0:-1])+'.gro'
+            fname = 'Analyisis_written.gro'
         with open(fname,'w') as ofile:
             for frame,d in self.timeframes.items():
                 if frames is not None:
@@ -2881,21 +2954,19 @@ class Analysis_Confined(Analysis):
                  connectivity_file,       # itp or mol2
                  conftype,
                  topol_file = None,
-                 memory_demanding=True, 
-                 particle_filt=None,
-                 particle_name=None,
-                 pol_filt=None,
-                 pol_name=None,
+                 memory_demanding=True,
+                 particle_method = 'molname',
+                 polymer_method = 'molname',
                  **kwargs):
         super().__init__(trajectory_file,
                          connectivity_file,
                          topol_file,
                          memory_demanding)
         self.conftype = conftype
-        self.particle_name = particle_name
-        self.particle_filt = particle_filt
-        self.pol_name = pol_name
-        self.pol_filt = pol_filt
+        self.particle_method = particle_method
+        self.polymer_method = polymer_method
+        self.kwargs = kwargs
+        
         if self.conftype =='zcylindrical':
             self.global_cylindrical_radius = kwargs['radius']
             
@@ -2927,23 +2998,46 @@ class Analysis_Confined(Analysis):
         self.connectivity_per_chain = cargs
         return
     
-    def find_particle_filt(self):
+    def find_systemic_filter(self,name):
+        method = getattr(self,name+'_method')
         
-        if self.particle_name is not None:
-            self.particle_filt = self.mol_names == self.particle_name # it gets a filter form
-       
+        if method == 'molname':
+            compare_array = self.mol_names
+        elif method == 'atomtypes':
+            compare_array = self.at_types
+        elif method == 'molids':
+            compare_array = self.mol_ids
+        elif method =='atomids':
+            compare_array = self.at_ids
         else:
-            raise Exception('Give particle_name or particle_filt explicitly')
-        logs.logger.info('Number of particle atoms: {:5d}'.format(np.count_nonzero(self.particle_filt)))
+            raise NotImplementedError('method "{}" is not Implemented'.format(method))
+        
+        try:
+            look_name_s = self.kwargs[name]
+        except KeyError:
+            raise Exception('You need to provide the key word "{:s}"'.format(name))
+        else:
+            t1 = type(look_name_s) is str
+            t2 = type(look_name_s) is list
+            t3 = type(look_name_s) is np.ndarray
+            if t1 or t2 or t3:
+                if t2 or t3:
+                    for i in range(1,len(look_name_s)):
+                        if type(look_name_s[i-1]) != type(look_name_s[i]):
+                                raise Exception('elements in variable {:s} must be of the same type'.format(name))
+            else:
+                raise NotImplementedError('{:s} variable is allowed to be either string, list or array'.format(name))
+                
+        filt = np.isin(compare_array,look_name_s)
+        setattr(self,name+'_filt',filt)
+        
+        return
+    def find_particle_filt(self):
+        self.find_systemic_filter('particle')
         return 
     
-    def find_pol_filt(self):
-        
-        if self.pol_name is not None:
-            self.pol_filt = self.mol_names == self.pol_name # it gets a filter form
-        else:
-            raise Exception('Give mol_name or mol_ids explicitly')
-        logs.logger.info('Number of adsorbent atoms: {:5d}'.format(np.count_nonzero(self.pol_filt)))
+    def find_polymer_filt(self):
+        self.find_systemic_filter('polymer')
         return
        
     def translate_particle_in_box_middle(self,coords,box):
@@ -2979,8 +3073,8 @@ class Analysis_Confined(Analysis):
         self.find_particle_filt()
         self.nparticle = self.mol_ids[self.particle_filt].shape[0]
     
-        self.find_pol_filt()
-        self.npol = self.mol_ids[self.pol_filt].shape[0]
+        self.find_polymer_filt()
+        self.npol = self.mol_ids[self.polymer_filt].shape[0]
     
         #self.find_masses()
         self.unique_atom_types = np.unique(self.at_types)
@@ -2990,12 +3084,10 @@ class Analysis_Confined(Analysis):
         self.box_add = self.get_class_function(Box_Additions,self.conftype)
         self.volfun = self.get_class_function(bin_Volume_Functions,self.conftype)
         self.centerfun = self.get_class_function(Center_Functions,self.conftype)
-        self.is_periodic_image = self.get_class_function(Periodic_image_Functions,self.conftype)
-        self.is_different_particle = self.get_class_function(Different_Particle_Functions,self.conftype)
         self.unit_vectorFun = self.get_class_function(unit_vector_Functions,self.conftype)
         ##########
         
-        self.find_args_per_residue(self.pol_filt,'chain_args')
+        self.find_args_per_residue(self.polymer_filt,'chain_args')
         self.find_connectivity_per_chain()
         self.find_args_per_residue(self.particle_filt,'particle_args')
         self.nparticles = len(self.particle_args.keys())
@@ -3017,7 +3109,7 @@ class Analysis_Confined(Analysis):
         coords = self.translated_coords(frame)
         box  = self.get_box(frame)          
         cm = self.get_particle_cm(coords)
-        d = self.dfun(self,coords[self.pol_filt],cm)
+        d = self.get_minimum_image_distance_from_particle(coords[self.polymer_filt])
         return coords,box,d,cm
     
     def get_whole_frame_basics(self,frame):
@@ -3058,11 +3150,11 @@ class Analysis_Confined(Analysis):
     def ids_from_topology(self,topol_vector):
         inter = len(topol_vector)
         if inter == 2: 
-            ids = self.connectivity_ids_per_type
+            ids = self.connectivity_per_type
         elif inter == 3: 
-            ids = self.angles_ids_per_type
+            ids = self.angles_per_type
         elif inter == 4: 
-            ids = self.dihedrals_ids_per_type
+            ids = self.dihedrals_per_type
         else:
             raise Exception('Large topology vectors with size >= {} are not Implemented'.format(inter))
         topol_vector = tuple(topol_vector)
@@ -3078,11 +3170,11 @@ class Analysis_Confined(Analysis):
    
     def ids_from_keyword(self,keyword,exclude=[]):
         if keyword in ['4',4,'1-4']:
-            ids = self.dihedrals_ids_per_type
+            ids = self.dihedrals_per_type
         if keyword in ['3',3,'1-3']:
-            ids = self.angles_ids_per_type
+            ids = self.angles_per_type
         if keyword in ['2',2,'1-2']:
-            ids = self.connectivity_ids_per_type
+            ids = self.connectivity_per_type
         ids1 = np.empty(0,dtype=int)
         ids2 = np.empty(0,dtype=int)
         for k,i in ids.items():
@@ -3123,37 +3215,43 @@ class Analysis_Confined(Analysis):
 
     ############### Conformation Calculation Supportive Functions #####
    
-    def check_if_ends_belong_to_periodic_image(self,istart,iend,periodic_image_args):
+
+
+   
+    def is_bridge(self,coords,istart,iend,periodic_image_args):
+        # used to distinguish loops from bridges
         
-        #used to distinguish loops from bridges
+        # check if one belong to the periodic_images and other not --> this means bridge
         e = iend in periodic_image_args 
         s = istart in periodic_image_args
-        
-        return (e and not s) or (s and not e)
-    
-    def check_if_ends_belong_to_different_particle(self,coords,istart,iend,dads):
-        #logs.logger.warning('WARNING Function {:s}: This Function was never examined in test cases'.format(inspect.currentframe().f_code.co_name))
-        r0 = coords[istart]
-        re = coords[iend]
-        CMs = np.empty((self.nparticles,3),dtype=float)
-        for i,(k,args) in enumerate(self.particle_args.items()):
-            CMs[i] = CM(coords[args],self.atom_mass[args])
-            
-        return self.is_different_particle(self,r0,re,dads,CMs)
-   
-    def is_bridge(self,coords,istart,iend,dads,periodic_image_args):
-        # used to distinguish loops from bridges
-        if self.nparticles !=1:
-            same_particle = self.check_if_ends_belong_to_different_particle(coords, istart, iend,dads,)
-        else:
-            same_particle = True
-            
-        if same_particle:  
-            #logs.logger.debug('istart = {:d}, iend = {:d}'.format(istart,iend))
-            return self.check_if_ends_belong_to_periodic_image( istart, iend, periodic_image_args)
-        else:
-            #logs.logger.info('istart = {:d} , iend = {:d}  Belong to differrent particle'.format(istart,iend))
+        if (e and not s) or (s and not e):
             return True
+        
+        # check if belong to different particle
+        if self.nparticles !=1:
+            logs.logger.warning('WARNING Function {:s}: This Function was never examined in test cases of more than one nanoparticles'.format(inspect.currentframe().f_code.co_name))
+            r0 = coords[istart]
+            re = coords[iend]
+            CMps = np.empty((self.nparticles,3),dtype=float)
+            for i,(k,args) in enumerate(self.particle_args.items()):
+                CMps[i] = CM(coords[args],self.atom_mass[args])
+            
+            if not e and not s: # if in main box no need to check periodic images
+                rer = CMps-re
+                r0r = CMps -r0
+                de = np.sum(rer*rer,axis=1)
+                d0 = np.sum(r0r*r0r,axis=1)
+            else:
+                de = 1e16 ; d0=1e16
+                for L in self.box_add(self.get_box(self.current_frame)):
+                    r0r = CMps+L -r0
+                    rer = CMps+L -re
+                    de = np.minimum(de,np.sum(rer*rer,axis=1))
+                    d0 = np.minimum(d0,np.sum(r0r*r0r,axis=1))
+            
+            if de.argmin()!=d0.argmin():
+                return True
+                
         return False
     
     def get_filt_train(self,dads,coords,box):
@@ -3178,7 +3276,7 @@ class Analysis_Confined(Analysis):
             cm = self.get_particle_cm(coords+L)
             d = self.dfun(self,coords,cm)
             ftrain = np.logical_or(ftrain,np.less_equal(d,dads))
-        ftrain = np.logical_and(ftrain,self.pol_filt)
+        ftrain = np.logical_and(ftrain,self.polymer_filt)
         
         self_trains = np.less_equal(
             self.dfun(self,coords,self.get_particle_cm(coords)),dads)
@@ -3212,7 +3310,7 @@ class Analysis_Confined(Analysis):
         if r is None:
             r = coords[ids]
         cm = self.get_particle_cm(coords)
-        d = np.ones(r.shape[0])*10**9
+        d = np.ones(r.shape[0])*1e16
         for L in self.box_add(box):
             d = np.minimum(d,self.dfun(self,r,cm+L))
         return d
@@ -3321,7 +3419,7 @@ class Analysis_Confined(Analysis):
                         node,chunk)
                 '''
                 if loopBridge:
-                    if not self.is_bridge(coords,istart,iend,dads,periodic_image_args):    
+                    if not self.is_bridge(coords,istart,iend,periodic_image_args):    
                         args_loop = np.concatenate( (args_loop, chunk) )             
                     else:
                         #logs.logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
@@ -3459,11 +3557,11 @@ class Analysis_Confined(Analysis):
         bins  =   np.arange(0, dmax+binl, binl)
         nbins = len(bins)-1
         rho = np.zeros(nbins,dtype=float)
-        mass_pol = self.atom_mass[self.pol_filt] 
+        mass_pol = self.atom_mass[self.polymer_filt] 
         
         if option == '__pertype':
             rho_per_atom_type = {t:np.zeros(nbins,dtype=float) for t in self.unique_atom_types }
-            ftt = {t: t == self.at_types[self.pol_filt] for t in rho_per_atom_type.keys() }
+            ftt = {t: t == self.at_types[self.polymer_filt] for t in rho_per_atom_type.keys() }
             args = (nbins,bins,rho,rho_per_atom_type,ftt)
         elif option =='':
             args = (nbins,bins,rho)
@@ -3516,7 +3614,7 @@ class Analysis_Confined(Analysis):
     
 
     
-    def calc_P2(self,binl,dmax,topol_vector):
+    def calc_P2(self,binl,dmax,topol_vector,option='',**kwargs):
         '''
         Calculates P2 bond parameter
         The unit vector is predifined by the type of confinement
@@ -3554,16 +3652,20 @@ class Analysis_Confined(Analysis):
         nvectors = ids1.shape[0]
         logs.logger.info('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
         nlayers = len(d_center)
-        costh_fz = [[] for i in range(len(dlayers))]
+        costh_unv = [[] for i in range(len(dlayers))]
         costh = np.empty(nvectors,dtype=float)
-        
-        args = (ids1,ids2,dlayers,costh,costh_fz)
-        nframes = self.loop_trajectory('P2', args)
+        if option in ['bridge','loop','train','loop']:
+            args = (ids1,ids2,dlayers,kwargs['dads'],option,costh,costh_unv)
+            s = '_conformation'
+        else:
+            s =''
+            args = (ids1,ids2,dlayers,costh,costh_unv)
+        nframes = self.loop_trajectory('P2'+s, args)
 
        
-        costh2_mean = np.array([ np.array(c).mean() for c in costh_fz ])
-        costh2_std  = np.array([ np.array(c).std()  for c in costh_fz ])
-        s='P2_' +'-'.join(topol_vector)
+        costh2_mean = np.array([ np.array(c).mean() for c in costh_unv ])
+        costh2_std  = np.array([ np.array(c).std()  for c in costh_unv ])
+        s='P2'
         orientation = {'d':  d_center} 
         orientation.update({s: 1.5*costh2_mean-0.5, s+'(std)' : 1.5*costh2_std-0.5 })
         
@@ -3672,7 +3774,7 @@ class Analysis_Confined(Analysis):
         d_center = [0.5*(b[0]+b[1]) for b in dlayers]
         
         dih_types = self.dihedral_types
-        dih_ids = self.dihedrals_ids_per_type # dictionary
+        dih_ids = self.dihedrals_per_type # dictionary
         
         dih_distr = { d: {lay: [] for lay in dlayers} for d in dih_types }
         
@@ -3838,7 +3940,7 @@ class Analysis_Confined(Analysis):
         dihedrals_t = dict()
         filt_per_t = dict()
        
-        dih_ids = self.dihedrals_ids_per_type[dih_type] #array (ndihs,4)
+        dih_ids = self.dihedrals_per_type[dih_type] #array (ndihs,4)
         ids1 = dih_ids[:,0] ; ids2 = dih_ids[:,3] 
 
         args = (dih_ids,ids1,ids2,filters,dads,dihedrals_t,filt_per_t)
@@ -5068,13 +5170,9 @@ class coreFunctions():
         frame = self.current_frame
         
         coords,box,d,cs = self.get_frame_basics(frame)
-        if self.conftype =='zcylindrical': L = 8
-        else: L = None
         #2) Caclulate profile
-  
-        
         for i in range(nbins):    
-            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
+            vol_bin = self.volfun(self,bins[i],bins[i+1])
             fin_bin = filt_uplow(d,bins[i],bins[i+1])
             rho[i] += np.sum(mass_pol[fin_bin])/vol_bin
         return
@@ -5088,7 +5186,7 @@ class coreFunctions():
        
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
+            vol_bin = self.volfun(self,bins[i],bins[i+1])
             fin_bin = filt_uplow(d, bins[i], bins[i+1])
             rho[i] += numba_sum(mass_pol[fin_bin])/vol_bin
   
@@ -5108,7 +5206,7 @@ class coreFunctions():
         #2) Caclulate profile
         
         for i in range(nbins):     
-            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
+            vol_bin = self.volfun(self,bins[i],bins[i+1])
             fin_bin = filt_uplow(d,bins[i],bins[i+1])
             rho[i] += (np.sum(mass_pol[fin_bin])/vol_bin)**2-rho_mean_sq[i]
         return
@@ -5122,12 +5220,12 @@ class coreFunctions():
         cs = self.get_particle_cm(coords)
         
         dfun = getattr(Distance_Functions,self.conftype +'__2side')
-        d = dfun(coords[self.pol_filt],cs) 
+        d = dfun(coords[self.polymer_filt],cs) 
          # needed because in volfun the volume of each bin is multiplied by 2
         #2) Caclulate profile
         
         for i in range(nbins):
-            vol_bin = self.volfun(self,box,bins[i],bins[i+1])*0.5
+            vol_bin = self.volfun(self,bins[i],bins[i+1])*0.5
             fin_bin_up =   filt_uplow(d,bins[i],bins[i+1])
             fin_bin_down = filt_uplow(d,-bins[i+1],-bins[i])
             rho_up[i] += np.sum(mass_pol[fin_bin_up])/vol_bin
@@ -5143,7 +5241,7 @@ class coreFunctions():
        
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
+            vol_bin = self.volfun(self,bins[i],bins[i+1])
             fin_bin = filt_uplow(d, bins[i], bins[i+1])
             rho[i] += np.count_nonzero(fin_bin)/vol_bin
   
@@ -5158,7 +5256,7 @@ class coreFunctions():
         
         #2) Caclulate profile
         for i in range(nbins):    
-            vol_bin = self.volfun(self,box,bins[i],bins[i+1])
+            vol_bin = self.volfun(self,bins[i],bins[i+1])
             fin_bin = filt_uplow(d,bins[i],bins[i+1])
             rho[i] += np.count_nonzero(fin_bin)/vol_bin
         return
@@ -5231,7 +5329,7 @@ class coreFunctions():
             args_lp = args_loop[filt_uplow(d_loop, dl[0], dl[1])]
             args_br =  args_bridge[filt_uplow(d_bridge, dl[0], dl[1])]
             
-            vol_bin=self.volfun(self,box,dl[0],dl[1])
+            vol_bin=self.volfun(self,dl[0],dl[1])
             
             dens['ntail'][l] += args_tl.shape[0]/vol_bin
             dens['nloop'][l] += args_lp.shape[0]/vol_bin
@@ -5272,10 +5370,10 @@ class coreFunctions():
         return
     
     @staticmethod
-    def P2(self,ids1,ids2,dlayers,costh,costh_fz):
+    def P2(self,ids1,ids2,dlayers,costh,costh_unv):
         frame = self.current_frame
         #1) coords
-        coords = self.get_whole_coords(frame)
+        coords = self.get_coords(frame)
         box =self.get_box(frame)
 
         #2) calc_particle_cm
@@ -5284,17 +5382,48 @@ class coreFunctions():
         r1 = coords[ids1]; r2 = coords[ids2]
         
         rm = 0.5*(r1+r2)
-        d = self.dfun(self,rm, cs)
-        uv = self.unit_vectorFun(rm,cs)
+        
+        d = self.get_minimum_image_distance_from_particle(rm)
+        uv = self.unit_vectorFun(self,rm,cs)
         
         costhsquare__kernel(costh,r2-r1,uv)
         
         for i,dl in enumerate(dlayers):
             filt = filt_uplow(d, dl[0], dl[1])
-            costh_fz[i].extend(costh[filt])
+            costh_unv[i].extend(costh[filt])
         
         return   
-    
+    @staticmethod
+    def P2_conformation(self,ids1,ids2,dlayers,
+                        dads,conformation,costh,costh_unv):
+        frame = self.current_frame
+        #1) coords
+        coords = self.get_coords(frame)
+        box =self.get_box(frame)
+
+        #2) calc_particle_cm
+        cs = self.get_particle_cm(coords)
+        ds_chains, args_train, args_tail,\
+        args_loop, args_bridge = self.conformations(dads,coords)
+        
+        #get conformation args
+        args = locals()['args_'+conformation]
+        filt_ids = Filters.filt_bothEndsIn(ids1,ids2,args)
+        
+        r1 = coords[ids1[filt_ids]]; r2 = coords[ids2[filt_ids]]
+        costh = costh[filt_ids]
+        rm = 0.5*(r1+r2)
+        
+        d = self.get_minimum_image_distance_from_particle(rm)
+        uv = self.unit_vectorFun(self,rm,cs)
+        
+        costhsquare__kernel(costh,r2-r1,uv)
+        
+        for i,dl in enumerate(dlayers):
+            filt = filt_uplow(d, dl[0], dl[1])
+            costh_unv[i].extend(costh[filt])
+        
+        return  
     @staticmethod
     def chain_characteristics(self,chain_args,dlayers,chars):
         #1) translate the system
