@@ -1651,16 +1651,19 @@ class bin_Volume_Functions():
     '''
     @staticmethod
     def zdir(self,bin_low,bin_up):
+        box = self.get_box(self.current_frame)
         binl = bin_up-bin_low
         return 2*box[0]*box[1]*binl
     
     @staticmethod
     def ydir(self,bin_low,bin_up):
+        box = self.get_box(self.current_frame)
         binl = bin_up-bin_low
         return 2*box[0]*box[2]*binl
     
     @staticmethod
     def xdir(self,bin_low,bin_up):
+        box = self.get_box(self.current_frame)
         binl = bin_up-bin_low
         return 2*box[1]*box[2]*binl
 
@@ -1911,6 +1914,7 @@ class Analysis:
             else:
                 raise NotImplementedError('Non itp files are not yet implemented') 
         self.connectivity = dict()
+        
         for j in np.unique(self.mol_ids):
             global_mol_at_ids = self.at_ids[self.mol_ids==j]
             res_nm = np.unique(self.mol_names[self.mol_ids==j])
@@ -2436,8 +2440,8 @@ class Analysis:
     def read_trr_by_frame(self,ofile,frame):
         try:
             header,data = ofile.read_frame()
-        except EOFError as e:
-            raise e
+        except EOFError:
+            raise EOFError
         self.timeframes[frame] = header
         self.timeframes[frame]['boxsize'] = np.diag(data['box'])
         self.timeframes[frame]['coords'] = data['x']
@@ -2474,11 +2478,16 @@ class Analysis:
         return True
 
     def read_from_disk_or_mem(self,ofile,frame):
-        if self.memory_demanding:
+        def exceptEOF():
             try:
-                return self.read_by_frame(ofile, frame)
+                ret = self.read_by_frame(ofile, frame)
             except EOFError:
                 return False
+            else:
+                return ret
+            
+        if self.memory_demanding:
+            return exceptEOF()
         elif frame in self.timeframes.keys():
             self.is_the_frame_read =True
             return True
@@ -2487,7 +2496,7 @@ class Analysis:
                 if self.is_the_frame_read:
                     return False
             except AttributeError:
-                return self.read_by_frame(ofile, frame)
+               return exceptEOF()
 
     def read_lammpstrj_file(self):
         t0 = perf_counter()
@@ -2974,7 +2983,7 @@ class Analysis_Confined(Analysis):
                  connectivity_file,       # itp or mol2
                  conftype,
                  topol_file = None,
-                 memory_demanding=True,
+                 memory_demanding=False,
                  particle_method = 'molname',
                  polymer_method = 'molname',
                  **kwargs):
@@ -2993,7 +3002,8 @@ class Analysis_Confined(Analysis):
             
         self.confined_system_initialization()
         
-
+        self.polymer_ids = np.where(self.polymer_filt)[0]
+        self.particle_ids = np.where(self.particle_filt)[0]
         return
 
         
@@ -3126,7 +3136,8 @@ class Analysis_Confined(Analysis):
         return fun
      
     def get_frame_basics(self,frame):
-        coords = self.translated_coords(frame)
+        #coords = self.translated_coords(frame)
+        coords = self.get_coords(frame)
         box  = self.get_box(frame)          
         cm = self.get_particle_cm(coords)
         d = self.get_minimum_image_distance_from_particle(coords[self.polymer_filt])
@@ -3528,7 +3539,8 @@ class Analysis_Confined(Analysis):
     
     ######## Main calculation Functions for structural properties ############      
     
-    def calc_density_profile(self,binl,dmax,mode='mass',option='',flux=None):
+    def calc_density_profile(self,binl,dmax,
+                             mode='mass',option='',flux=None,**kwargs):
         '''
         Master function to compute the density profile
 
@@ -3542,9 +3554,9 @@ class Analysis_Confined(Analysis):
             'mass' for mass density
             'number' for number density
         option : string
-            '__pertype' decomposes the density to each atomic type contribution
-            '__2side' computes the profile to both sides.
-                Only valid for one directional confinement (e.g. zdir) 
+            'pertype' decomposes the density to each atomic type contribution
+            '2side' computes the profile to both sides.
+                Only valid for one directional confinement (i.e. zdir,ydir,xdir) 
         flux : bool
             if True it calculates density fluxuations
             by first calling this function to compute the density
@@ -3579,16 +3591,22 @@ class Analysis_Confined(Analysis):
         rho = np.zeros(nbins,dtype=float)
         mass_pol = self.atom_mass[self.polymer_filt] 
         
-        if option == '__pertype':
+        if option == 'pertype':
             rho_per_atom_type = {t:np.zeros(nbins,dtype=float) for t in self.unique_atom_types }
             ftt = {t: t == self.at_types[self.polymer_filt] for t in rho_per_atom_type.keys() }
             args = (nbins,bins,rho,rho_per_atom_type,ftt)
+            option ='__pertype'
         elif option =='':
             args = (nbins,bins,rho)
-        elif option =='__2side':
+        elif option =='2side':
             rho_down = np.zeros(nbins,dtype=float)
             args =(nbins,bins,rho,rho_down)
-        
+            option ='__2side'
+        elif option =='conformation':              
+            confdens = {k:np.zeros(nbins,dtype=float) 
+                    for k in ['rho','train','tail','loop','bridge','free'] }                
+            args = (kwargs['dads'],bins, confdens, stats)
+            option=='__conformation'
         if mode =='mass': args =(*args,mass_pol)
         
         if flux is not None and flux !=False:
@@ -3624,7 +3642,10 @@ class Analysis_Confined(Analysis):
             elif option =='__2side':
                 rho_down *=scale/nframes
                 density_profile.update({'rho_up':rho,'rho_down':rho_down,'rho':0.5*(rho+rho_down)})
-        
+            elif option =='__conformation':
+                dens= {k:v*scale/nframes for k,v in confdens.items()}
+                density_profile.update(dens)
+                denstiy_profile.update({'stats':stats})
         #############
         
         tf = perf_counter() -t0
@@ -3730,14 +3751,15 @@ class Analysis_Confined(Analysis):
         t0 = perf_counter()
         
         #initialize
-        dlayers = self.get_layers(dads,dmax,binl)[1:]
+        dlayers = self.get_layers(0,dmax,binl)
         d_center = np.array([0.5*(b[0]+b[1]) for b in dlayers])
         
         stats = { k : 0 for k in ['adschains','train','looptailbridge',
                                   'tail','loop','bridge']}
         
         nlay = len(dlayers)
-        dens = {k:np.zeros(nlay,dtype=float) for k in ['mtail','mloop','mbridge','ntail','nloop','nbridge'] }                
+        dens = {k:np.zeros(nlay,dtype=float) for k in ['mrho','mtrain','mtail','mloop','mbridge','mfree',
+                                                       'nrho','ntrain','ntail','nloop','nbridge','nfree'] }                
         dens.update({'d':d_center})
         
         #calculate
@@ -3745,8 +3767,8 @@ class Analysis_Confined(Analysis):
         nframes = self.loop_trajectory('conformation'+option, args)
         
         #post_proc
-        for k in ['ntail','nloop','nbridge']: dens[k] /= nframes
-        for k in ['mtail','mloop','mbridge']: dens[k] *= 1.660539e-3/nframes
+        for k in ['ntrain','ntail','nloop','nbridge','nfree']: dens[k] /= nframes
+        for k in ['mtrain','mtail','mloop','mbridge','mfree']: dens[k] *= 1.660539e-3/nframes
         dens.update({'d':d_center})
         
         for k in stats: stats[k] /= nframes
@@ -3758,7 +3780,10 @@ class Analysis_Confined(Analysis):
         
         tf = perf_counter() -t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        
+        for k in ['train','tail','loop','bridge','free']:
+            dens['mrho'] += dens['m'+k]
+            dens['nrho'] +=dens['n'+k]
+            
         return dens, stats
     
     def calc_particle_size(self):
@@ -5232,6 +5257,29 @@ class coreFunctions():
         return
     
     @staticmethod
+    def number_density_profile__2side(self,nbins,bins,
+                                  rho_up,rho_down):
+        frame = self.current_frame
+        coords = self.translated_coords(frame)
+        box = self.get_box(frame)
+        cs = self.get_particle_cm(coords)
+        
+        dfun = getattr(Distance_Functions,self.conftype +'__2side')
+        d = dfun(self,coords[self.polymer_filt],cs) 
+         # needed because in volfun the volume of each bin is multiplied by 2
+        #2) Caclulate profile
+        
+        for i in range(nbins):
+            vol_bin = self.volfun(self,bins[i],bins[i+1])*0.5
+            fin_bin_up =   filt_uplow(d,bins[i],bins[i+1])
+            fin_bin_down = filt_uplow(d,-bins[i+1],-bins[i])
+            rho_up[i] += np.count_nonzero(fin_bin_up)/vol_bin
+            rho_down[i] += np.count_nonzero(fin_bin_down)/vol_bin
+            
+        return
+    
+    
+    @staticmethod
     def mass_density_profile__2side(self,nbins,bins,
                                   rho_up,rho_down,mass_pol):
         frame = self.current_frame
@@ -5240,7 +5288,7 @@ class coreFunctions():
         cs = self.get_particle_cm(coords)
         
         dfun = getattr(Distance_Functions,self.conftype +'__2side')
-        d = dfun(coords[self.polymer_filt],cs) 
+        d = dfun(self,coords[self.polymer_filt],cs) 
          # needed because in volfun the volume of each bin is multiplied by 2
         #2) Caclulate profile
         
@@ -5290,9 +5338,9 @@ class coreFunctions():
         ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(dads,coords)
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
-        
+
         coreFunctions.conformation_dens(self, dlayers, dens,
-                                           ads_chains, args_train, args_tail,
+                                           args_train, args_tail,
                                            args_loop, args_bridge)
         
         coreFunctions.conformation_stats(stats,ads_chains, args_train, args_tail, 
@@ -5306,11 +5354,10 @@ class coreFunctions():
         box = self.get_box(frame)
         #1) ads_chains, trains,tails,loops,bridges
         ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(dads,coords)
-        
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
         
         coreFunctions.conformation_dens(self, dlayers, dens,
-                                           ads_chains, args_train, args_tail,
+                                           args_train, args_tail,
                                            args_loop, args_bridge)
         
         return
@@ -5332,33 +5379,42 @@ class coreFunctions():
     
     @staticmethod
     def conformation_dens(self, dlayers,dens,
-                             ads_chains, args_train, args_tail, 
+                             args_train, args_tail, 
                              args_loop, args_bridge):
         frame = self.current_frame
         coords = self.get_coords(frame)
         box = self.get_box(frame)
         d = self.get_minimum_image_distance_from_particle(coords)
         
+        all_not_free = np.concatenate((args_train,args_tail,args_loop,args_bridge))
+        f = np.logical_not(np.isin(self.polymer_ids, all_not_free))
+        args_free = self.polymer_ids[f]
         
         d_tail = d[args_tail]
         d_loop = d[args_loop]          
         d_bridge = d[args_bridge]
-        
+        d_free = d[args_free]
+        d_train = d[args_train]
         for l,dl in enumerate(dlayers):
             args_tl = args_tail[filt_uplow(d_tail, dl[0], dl[1])]
             args_lp = args_loop[filt_uplow(d_loop, dl[0], dl[1])]
             args_br =  args_bridge[filt_uplow(d_bridge, dl[0], dl[1])]
+            args_fr = args_free[filt_uplow(d_free,dl[0],dl[1])]
+            args_tr = args_train[filt_uplow(d_train,dl[0],dl[1])]
             
             vol_bin=self.volfun(self,dl[0],dl[1])
             
+            dens['ntrain'][l] += args_tr.shape[0]/vol_bin
             dens['ntail'][l] += args_tl.shape[0]/vol_bin
             dens['nloop'][l] += args_lp.shape[0]/vol_bin
-            dens['nbridge'][l] +=args_br.shape[0]/vol_bin
+            dens['nbridge'][l] += args_br.shape[0]/vol_bin
+            dens['nfree'][l] += args_fr.shape[0]/vol_bin
             
-            
+            dens['mtrain'][l] += numba_sum(self.atom_mass[args_tr])/vol_bin
             dens['mtail'][l] += numba_sum(self.atom_mass[args_tl])/vol_bin
             dens['mloop'][l] += numba_sum(self.atom_mass[args_lp])/vol_bin
             dens['mbridge'][l] += numba_sum(self.atom_mass[args_br])/vol_bin
+            dens['mfree'][l] += numba_sum(self.atom_mass[args_fr])/vol_bin
         return    
 
     @staticmethod
