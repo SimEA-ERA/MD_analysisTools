@@ -3602,11 +3602,17 @@ class Analysis_Confined(Analysis):
             rho_down = np.zeros(nbins,dtype=float)
             args =(nbins,bins,rho,rho_down)
             option ='__2side'
-        elif option =='conformation':              
-            confdens = {k:np.zeros(nbins,dtype=float) 
-                    for k in ['rho','train','tail','loop','bridge','free'] }                
-            args = (kwargs['dads'],bins, confdens, stats)
-            option=='__conformation'
+        elif option =='conformations':              
+            confdens = {nm+k:np.zeros(nbins,dtype=float) for nm in ['m','n']
+                        for k in ['rho','train','tail','loop','bridge','free'] 
+                        }         
+            stats = { k : 0 for k in ['adschains','train','looptailbridge',
+                                  'tail','loop','bridge']}
+            dlayers = [(bins[i],bins[i+1]) for i in range(nbins)]
+            args = (kwargs['dads'],dlayers, confdens, stats)
+            option='__conformations'
+            mode='massnumber'
+            
         if mode =='mass': args =(*args,mass_pol)
         
         if flux is not None and flux !=False:
@@ -3642,10 +3648,19 @@ class Analysis_Confined(Analysis):
             elif option =='__2side':
                 rho_down *=scale/nframes
                 density_profile.update({'rho_up':rho,'rho_down':rho_down,'rho':0.5*(rho+rho_down)})
-            elif option =='__conformation':
+            elif option =='__conformations':
+                stats = {k+'_perc':v/self.npol/nframes if 'adschains'!=k else v/len(self.chain_args)/nframes
+                         for k,v in stats.items()}
                 dens= {k:v*scale/nframes for k,v in confdens.items()}
+
+                for k in ['train','tail','loop','bridge','free']: 
+                    dens['mrho'] += dens['m'+k] 
+                    dens['nrho'] += dens['n'+k]
+                    
+                dens['rho'] = dens['mrho']
                 density_profile.update(dens)
-                denstiy_profile.update({'stats':stats})
+                density_profile.update({'stats':stats})
+                
         #############
         
         tf = perf_counter() -t0
@@ -3715,77 +3730,6 @@ class Analysis_Confined(Analysis):
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return orientation   
         
-
-    def calc_conformation_density(self,dads,dmax,binl,option='__densityAndstats'):
-        '''
-        calculates mass and  probability density per conformation
-
-        Parameters
-        ----------
-        dads : float
-            adsorption distance
-        dmax : float
-            maximum distance
-        binl : float
-            binning length
-        option : what to return
-            '__densityAndstats' returns both density and stats
-            '__stats' return only stats
-            '__density' return only density
-
-        Returns
-        -------
-        dens : dictionary containing             
-            discription :  key  |  value
-            the distance: 'd'  | float array
-            conformation mass  density keys 
-            -->mtail,mloop and mbridge
-            conformation probability density keys
-            --> ntail, nloop and nbridge
-            the values are float arrays
-        stats : disctionary 
-        statistics of conformations and adsorbed chains
-        values are floats
-
-        '''
-        t0 = perf_counter()
-        
-        #initialize
-        dlayers = self.get_layers(0,dmax,binl)
-        d_center = np.array([0.5*(b[0]+b[1]) for b in dlayers])
-        
-        stats = { k : 0 for k in ['adschains','train','looptailbridge',
-                                  'tail','loop','bridge']}
-        
-        nlay = len(dlayers)
-        dens = {k:np.zeros(nlay,dtype=float) for k in ['mrho','mtrain','mtail','mloop','mbridge','mfree',
-                                                       'nrho','ntrain','ntail','nloop','nbridge','nfree'] }                
-        dens.update({'d':d_center})
-        
-        #calculate
-        args = (dads,dlayers, dens, stats)
-        nframes = self.loop_trajectory('conformation'+option, args)
-        
-        #post_proc
-        for k in ['ntrain','ntail','nloop','nbridge','nfree']: dens[k] /= nframes
-        for k in ['mtrain','mtail','mloop','mbridge','mfree']: dens[k] *= 1.660539e-3/nframes
-        dens.update({'d':d_center})
-        
-        for k in stats: stats[k] /= nframes
-        for k in ['train','looptailbridge','tail','loop','bridge']: stats[k+'_perc'] = stats[k]/self.npol
-        stats['adschains_perc'] = stats['adschains'] / len(self.chain_args)
-            
-        for k,v in stats.items():
-            logs.logger.info('{:s} = {:4.3f}'.format(k,v))
-        
-        tf = perf_counter() -t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        for k in ['train','tail','loop','bridge','free']:
-            dens['mrho'] += dens['m'+k]
-            dens['nrho'] +=dens['n'+k]
-            
-        return dens, stats
-    
     def calc_particle_size(self):
         t0 = perf_counter()
         part_size = np.zeros(3)
@@ -5330,7 +5274,7 @@ class coreFunctions():
         return
   
     @staticmethod
-    def conformation__densityAndstats(self,dads,dlayers,dens,stats):                
+    def massnumber_density_profile__conformations(self,dads,dlayers,dens,stats):                
         frame = self.current_frame
         coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
@@ -5342,36 +5286,6 @@ class coreFunctions():
         coreFunctions.conformation_dens(self, dlayers, dens,
                                            args_train, args_tail,
                                            args_loop, args_bridge)
-        
-        coreFunctions.conformation_stats(stats,ads_chains, args_train, args_tail, 
-                             args_loop, args_bridge)
-        return
-    
-    @staticmethod
-    def conformation__density(self,dads,dlayers,dens,stats):                
-        frame = self.current_frame
-        coords = self.get_whole_coords(frame)
-        box = self.get_box(frame)
-        #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(dads,coords)
-        #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
-        
-        coreFunctions.conformation_dens(self, dlayers, dens,
-                                           args_train, args_tail,
-                                           args_loop, args_bridge)
-        
-        return
-
-    @staticmethod
-    def conformation__stats(self,dads,dlayers,dens,stats):                
-        frame = self.current_frame
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
-        #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(dads,coords)
-        
-        #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
-        
         
         coreFunctions.conformation_stats(stats,ads_chains, args_train, args_tail, 
                              args_loop, args_bridge)
