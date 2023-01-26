@@ -23,6 +23,7 @@ import re
 import lammpsreader 
 
 
+
 class logs():
     '''
     A class for modifying the loggers
@@ -3553,13 +3554,14 @@ class Analysis_Confined(Analysis):
         mode : string
             'mass' for mass density
             'number' for number density
+            For conformations option is set automatically to massnumber
         option : string
             'pertype' decomposes the density to each atomic type contribution
             '2side' computes the profile to both sides.
                 Only valid for one directional confinement (i.e. zdir,ydir,xdir) 
         flux : bool
             if True it calculates density fluxuations
-            by first calling this function to compute the density
+            by first calling this function to compute the density.
             density fluctuations are computed by the standard deviation
 
         Returns
@@ -3591,17 +3593,19 @@ class Analysis_Confined(Analysis):
         rho = np.zeros(nbins,dtype=float)
         mass_pol = self.atom_mass[self.polymer_filt] 
         
-        if option == 'pertype':
+        
+        if option =='':
+            args = (nbins,bins,rho)
+            contr=''
+        elif option == 'pertype':
             rho_per_atom_type = {t:np.zeros(nbins,dtype=float) for t in self.unique_atom_types }
             ftt = {t: t == self.at_types[self.polymer_filt] for t in rho_per_atom_type.keys() }
             args = (nbins,bins,rho,rho_per_atom_type,ftt)
-            option ='__pertype'
-        elif option =='':
-            args = (nbins,bins,rho)
+            contr ='__pertype'
         elif option =='2side':
             rho_down = np.zeros(nbins,dtype=float)
             args =(nbins,bins,rho,rho_down)
-            option ='__2side'
+            contr ='__2side'
         elif option =='conformations':              
             confdens = {nm+k:np.zeros(nbins,dtype=float) for nm in ['m','n']
                         for k in ['rho','train','tail','loop','bridge','free'] 
@@ -3610,19 +3614,23 @@ class Analysis_Confined(Analysis):
                                   'tail','loop','bridge']}
             dlayers = [(bins[i],bins[i+1]) for i in range(nbins)]
             args = (kwargs['dads'],dlayers, confdens, stats)
-            option='__conformations'
+            contr='__conformations'
             mode='massnumber'
             
         if mode =='mass': args =(*args,mass_pol)
         
+        
         if flux is not None and flux !=False:
-            density_profile.update(self.calc_density_profile(binl,dmax,mode,option))
+            density_profile.update(self.calc_density_profile(binl,dmax,mode,option=option,**kwargs))
             rho_mean = density_profile['rho'].copy()
             rho_mean/=scale
             args = (nbins,bins,rho,mass_pol,rho_mean**2)
-            func =  mode+'_density_profile'+'_flux'
+            func =  'mass'+'_density_profile'+'_flux'
+            if mode !='mass' or option!='':
+                logs.logger.warning('mass mode and total density fluxuations are calculated')
         else:
-            func =  mode+'_density_profile'+option    
+            func =  mode+'_density_profile'+contr    
+        
         
         #############
         
@@ -3642,13 +3650,13 @@ class Analysis_Confined(Analysis):
             density_profile.update({'d':d_center})
             
             density_profile.update({'rho':rho})
-            if option =='__pertype':
+            if option =='pertype':
                 for t,rhot in rho_per_atom_type.items(): 
                     density_profile[t] = rhot*scale/nframes 
-            elif option =='__2side':
+            elif option =='2side':
                 rho_down *=scale/nframes
                 density_profile.update({'rho_up':rho,'rho_down':rho_down,'rho':0.5*(rho+rho_down)})
-            elif option =='__conformations':
+            elif option =='conformations':
                 stats = {k+'_perc':v/self.npol/nframes if 'adschains'!=k else v/len(self.chain_args)/nframes
                          for k,v in stats.items()}
                 dens= {k:v*scale/nframes for k,v in confdens.items()}
@@ -6385,3 +6393,4 @@ def numba_elementwise_minimum(x1,x2):
         else:
             xmin[i] = x2[i]
     return xmin
+
