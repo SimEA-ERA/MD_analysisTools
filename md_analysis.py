@@ -10,6 +10,7 @@ import warnings
 import inspect
 import collections
 import six
+from scipy.integrate import simpson
 from pytrr import GroTrrReader
 import pytrr
 from joblib import Parallel, delayed
@@ -591,9 +592,9 @@ class plotter():
         
         if midtime is not None:
             if not ass.iterable(midtime):
-                if type(midtime) is float:
+                if type(midtime) is not float:
                     if type(midtime) is not int: 
-                        raise Exception('midtime must be float or iterable of floats')
+                        raise Exception('midtime must be float,int or iterable of floats,ints')
                 midtime = [float(midtime)]
             else:
                 midtime = [float(m) for m in midtime]
@@ -760,6 +761,25 @@ class plotter():
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
+
+class dielectric_constants():
+    def __init__(self,t,ft,de=1,omega=1.0):
+        self.t = t
+        self.ft = ft
+        self.de=de
+        self.omega=omega
+        return
+    def find_epsilon(self):
+        def ep_epp(t,phit,de,o):
+            I = simpson(phit*np.exp(-1j*o),t)
+            eps = (1-1j*o*I)*de
+            return eps
+        if ass.iterable(self.omega):
+            eps = [ ep_epp(self.t,self.ft,self.de,o) for o in self.omega]
+        else:
+            eps = ep_epp(self.t,self.ft,self.de,self.omega)
+        return eps
+    
     
 class fitData():
     
