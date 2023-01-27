@@ -6,3 +6,7 @@ Example templates of how to use where uploaded (find them in 'testing_v1.0'), al
 A jupyter notebook to guide you will also be uploaded
 Soon explanations more documentation and explanations for users and potential developers will be uploaded
 
+To test and run the examples in "testing_v1.0" directory except from this folder download also the "trr" folder which can be found here
+https://drive.google.com/drive/folders/1_pcklrLmcNQxfSegpVxI20ndxRgJiioK?usp=sharing
+The trr files are large and may took you some time
+Add the "trr" directory to the "testing_v1.0" directory
