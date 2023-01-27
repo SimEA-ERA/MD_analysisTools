@@ -1,0 +1,86 @@
+2023-01-27 14:49:14,668
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.011"'
+ --------
+2023-01-27 14:49:14,702
+[ WARNING ]
+[md_analysis.py -> read_connectivity_from_itp() -> line 2165]
+Warning: File ../itp/alu_to.itp probably contains no bonds
+ Excepted ValueError : zero-size array to reduction operation minimum which has no identity
+ --------
+2023-01-27 14:49:14,703
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.034"'
+ --------
+2023-01-27 14:49:15,213
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.442"'
+ --------
+2023-01-27 14:49:15,455
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.240"'
+ --------
+2023-01-27 14:49:27,091
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_trr_file"
+ Time/frame --> 0h : 0' : 0" : 0.007"'
+ Total time --> 0h : 0' : 11" : 0.636"'
+ --------
+2023-01-27 14:49:29,457
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "vects_per_t"
+ Time/frame --> 0h : 0' : 0" : 0.001"'
+ Total time --> 0h : 0' : 2" : 0.366"'
+ --------
+2023-01-27 14:49:29,458
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "calc_adsorbed_segments_t"
+ Total time --> 0h : 0' : 2" : 0.367"'
+ --------
+2023-01-27 14:49:29,468
+[ INFO ]
+[md_analysis.py -> get_Kinetics_inner_kernel_functions() -> line 4605]
+func name : Kinetics_inner__kernel , argsFunc name : get__args
+ --------
+2023-01-27 14:49:31,816
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Kinetics" ---> Property: "Kinetics"
+ Total time --> 0h : 0' : 2" : 0.351"'
+ --------
+2023-01-27 14:49:36,229
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "calc_chainCM_t"
+ Time/frame --> 0h : 0' : 0" : 0.003"'
+ Total time --> 0h : 0' : 4" : 0.411"'
+ --------
+2023-01-27 14:49:36,232
+[ INFO ]
+[md_analysis.py -> get_Kinetics_inner_kernel_functions() -> line 4605]
+func name : Kinetics_inner_weighted__kernel , argsFunc name : get_weighted__args
+ --------
+2023-01-27 14:49:36,966
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Kinetics" ---> Property: "Kinetics"
+ Total time --> 0h : 0' : 0" : 0.737"'
+ --------
+2023-01-27 14:49:38,181
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "MAIN"
+ Time/frame --> 0h : 0' : 0" : 0.024"'
+ Total time --> 0h : 0' : 23" : 0.595"'
+ --------

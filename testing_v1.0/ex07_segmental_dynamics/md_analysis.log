@@ -1,0 +1,122 @@
+2023-01-27 13:55:33,415
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.014"'
+ --------
+2023-01-27 13:55:33,450
+[ WARNING ]
+[md_analysis.py -> read_connectivity_from_itp() -> line 2165]
+Warning: File ../itp/alu_to.itp probably contains no bonds
+ Excepted ValueError : zero-size array to reduction operation minimum which has no identity
+ --------
+2023-01-27 13:55:33,452
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.035"'
+ --------
+2023-01-27 13:55:33,838
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.322"'
+ --------
+2023-01-27 13:55:34,083
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.243"'
+ --------
+2023-01-27 13:56:27,710
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_trr_file"
+ Time/frame --> 0h : 0' : 0" : 0.007"'
+ Total time --> 0h : 0' : 53" : 0.627"'
+ --------
+2023-01-27 14:01:33,340
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "vects_per_t"
+ Time/frame --> 0h : 0' : 0" : 0.038"'
+ Total time --> 0h : 5' : 5" : 0.628"'
+ --------
+2023-01-27 14:01:33,344
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "calc_segmental_vectors_t"
+ Total time --> 0h : 5' : 5" : 0.632"'
+ --------
+2023-01-27 14:01:48,237
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4484]
+ func name : "dynprop__kernel" 
+ argsFunc name : "get__args" 
+ innerFunc name : "cos2th_kernel" 
+ --------
+2023-01-27 14:13:12,526
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "P2"
+ Total time --> 0h : 11' : 39" : 0.179"'
+ --------
+2023-01-27 14:13:18,915
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4484]
+ func name : "dynprop_simple__kernel" 
+ argsFunc name : "get_simple__args" 
+ innerFunc name : "cos2th_kernel" 
+ --------
+2023-01-27 14:17:07,832
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "P2"
+ Total time --> 0h : 3' : 54" : 0.973"'
+ --------
+2023-01-27 14:17:11,516
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4484]
+ func name : "dynprop_simple__kernel" 
+ argsFunc name : "get_simple__args" 
+ innerFunc name : "cos2th_kernel" 
+ --------
+2023-01-27 14:19:04,507
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "P2"
+ Total time --> 0h : 1' : 56" : 0.368"'
+ --------
+2023-01-27 14:19:06,106
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4484]
+ func name : "dynprop_simple__kernel" 
+ argsFunc name : "get_simple__args" 
+ innerFunc name : "cos2th_kernel" 
+ --------
+2023-01-27 14:22:34,734
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "P2"
+ Total time --> 0h : 3' : 29" : 0.874"'
+ --------
+2023-01-27 14:22:37,274
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4484]
+ func name : "dynprop_simple__kernel" 
+ argsFunc name : "get_simple__args" 
+ innerFunc name : "cos2th_kernel" 
+ --------
+2023-01-27 14:32:45,931
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "P2"
+ Total time --> 0h : 10' : 10" : 0.924"'
+ --------
+2023-01-27 14:32:47,791
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "MAIN"
+ Time/frame --> 0h : 0' : 2" : 0.234"'
+ Total time --> 0h : 37' : 14" : 0.442"'
+ --------

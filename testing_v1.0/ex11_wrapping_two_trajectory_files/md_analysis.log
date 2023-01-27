@@ -1,0 +1,422 @@
+2023-01-27 15:39:39,423
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.009"'
+ --------
+2023-01-27 15:39:39,457
+[ WARNING ]
+[md_analysis.py -> read_connectivity_from_itp() -> line 2165]
+Warning: File ../itp/alu_to.itp probably contains no bonds
+ Excepted ValueError : zero-size array to reduction operation minimum which has no identity
+ --------
+2023-01-27 15:39:39,460
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.037"'
+ --------
+2023-01-27 15:39:39,849
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.328"'
+ --------
+2023-01-27 15:39:40,131
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.280"'
+ --------
+2023-01-27 15:40:34,977
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_trr_file"
+ Time/frame --> 0h : 0' : 0" : 0.007"'
+ Total time --> 0h : 0' : 54" : 0.844"'
+ --------
+2023-01-27 15:40:36,051
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "find_segmental_ids"
+ Total time --> 0h : 0' : 1" : 0.071"'
+ --------
+2023-01-27 15:43:57,906
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "calc_segCM_t"
+ Time/frame --> 0h : 0' : 0" : 0.025"'
+ Total time --> 0h : 3' : 22" : 0.927"'
+ --------
+2023-01-27 15:43:59,060
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:44:32,206
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 33" : 0.792"'
+ --------
+2023-01-27 15:44:32,612
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:45:01,228
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 28" : 0.888"'
+ --------
+2023-01-27 15:45:01,578
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:45:56,247
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 54" : 0.893"'
+ --------
+2023-01-27 15:45:56,618
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:48:34,342
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 2' : 37" : 0.942"'
+ --------
+2023-01-27 15:48:36,172
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:49:07,214
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 31" : 0.326"'
+ --------
+2023-01-27 15:49:07,535
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:49:36,528
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 29" : 0.222"'
+ --------
+2023-01-27 15:49:36,894
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:50:29,992
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 53" : 0.376"'
+ --------
+2023-01-27 15:50:30,357
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:53:11,172
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 2' : 41" : 0.094"'
+ --------
+2023-01-27 15:53:13,506
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:53:47,104
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 33" : 0.868"'
+ --------
+2023-01-27 15:53:47,482
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:54:17,730
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 30" : 0.531"'
+ --------
+2023-01-27 15:54:18,163
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:55:14,145
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 56" : 0.319"'
+ --------
+2023-01-27 15:55:14,525
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:57:59,270
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 2' : 45" : 0.035"'
+ --------
+2023-01-27 15:58:00,141
+[ INFO ]
+[md_analysis.py -> wrap_multiple_trajectory() -> line 216]
+wrapped file ../trr/PRnj_dt100fs.trr
+ --------
+2023-01-27 15:58:00,223
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.012"'
+ --------
+2023-01-27 15:58:00,262
+[ WARNING ]
+[md_analysis.py -> read_connectivity_from_itp() -> line 2165]
+Warning: File ../itp/alu_to.itp probably contains no bonds
+ Excepted ValueError : zero-size array to reduction operation minimum which has no identity
+ --------
+2023-01-27 15:58:00,264
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.039"'
+ --------
+2023-01-27 15:58:00,691
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.359"'
+ --------
+2023-01-27 15:58:01,057
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.365"'
+ --------
+2023-01-27 15:58:14,962
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "read_trr_file"
+ Time/frame --> 0h : 0' : 0" : 0.008"'
+ Total time --> 0h : 0' : 13" : 0.905"'
+ --------
+2023-01-27 15:58:15,892
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "find_segmental_ids"
+ Total time --> 0h : 0' : 0" : 0.928"'
+ --------
+2023-01-27 15:58:56,823
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "calc_segCM_t"
+ Time/frame --> 0h : 0' : 0" : 0.024"'
+ Total time --> 0h : 0' : 41" : 0.859"'
+ --------
+2023-01-27 15:58:57,001
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:58:58,489
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 1" : 0.534"'
+ --------
+2023-01-27 15:58:58,560
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:58:59,848
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 1" : 0.339"'
+ --------
+2023-01-27 15:58:59,925
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:02,058
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 2" : 0.190"'
+ --------
+2023-01-27 15:59:02,125
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:09,276
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 7" : 0.197"'
+ --------
+2023-01-27 15:59:09,498
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:10,995
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 1" : 0.543"'
+ --------
+2023-01-27 15:59:11,062
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:12,370
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 1" : 0.354"'
+ --------
+2023-01-27 15:59:12,436
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:14,609
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 2" : 0.219"'
+ --------
+2023-01-27 15:59:14,675
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:21,945
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 7" : 0.315"'
+ --------
+2023-01-27 15:59:22,285
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:23,819
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 1" : 0.581"'
+ --------
+2023-01-27 15:59:23,886
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:25,215
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 1" : 0.375"'
+ --------
+2023-01-27 15:59:25,282
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:27,466
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 2" : 0.231"'
+ --------
+2023-01-27 15:59:27,533
+[ INFO ]
+[md_analysis.py -> get_Dynamics_inner_kernel_functions() -> line 4485]
+ func name : "dynprop_strict__kernel" 
+ argsFunc name : "get_strict__args" 
+ innerFunc name : "norm_square_kernel" 
+ --------
+2023-01-27 15:59:34,999
+[ INFO ]
+[md_analysis.py -> print_time() -> line 233]
+Function "Dynamics" ---> Property: "MSD"
+ Total time --> 0h : 0' : 7" : 0.512"'
+ --------
+2023-01-27 15:59:35,178
+[ INFO ]
+[md_analysis.py -> wrap_multiple_trajectory() -> line 216]
+wrapped file ../trr/PRnj_dt1.trr
+ --------

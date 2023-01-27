@@ -1,0 +1,223 @@
+2023-01-26 12:51:32,389
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.009"'
+ --------
+2023-01-26 12:51:32,752
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.309"'
+ --------
+2023-01-26 12:51:42,116
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_trr_file"
+ Time/frame --> 0h : 0' : 0" : 0.005"'
+ Total time --> 0h : 0' : 9" : 0.363"'
+ --------
+2023-01-26 12:51:42,191
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.009"'
+ --------
+2023-01-26 12:51:42,223
+[ WARNING ]
+[md_analysis.py -> read_connectivity_from_itp() -> line 2159]
+Warning: File ../itp/alu_to.itp probably contains no bonds
+ Excepted ValueError : zero-size array to reduction operation minimum which has no identity
+ --------
+2023-01-26 12:51:42,224
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.032"'
+ --------
+2023-01-26 12:51:42,652
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.370"'
+ --------
+2023-01-26 12:51:42,891
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.238"'
+ --------
+2023-01-26 12:51:54,190
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_trr_file"
+ Time/frame --> 0h : 0' : 0" : 0.007"'
+ Total time --> 0h : 0' : 11" : 0.299"'
+ --------
+2023-01-26 13:02:22,328
+[ WARNING ]
+[md_analysis.py -> read_lammps_topol() -> line 2281]
+(4950, 5773) is already in connectivity 
+ --------
+2023-01-26 13:02:22,346
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_lammps_topol"
+ Total time --> 0h : 0' : 0" : 0.059"'
+ --------
+2023-01-26 13:02:22,505
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.156"'
+ --------
+2023-01-26 13:02:33,883
+[ WARNING ]
+[md_analysis.py -> read_lammps_topol() -> line 2281]
+(4950, 5773) is already in connectivity 
+ --------
+2023-01-26 13:02:33,897
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_lammps_topol"
+ Total time --> 0h : 0' : 0" : 0.059"'
+ --------
+2023-01-26 13:02:34,064
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.166"'
+ --------
+2023-01-26 13:02:34,086
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.021"'
+ --------
+2023-01-26 13:02:37,120
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_lammpstrj_file"
+ Time/frame --> 0h : 0' : 0" : 0.098"'
+ Total time --> 0h : 0' : 3" : 0.033"'
+ --------
+2023-01-26 13:02:44,853
+[ WARNING ]
+[md_analysis.py -> read_lammps_topol() -> line 2281]
+(4950, 5773) is already in connectivity 
+ --------
+2023-01-26 13:02:44,868
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_lammps_topol"
+ Total time --> 0h : 0' : 0" : 0.058"'
+ --------
+2023-01-26 13:02:45,043
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.174"'
+ --------
+2023-01-26 13:02:45,065
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.021"'
+ --------
+2023-01-26 13:02:48,071
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_lammpstrj_file"
+ Time/frame --> 0h : 0' : 0" : 0.097"'
+ Total time --> 0h : 0' : 3" : 0.005"'
+ --------
+2023-01-26 13:08:40,077
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.009"'
+ --------
+2023-01-26 13:08:40,111
+[ WARNING ]
+[md_analysis.py -> read_connectivity_from_itp() -> line 2159]
+Warning: File ../itp/alu_to.itp probably contains no bonds
+ Excepted ValueError : zero-size array to reduction operation minimum which has no identity
+ --------
+2023-01-26 13:08:40,112
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.034"'
+ --------
+2023-01-26 13:08:40,497
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.310"'
+ --------
+2023-01-26 13:08:40,754
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.256"'
+ --------
+2023-01-26 13:10:27,608
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.008"'
+ --------
+2023-01-26 13:10:27,641
+[ WARNING ]
+[md_analysis.py -> read_connectivity_from_itp() -> line 2162]
+Warning: File ../itp/alu_to.itp probably contains no bonds
+ Excepted ValueError : zero-size array to reduction operation minimum which has no identity
+ --------
+2023-01-26 13:10:27,643
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.034"'
+ --------
+2023-01-26 13:10:28,110
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.404"'
+ --------
+2023-01-26 13:10:28,347
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.236"'
+ --------
+2023-01-26 13:15:20,122
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.009"'
+ --------
+2023-01-26 13:15:20,155
+[ WARNING ]
+[md_analysis.py -> read_connectivity_from_itp() -> line 2162]
+Warning: File ../itp/alu_to.itp probably contains no bonds
+ Excepted ValueError : zero-size array to reduction operation minimum which has no identity
+ --------
+2023-01-26 13:15:20,158
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "read_atoms_and_connectivity_from_itp"
+ Total time --> 0h : 0' : 0" : 0.033"'
+ --------
+2023-01-26 13:15:20,555
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "analysis_initialization"
+ Total time --> 0h : 0' : 0" : 0.323"'
+ --------
+2023-01-26 13:15:20,804
+[ INFO ]
+[md_analysis.py -> print_time() -> line 232]
+Function "confined_system_initialization"
+ Total time --> 0h : 0' : 0" : 0.248"'
+ --------
