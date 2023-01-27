@@ -771,8 +771,10 @@ class dielectric_constants():
         self.omega=omega
         return
     def find_epsilon(self):
-        def ep_epp(t,phit,de,o):
-            I = simpson(phit*np.exp(-1j*o),t)
+        
+        def ep_epp(t,ft,de,o):
+            
+            I = simpson(ft*np.exp(-1j*o*t),x=t)
             eps = (1-1j*o*I)*de
             return eps
         if ass.iterable(self.omega):
@@ -3718,12 +3720,14 @@ class Analysis_Confined(Analysis):
         nlayers = len(d_center)
         costh_unv = [[] for i in range(len(dlayers))]
         costh = np.empty(nvectors,dtype=float)
-        if option in ['bridge','loop','train','loop']:
+        if option in ['bridge','loop','train','tail','free']:
             args = (ids1,ids2,dlayers,kwargs['dads'],option,costh,costh_unv)
             s = '_conformation'
-        else:
+        elif option=='':
             s =''
             args = (ids1,ids2,dlayers,costh,costh_unv)
+        else:
+            raise NotImplementedError('option "{}" not Implemented.\n Check your spelling when you give strings'.format(option))
         nframes = self.loop_trajectory('P2'+s, args)
 
        
@@ -3748,10 +3752,9 @@ class Analysis_Confined(Analysis):
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return part_size
         
-    def calc_dihedral_distribution(self,dads,dmax,binl):
+    def calc_dihedral_distribution(self,phi,dads=None,filters=dict()):
         '''
-        Computes dihedral distributions as a function of distance
-        Parameters
+        Computes dihedral distributions as a function of given populations
         ----------
         dads : float
           adsorption distance
@@ -3766,23 +3769,23 @@ class Analysis_Confined(Analysis):
 
         '''
         t0 = perf_counter()
+        diht,ft = self.calc_dihedrals_t(phi,dads=dads,filters = filters)
+        distrib = {k: [] for filt in filters.values() for k in filt }
         
-        dlayers = self.get_layers(dads,dmax,binl)
-        d_center = [0.5*(b[0]+b[1]) for b in dlayers]
+        for k in distrib:
+            for t,dih in diht.items():
+                distrib[k].extend(dih[ft[k][t]])
         
-        dih_types = self.dihedral_types
-        dih_ids = self.dihedrals_per_type # dictionary
+        distrib['system'] = []
+        for t,dih in diht.items():
+            distrib['system'].extend(dih)
+            
+        for k in distrib:
+            distrib[k] = np.array(distrib[k])*180/np.pi
         
-        dih_distr = { d: {lay: [] for lay in dlayers} for d in dih_types }
-        
-        args = (dih_ids,dlayers,dih_distr)
-        nframes = self.loop_trajectory('dihedral_distribution', args)
-        
-        dihedral_distr = {k:{lay:np.array(val) for lay,val in dih_distr[k].items()} for k in dih_distr }
-        tf = perf_counter() -t0
-       
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return dihedral_distr
+        tf = perf_counter()-t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        return distrib
     
     def calc_chain_characteristics(self,dmin,dmax,binl):
         '''
@@ -3953,8 +3956,8 @@ class Analysis_Confined(Analysis):
     
 
 
-    def calc_Ree_t(self,filters,
-                       dads=0):
+    def calc_Ree_t(self,filters={},
+                       dads=None):
         '''
         End to End vectors as a function of time
 
@@ -3974,6 +3977,7 @@ class Analysis_Confined(Analysis):
             see filter documentation
 
         '''
+        
         t0 = perf_counter()
         #filters = {'chain_'+k: v for k,v in filters.items()}
         chain_is = []
@@ -4320,7 +4324,7 @@ class Analysis_Confined(Analysis):
     
         return confs_t
     
-    def calc_segmental_vectors_t(self,topol_vector,filters=None,
+    def calc_segmental_vectors_t(self,topol_vector,filters={},
                                      dads=0):
         '''
         Calculates 1-2,1-3 or 1-4 segmental vectors as a function of time
@@ -5300,6 +5304,13 @@ class coreFunctions():
         return
     
     @staticmethod
+    def get_args_free(self,args_train,args_tail,args_loop,args_bridge):
+        all_not_free = np.concatenate((args_train,args_tail,args_loop,args_bridge))
+        f = np.logical_not(np.isin(self.polymer_ids, all_not_free))
+        args_free = self.polymer_ids[f]
+        return args_free
+    
+    @staticmethod
     def conformation_dens(self, dlayers,dens,
                              args_train, args_tail, 
                              args_loop, args_bridge):
@@ -5308,9 +5319,8 @@ class coreFunctions():
         box = self.get_box(frame)
         d = self.get_minimum_image_distance_from_particle(coords)
         
-        all_not_free = np.concatenate((args_train,args_tail,args_loop,args_bridge))
-        f = np.logical_not(np.isin(self.polymer_ids, all_not_free))
-        args_free = self.polymer_ids[f]
+        args_free = coreFunctions.get_args_free(self,args_train,
+                        args_tail,args_loop,args_bridge)
         
         d_tail = d[args_tail]
         d_loop = d[args_loop]          
@@ -5403,6 +5413,9 @@ class coreFunctions():
         cs = self.get_particle_cm(coords)
         ds_chains, args_train, args_tail,\
         args_loop, args_bridge = self.conformations(dads,coords)
+        
+        args_free = coreFunctions.get_args_free(self,args_train,
+                        args_tail,args_loop,args_bridge)
         
         #get conformation args
         args = locals()['args_'+conformation]
