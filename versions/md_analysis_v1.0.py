@@ -69,12 +69,61 @@ class ass():
     '''
     The ASSISTANT class
     Contains everything that is needed to assist in the data analysis including
-    1) functions for manipulating data in dictionaries
-    2) The wrapper for using the same function and multyple trajectories on the Dynamic analysis
-    3) printing and logger functions e.g. print_time, clear_logs 
+    1) colors for ploting 
+    2) linestyles
+    3) functions for manipulating data in dictionaries
+    4) The wrapper for using the same function and multyple trajectories on the Dynamic analysis
+    5) printing and logger functions e.g. print_time, clear_logs 
     
     '''
+    class colors():
+        class qualitative():                
+            colors4 = ['#e41a1c','#377eb8','#4daf4a','#984ea3']
+            colors5 = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00']
+            colors6 = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33']            
+            colors9 = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33','#a65628','#f781bf','#999999']
+        class diverging():
+            colors6 = ['#d73027','#fc8d59','#fee090','#ffffbf','#91bfdb','#4575b4']
+            colors9 = ['#d73027','#f46d43','#fdae61','#fee08b','#ffffbf','#d9ef8b','#a6d96a','#66bd63','#1a9850']
+            colors7 = ['#d73027','#fc8d59','#fee08b','#ffffbf','#d9ef8b','#91cf60','#1a9850']
+        class sequential():
+            colors3 = ['#fee0d2','#fc9272','#de2d26']
     beebbeeb = True
+    class linestyles():
+        lst_map = {
+            'loosely dotted':      (0, (1, 3)),
+            'dotted':               (0, (1, 1)),
+            'densely dotted':       (0, (2, 1)),
+            
+            'loosely dashed':       (0, (5, 3)),
+            'dashed':               (0, (4, 2)),
+            'densely dashed':       (0, (3, 1)),
+
+         'loosely dashdotted':   (0, (5, 3, 1, 3)),
+         'dashdotted':           (0, (4, 2, 1, 2)),
+         'densely dashdotted':    (0, (3, 1, 1, 1)),
+
+         'dashdotdotted':         (0, (5, 2, 1, 2, 1, 2)),
+         'loosely dashdotdotted': (0, (4, 3, 1,3, 1, 3)),
+         'densely dashdotdotted': (0, (3, 1, 1, 1, 1, 1))
+         }
+        lst3 = [lst_map['densely dotted'],lst_map['loosely dashed'],
+              lst_map['densely dashed']]
+        lst4 = [lst_map['densely dotted'],lst_map['loosely dotted'],
+              lst_map['densely dashed'],lst_map['loosely dashed']]
+        lst6 = [lst_map['loosely dotted'],
+                lst_map['dotted'],
+                lst_map['dashed'],
+                lst_map['loosely dashdotted'],
+                lst_map['dashdotted'],
+                lst_map['densely dashdotted']]
+        lst7 = [lst_map['loosely dotted'],
+                lst_map['dotted'],
+                lst_map['dashed'],
+                lst_map['loosely dashdotted'],
+                lst_map['dashdotted'],
+                lst_map['densely dashdotted'],
+                lst_map['densely dotted']]
     @staticmethod
     def try_beebbeeb():
         if ass.beebbeeb:
@@ -307,12 +356,8 @@ def moving_average(a, n=10) :
 
 def block_average(a, n=100) :
     #block average kernel
-    if a.shape[0]%n!=0:
-        p = 1
-    else:
-        p=0
-    bv = np.empty(int(a.shape[0]/n)+1,dtype=float)
-    for i in range(bv.shape[0]):
+    bv = np.empty(int(a.shape[0]/n),dtype=float)
+    for i in range(bn.shape[0]):
         x = a[i*n:(i+1)*n]
         bv[i] = x.mean()
     return bv
@@ -435,52 +480,6 @@ class XPCS_Reader():
 class plotter():
     def __init__(self):
         return
-    
-    class colors():
-        qualitative = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33','#a65628','#f781bf','#999999']
-        diverging = ['#d73027','#f46d43','#fdae61','#fee08b','#ffffbf','#d9ef8b','#a6d96a','#66bd63','#1a9850']
-        sequential = ['#fee0d2','#fc9272','#de2d26']
-        safe = ['#1b9e77','#d95f02','#7570b3']
-        semisafe = ['#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e','#e6ab02','#a6761d','#666666']
-    class linestyles():
-        lst_map = {
-            'loosely dotted':      (0, (1, 3)),
-            'dotted':               (0, (1, 1)),
-            'densely dotted':       (0, (2, 1)),
-            
-            'loosely dashed':       (0, (5, 3)),
-            'dashed':               (0, (4, 2)),
-            'densely dashed':       (0, (3, 1)),
-
-         'loosely dashdotted':   (0, (5, 3, 1, 3)),
-         'dashdotted':           (0, (4, 2, 1, 2)),
-         'densely dashdotted':    (0, (3, 1, 1, 1)),
-
-         'dashdotdotted':         (0, (5, 2, 1, 2, 1, 2)),
-         'loosely dashdotdotted': (0, (4, 3, 1,3, 1, 3)),
-         'densely dashdotdotted': (0, (3, 1, 1, 1, 1, 1))
-         }
-        lst3 = [lst_map['densely dotted'],lst_map['loosely dashed'],
-              lst_map['densely dashed']]
-        lst4 = [lst_map['densely dotted'],lst_map['loosely dotted'],
-              lst_map['densely dashed'],lst_map['loosely dashed']]
-        lst6 = [lst_map['loosely dotted'],
-                lst_map['dotted'],
-                lst_map['dashed'],
-                lst_map['loosely dashdotted'],
-                lst_map['dashdotted'],
-                lst_map['densely dashdotted']]
-        lst7 = [lst_map['loosely dotted'],
-                lst_map['dotted'],
-                lst_map['dashed'],
-                lst_map['loosely dashdotted'],
-                lst_map['dashdotted'],
-                lst_map['densely dashdotted'],
-                lst_map['densely dotted']]
-    @staticmethod
-    def boldlabel(label):
-        return r'$\mathbf{'+label+'}$'
-    
     @staticmethod
     def relaxation_time_distributions(datadict,
                                       size=3.5,fname=None,title=None,
@@ -488,7 +487,7 @@ class plotter():
                                       units='ns',mode='tau'):
         
         if cmap is None:
-            c = plotter.colors.semisafe
+            c = ass.colors.qualitative.colors9
             cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
         figsize = (size,size)
         dpi = 300
@@ -634,16 +633,15 @@ class plotter():
     def plotDynamics(datadict,style='points',locleg='best',ncolleg=1,
              fname =None,title=None,size=3.5,xlim=None,ylim=None,pmap=None,
              cmap = None,ylabel=None,units='ns',midtime=None,labmap=None,
-             num=100,cutf=None,lstmap=None,write_plot_data=False,yscale=None,
-             edgewidth=0.3,markersize=1.5):
+             num=100,cutf=None,lstmap=None,write_plot_data=False,yscale=None):
 
         if labmap is None:
             labmap  = {k:k for k in datadict}
         if cmap is None:
-            c = plotter.colors.semisafe
+            c = ass.colors.qualitative.colors9
             cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
         if lstmap is None:
-            lst = plotter.linestyles.lst7*10
+            lst = ass.linestyles.lst7*10
             lstmap = {k:lst[i] for i,k in enumerate(datadict.keys())}
         elif type(lstmap) is str:
             lstmap = {k:lstmap for k in datadict}
@@ -690,15 +688,11 @@ class plotter():
             t = x<=cutf[k]
             x = x[t][1:]
             y = y[t][1:]
-            if num == 'all':
-                args = np.arange(0,x.shape[0],dtype='i')
-            else:
-                args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
-            
+            args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
             if style == 'points':
                 plt.plot(x[args],y[args],ls='none',
-                marker = pmap[k],markeredgewidth=edgewidth*size,
-                label=labmap[k], markersize=size*markersize,fillstyle='none',
+                marker = pmap[k],markeredgewidth=0.3*size,
+                label=labmap[k], markersize=size*1.2,fillstyle='none',
                 color=cmap[k])
             elif style=='lines':
                 plt.plot(x[args],y[args],ls=lstmap[k],lw=size/1.5,
@@ -722,7 +716,7 @@ class plotter():
             plotter.write_data_forXPCS(datadict,cutf=cutf,midtime=midtime)
         
         if cmap is None:
-            c = c = plotter.colors.semisafe
+            c = ass.colors.qualitative.colors9
             cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
         if ylabel is None:
             ylabel =r'$P_1(t)$'
@@ -2560,7 +2554,7 @@ class Analysis:
             self.read_lammpstrj_file()
         return 
     
-    def write_gro_file(self,fname=None,option='',frames=None,step=None):
+    def write_gro_file(self,fname=None,option='',frames=None):
         t0 = perf_counter()
         options = ['','unwrap','transmiddle']
         if option not in options:
@@ -2572,9 +2566,6 @@ class Analysis:
             for frame,d in self.timeframes.items():
                 if frames is not None:
                     if  frame <frames[0] or frame>frames[1]:
-                        continue
-                if step is not None:
-                    if frame%step  !=0: 
                         continue
                 if option == 'unwrap':
                     coords = self.get_whole_coords(frame)
@@ -2735,20 +2726,27 @@ class Analysis:
             i2 = num_end
         else:
             i2 = len(self.timeframes)
-        new_dict = ass.dict_slice(self.timeframes,i1,i2)
+        new_dict = self.dict_slice(self.timeframes,i1,i2)
         if len(new_dict) ==0:
             raise Exception('Oh dear you have cut all your timeframes from memory')
             
         self.timeframes = new_dict
         return 
     
+    @staticmethod
+    def dict_slice(d,i1,i2):
+        return {k:v for i,(k,v) in enumerate(d.items()) if i1<=i<i2 }
+   
+
+    
+
+
+    
     def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
-                               density='',normalize=False):
+                               density='number'):
         '''
         Used to calculate pair distribution functions between two atom types
-        Could be the same type. If one type is None then the distribution is 
-        between the the other type and all atom types. If both is none then
-        the distribution is between all atoms.
+        Could be the same type
 
         Parameters
         ----------
@@ -2761,11 +2759,10 @@ class Analysis:
         type2 : string
             . The default is None.
         density : string
-            DESCRIPTION. The default is ''.
+            DESCRIPTION. The default is 'number'.
             'number' is to return number density [ 1/nm^3 ]
             'probability' returns probability density
-        normalize : The default is False
-                
+
         Raises
         ------
         NotImplementedError
@@ -2773,47 +2770,45 @@ class Analysis:
 
         Returns
         -------
-        pair_distribution : dictionary 
-            having the distance and the distribution
-    
+        pair_distribution : TYPE
+            DESCRIPTION.
 
         '''
         t0 = perf_counter()   
         
-        #if density not in ['number','probability','max']:
-            #raise NotImplementedError('density = {:s} is not Impmemented'.format(density))
+        if density not in ['number','probability']:
+            raise NotImplementedError('density = {:s} is not Impmemented'.format(density))
             
         bins = np.arange(0,dmax+binl,binl)
         gofr = np.zeros(bins.shape[0]-1,dtype=float)
-        
         if type1 is None and type2 is None:
             func = 'gofr'
             args = ()
-            nc1 = self.natoms
+            nc1 = self.get_coords(0).shape[0]
             nc2 = (nc1-1)/2
         elif type1 is not None and type2 is None:
             func = 'gofr_type_to_all'
             fty1 = type1 == self.at_types
-            nc1 = np.count_nonzero(fty1)
-            nc2 = self.natoms
+            nc1 = self.get_coords(0)[fty1].shape[0]
+            nc2 = self.get_coords(0).shape[0]
             args = (fty1,)
         elif type1 is None and type2 is not None:
             func ='gofr_type_to_all'
             fty2 = type2 == self.at_types
-            nc1 = self.natoms
-            nc2 = np.count_nonzero(fty2)
+            nc1 = self.get_coords(0).shape[0]
+            nc2 = self.get_coords(0)[fty2].shape[0]
             args =(fty2,)
         elif type1==type2:
             func= 'gofr_type'
             fty = type1 == self.at_types
-            nc1 =  np.count_nonzero(fty)
+            nc1 =  self.get_coords(0)[fty].shape[0]
             nc2 =(nc1-1)/2
             args = (fty,)
         else:
             func = 'gofr_type_to_type'
             fty1,fty2 = type1 == self.at_types, type2 == self.at_types
-            nc1 = np.count_nonzero(fty1)
-            nc2 = np.count_nonzero(fty2)
+            nc1 = self.get_coords(0)[fty1].shape[0]
+            nc2 = self.get_coords(0)[fty2].shape[0]
             args= (type1 == self.at_types, type2 == self.at_types)
         
         args = (*args,bins,gofr)
@@ -2821,17 +2816,14 @@ class Analysis:
         nframes = self.loop_trajectory(func, args)
 
 
-        gofr/=nframes
+        gofr/=nframes*nc2
         cb = center_of_bins(bins)
         if density=='number':
-            const = 4*np.pi/3
-            for i in range(0,bins.shape[0]-1):
-                vshell = const*(bins[i+1]**3-bins[i]**3)
-                gofr[i]/=vshell
+            vshell = 4*np.pi*(cb[1]-cb[0])*cb**2
+            gofr/=vshell
         elif density =='probability':
-            gofr/=nc1*nc2
-        if normalize:
-            gofr/=gofr.max()
+            gofr/=nc1
+        
         pair_distribution = {'d':cb, 'gr':gofr }
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
@@ -3085,7 +3077,7 @@ class Analysis_Confined(Analysis):
         particle_cm = self.get_particle_cm(coords)
         cds = coords.copy()
         cds += box/2 - particle_cm
-        cds = implement_pbc(cds,box)
+        cds = implement_pbc(cds,box,inplace=True)
         return cds
     
     def translated_coords(self,frame):
@@ -3151,7 +3143,7 @@ class Analysis_Confined(Analysis):
         coords = self.get_coords(frame)
         box  = self.get_box(frame)          
         cm = self.get_particle_cm(coords)
-        d = self.get_distance_from_particle(coords[self.polymer_filt])
+        d = self.get_minimum_image_distance_from_particle(coords[self.polymer_filt])
         return coords,box,d,cm
     
     def get_whole_frame_basics(self,frame):
@@ -3326,7 +3318,7 @@ class Analysis_Confined(Analysis):
         
         return ftrain,image_trains
     
-    def get_distance_from_particle(self,r=None,ids=None):
+    def get_minimum_image_distance_from_particle(self,r=None,ids=None):
         '''
         Give either r or ids
         If you give r then the 
@@ -3352,8 +3344,7 @@ class Analysis_Confined(Analysis):
         if r is None:
             r = coords[ids]
         cm = self.get_particle_cm(coords)
-        
-        d = 1e16
+        d = np.ones(r.shape[0])*1e16
         for L in self.box_add(box):
             d = np.minimum(d,self.dfun(self,r,cm+L))
         return d
@@ -3538,27 +3529,15 @@ class Analysis_Confined(Analysis):
                             new_set_a.add(neib)
                             if neib not in old_set_a:
                                 new_neibs.add(neib)
+                
+                
 
             chunks.append(new_set_a)
             set_args.difference_update(new_set_a)
         
-            #aold # (for debugging-combined with assertion above)
+            #aold = a
         #ass.print_time(perf_counter()-t0,'connected_chunks')
         return chunks
-    
-    def length_of_connected_chunks(self,args,coords,exclude_bonds=None):
-        # this currently is suitable for linear chains in corse-grained or united atom represtation
-        # if there is an all atom representation exclude_bonds must be used
-        bonds = self.sorted_connectivity_keys
-        f1 = np.isin(bonds[:,0],args)
-        f2 = np.isin(bonds[:,1],args)
-        f = np.logical_and(f1,f2)
-        cb = bonds[f]
-        coords1 = coords[cb[:,0]]
-        coords2 = coords[cb[:,1]]
-        r = coords2-coords1
-        dists = np.sqrt(np.sum(r*r,axis=1))
-        return dists.sum()
     ############### End of Conformation Calculation Supportive Functions #####
     
     ######## Main calculation Functions for structural properties ############      
@@ -4089,7 +4068,7 @@ class Analysis_Confined(Analysis):
         '''
         t0 = perf_counter()
         conn_cleaned = {k:v for k,v in self.connectivity.items()
-                        if v != segbond
+                        if v != ('C','C')
                         }
         
         bond_ids = np.array(list(conn_cleaned.keys()))
@@ -4849,8 +4828,8 @@ class Filters():
     def space(self,layers,ids1,ids2,coords,*args):
         #coords = self.get_whole_coords(self.current_frame)
 
-        d1 = self.get_distance_from_particle(ids = ids1)
-        d2 = self.get_distance_from_particle(ids =ids2)
+        d1 = self.get_minimum_image_distance_from_particle(ids = ids1)
+        d2 = self.get_minimum_image_distance_from_particle(ids =ids2)
         
         f1 = Filters.filtLayers(layers,0.5*(d1+d2))
         return f1
@@ -4924,7 +4903,7 @@ class Filters():
             
             connected_chunks = self.connected_chunks(args)
             
-            sizes = np.array([chunk.__len__() for chunk in connected_chunks])
+            sizes = np.array([len(chunk) for chunk in connected_chunks])
             
             
             filt['{}:distr'.format(conf)] = sizes
@@ -4982,7 +4961,7 @@ class Filters():
     
     @staticmethod
     def chain_space(self,layers,chain_cm,*args):
-        d = self.get_distance_from_particle(chain_cm)
+        d = self.get_minimum_image_distance_from_particle(chain_cm)
         return Filters.filtLayers(layers, d)
     
     @staticmethod
@@ -5012,7 +4991,7 @@ class Filters():
         chain_arg_keys = self.chain_args.keys()
         cads = np.empty(len(chain_arg_keys),dtype=bool)
         degree = np.empty(cads.shape[0],dtype=float)
-        d = self.get_distance_from_particle(coords)
+        d = self.get_minimum_image_distance_from_particle(coords)
         fd = filt_uplow(d,0,dads)
         for i,args in enumerate(self.chain_args.values()):   
             f = fd[args]
@@ -5338,7 +5317,7 @@ class coreFunctions():
         frame = self.current_frame
         coords = self.get_coords(frame)
         box = self.get_box(frame)
-        d = self.get_distance_from_particle(coords)
+        d = self.get_minimum_image_distance_from_particle(coords)
         
         args_free = coreFunctions.get_args_free(self,args_train,
                         args_tail,args_loop,args_bridge)
@@ -5381,7 +5360,22 @@ class coreFunctions():
         stats['bridge'] += args_bridge.shape[0]
         return 
     
+    @staticmethod
+    def dihedral_distribution(self,dih_ids,dlayers,dih_distr):
+        frame = self.current_frame
+        box = self.get_box(frame)
+        coords = self.get_whole_coords(frame)
+        cs = self.get_particle_cm(coords)
 
+        for k,d_ids in dih_ids.items():
+            rm = 0.5*( coords[d_ids[:,1]] + coords[d_ids[:,2]] )
+            d = self.dfun(self,rm,cs)
+            dih_val = np.empty(d_ids.shape[0],dtype=float)
+            dihedral_values_kernel(d_ids,coords,dih_val)
+            for lay in dlayers:
+                fin_bin = filt_uplow(d, lay[0], lay[1])
+                dih_distr[k][lay].extend(dih_val[fin_bin])
+        return
     
     @staticmethod
     def P2(self,ids1,ids2,dlayers,costh,costh_unv):
@@ -5397,7 +5391,7 @@ class coreFunctions():
         
         rm = 0.5*(r1+r2)
         
-        d = self.get_distance_from_particle(rm)
+        d = self.get_minimum_image_distance_from_particle(rm)
         uv = self.unit_vectorFun(self,rm,cs)
         
         costhsquare__kernel(costh,r2-r1,uv)
@@ -5431,7 +5425,7 @@ class coreFunctions():
         costh = costh[filt_ids]
         rm = 0.5*(r1+r2)
         
-        d = self.get_distance_from_particle(rm)
+        d = self.get_minimum_image_distance_from_particle(rm)
         uv = self.unit_vectorFun(self,rm,cs)
         
         costhsquare__kernel(costh,r2-r1,uv)
@@ -5448,8 +5442,7 @@ class coreFunctions():
         coords = self.get_whole_coords(frame)
         box = self.get_box(frame)
         cs = self.get_particle_cm(coords)
-        
-        
+                   
         for j in chain_args:
             #find chain  center of mass
             c_ch = coords[chain_args[j]]
@@ -5464,9 +5457,7 @@ class coreFunctions():
             Rg = Rg2**0.5
             local_dict = locals()
             #Assign values
-            d =1e16 
-            for L in self.box_add(box):
-                d = np.minimum(d,self.dfun(self,ch_cm.reshape(1,3),cs+L))
+            d = self.dfun(self,ch_cm.reshape((1,3)),cs) #scalar
             for i,dl in enumerate(dlayers):
                 if dl[0]< d[0] <=dl[1]:
                     for char in chars:
@@ -5552,66 +5543,6 @@ class coreFunctions():
         confs_t[key] = x
         
         return
-
-    @staticmethod
-    def confs_t__length(self,dads,confs_t):
-        frame = self.current_frame
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
-        time = self.get_time(frame)
-        
-        ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(dads,coords)
-        x = dict()
-        for args,lab in zip([args_train, args_tail, args_loop, args_bridge],
-                        ['l_train','l_tail','l_loop','l_bridge']):
-            connected_chunks = self.connected_chunks(args)
-            lengths = [self.length_of_connected_chunks(list(ch),coords)
-                       for ch in connected_chunks ]
-            
-            m = np.mean(lengths)
-            std = np.std(lengths)
-            x[lab] = m
-            x[lab+'(std)'] = std
-            x[lab+'_lenghts'] = lengths 
-        if frame == self.first_frame:
-            self.time_zero = time
-            
-        key = self.get_timekey(time,self.time_zero)
-        
-        confs_t[key] = x
-        
-        return  
-    
-    @staticmethod
-    def confs_t__size(self,dads,confs_t):
-        frame = self.current_frame
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
-        time = self.get_time(frame)
-        
-        ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(dads,coords)
-        x = dict()
-        for args,lab in zip([args_train, args_tail, args_loop, args_bridge],
-                        ['s_train','s_tail','s_loop','s_bridge']):
-            connected_chunks = self.connected_chunks(args)
-            sizes = [s.__len__() for s in connected_chunks]
-            size_m = np.mean(sizes)
-            size_std = np.std(sizes)
-            x[lab] = size_m 
-            x[lab+'(std)'] = size_std
-            x[lab+'_sizes'] = sizes
-        if frame == self.first_frame:
-            self.time_zero = time
-            
-        key = self.get_timekey(time,self.time_zero)
-        
-        confs_t[key] = x
-        
-        return    
-    
-    
     @staticmethod
     def confs_t__perchain(self,dads,confs_t):
         frame = self.current_frame
@@ -5626,6 +5557,7 @@ class coreFunctions():
             x[k] =  [ np.count_nonzero( np.isin(a, args ) )/a.shape[0] 
                                       for a in self.chain_args.values() ] 
                                     
+        
         if frame == self.first_frame:
             self.time_zero = time
             
@@ -5648,15 +5580,15 @@ class coreFunctions():
         box = self.get_box(frame)
         time = self.get_time(frame)
         
-        chain_cm = self.chains_CM(coords)
 
+        
+        chain_cm = self.chains_CM(coords)
         
         if frame == self.first_frame:
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
-        pf = self.particle_filt
-        cm = CM(coords[pf],self.atom_mass[pf])
-        vec_t[key] =  chain_cm - cm
+        
+        vec_t[key] =  chain_cm
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
                             chain_cm, coords, dads)
@@ -5697,7 +5629,6 @@ class coreFunctions():
         pd = np.empty(int(n*(n-1)/2),dtype=float)
 
         pair_dists(coords,box,pd)
-        pd = pd[pd<=bins.max()]
         numba_bin_count(pd,bins,gofr)
         
         return
@@ -5712,7 +5643,7 @@ class coreFunctions():
         pd = np.empty(int(n*(n-1)/2),dtype=float)
  
         pair_dists(coords,box,pd)
-        pd = pd[pd<=bins.max()]
+
         numba_bin_count(pd,bins,gofr)
         return
     
@@ -5729,7 +5660,7 @@ class coreFunctions():
         pd = np.empty(int(n*nty),dtype=float)
         
         pair_dists_general(coords,coords_ty,box,pd)
-        pd = pd[pd<=bins.max()]
+        
         numba_bin_count(pd,bins,gofr)
 
         return
@@ -5746,9 +5677,8 @@ class coreFunctions():
         nty1 = coords_ty1.shape[0]
         nty2 = coords_ty2.shape[0]
         pd = np.empty(int(nty1*nty2),dtype=float)
-        
+
         pair_dists_general(coords_ty1,coords_ty2,box,pd)
-        pd = pd[pd<=bins.max()]
         numba_bin_count(pd,bins,gofr)
 
         return
@@ -6310,7 +6240,6 @@ def minimum_image(relative_coords,box):
             elif relative_coords[i][j] < -0.5*box[j]:
                 imaged_rel_coords[i][j] += box[j]  
     return imaged_rel_coords
-
 @jit(nopython=True,fastmath=True,parallel=True)
 def pair_dists(coords,box,dists):
     n = coords.shape[0]
@@ -6342,10 +6271,26 @@ def pair_dists_general(coords1,coords2,box,dists):
 def CM(coords,mass):
     cm = np.sum(mass*coords.T,axis=1)/mass.sum()
     return cm
+#@jit(nopython=True,fastmath=True)
+def implement_pbc(coords,boxsize,inplace=True):
+    
+    if inplace:
+        cn = coords
+    else:
+        cn = coords.copy()
+    fxu = coords[:,0] > boxsize[0]
+    fxl = coords[:,0] < 0
+    fyu = coords[:,1] > boxsize[1]
+    fyl = coords[:,1] < 0
+    fzu = coords[:,2] > boxsize[2]
+    fzl = coords[:,2] < 0
+    cn[:,0] -= boxsize[0]*np.array(fxu,dtype=float)
+    cn[:,0] += boxsize[0]*np.array(fxl,dtype=float)
+    cn[:,1] -= boxsize[1]*np.array(fyu,dtype=float)
+    cn[:,1] += boxsize[1]*np.array(fyl,dtype=float)
+    cn[:,2] -= boxsize[2]*np.array(fzu,dtype=float)
+    cn[:,2] += boxsize[2]*np.array(fzl,dtype=float)
 
-@jit(nopython=True,fastmath=True)
-def implement_pbc(coords,boxsize):
-    cn = coords%boxsize
     return cn
 
 @jit(nopython=True,fastmath=True)

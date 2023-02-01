@@ -22,7 +22,7 @@ obj = mda.Analysis_Confined(trajf, #trajectory file
         topol_file ='../gro/alupb.gro', # if it's gromacs setup we need a gro file of one frame to read atom types, molecule types and exetra 
         particle='ALU',polymer='PB') # Need to give the particle and polymer name 
 
-#obj.read_file()
+obj.read_file()
 binl=0.025 ; dmax =4.825 ; dads = 1.025 
 
 # if you dont read the file the algorithm will read it 

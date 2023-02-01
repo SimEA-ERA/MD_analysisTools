@@ -37,7 +37,7 @@ DK['seg'] = obj.Kinetics(ads_seg_t)
 
 du, fwads = obj.calc_chainCM_t(filters={'adsorption':None},dads=dads)
 #we also give the degree of adsorption as weights. It will perform a weighted average
-DK['chains'] = obj.Kinetics(fwads['ads'],wt =fwads['degree'])
+DK['chains'] = obj.Kinetics(fwads['ads'])
 
 ## GO GO PLOT ## 
 size = 5.5

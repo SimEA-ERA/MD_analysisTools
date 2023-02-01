@@ -18,6 +18,7 @@ conftype = 'zdir'
 binl=0.2 ; dmax =5 ; 
 
 #readings
+
 confined = mda.Analysis_Confined(trajf,['../itp/topol_UA_PB30.itp','../itp/alu_to.itp'],
                         conftype, 
                         topol_file ='../gro/alupb.gro',
@@ -35,7 +36,7 @@ bulk.read_file()
 
 # calculations
 chain_chars = confined.calc_chain_characteristics(0.5,dmax,binl)
-bulk_chars = bulk.calc_chain_characteristics(0.5,dmax,binl)
+bulk_chars = bulk.calc_chain_characteristics(0.5,4.5,binl)
 # store in shorter variables
 d = chain_chars
 b = bulk_chars
