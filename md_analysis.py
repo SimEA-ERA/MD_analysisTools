@@ -2743,7 +2743,7 @@ class Analysis:
         return 
     
     def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
-                               density='',normalize=False):
+                               density='',normalize=False,**kwargs):
         '''
         Used to calculate pair distribution functions between two atom types
         Could be the same type. If one type is None then the distribution is 
@@ -2764,8 +2764,11 @@ class Analysis:
             DESCRIPTION. The default is ''.
             'number' is to return number density [ 1/nm^3 ]
             'probability' returns probability density
-        normalize : The default is False
-                
+        normalize : The default is True. 
+            For density=="number" it normalizes with the mean of far values (by default with the mean between distances (0.75dmax,dmax))
+            for density=="probability" it normalizes with gofr.sum()
+            for density=="coordination" it does nothing
+            for density=="" (default) it normalizes by gmax
         Raises
         ------
         NotImplementedError
@@ -2819,19 +2822,40 @@ class Analysis:
         args = (*args,bins,gofr)
         
         nframes = self.loop_trajectory(func, args)
-
+        
 
         gofr/=nframes
         cb = center_of_bins(bins)
-        if density=='number':
+        if 'number' in density:
+            
             const = 4*np.pi/3
             for i in range(0,bins.shape[0]-1):
                 vshell = const*(bins[i+1]**3-bins[i]**3)
                 gofr[i]/=vshell
+            if 'pair' in density:
+                pass
+            else:
+                gofr/=nc1
+            if normalize:
+                if 'bulk_region' in kwargs:
+                    bulk_region = kwargs['bulk_region']
+                else:
+                    bulk_region =(0.75*dmax,dmax)
+                f = np.logical_and(bulk_region[0]<cb,cb<=bulk_region[1])
+                bulkv = gofr[f].mean()
+                if 100*bulkv<=gofr.max():
+                    raise Exception('The bulk region is very small compared to the maximum value\nTry increasing dmax')
+                gofr/=bulkv
         elif density =='probability':
             gofr/=nc1*nc2
-        if normalize:
-            gofr/=gofr.max()
+            if normalize:
+                gofr/=gofr.sum()
+        elif density=='coordination':
+            gofr/=nc1
+        elif density=='':
+            if normalize:
+                gofr/=gofr.max()
+            
         pair_distribution = {'d':cb, 'gr':gofr }
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
@@ -3117,6 +3141,9 @@ class Analysis_Confined(Analysis):
         self.find_polymer_filt()
         self.npol = self.mol_ids[self.polymer_filt].shape[0]
     
+        self.particle_mass = self.atom_mass[self.particle_filt]
+        self.polymer_mass = self.atom_mass[self.polymer_filt]
+        
         #self.find_masses()
         self.unique_atom_types = np.unique(self.at_types)
         
@@ -3177,7 +3204,7 @@ class Analysis_Confined(Analysis):
 
         '''
         cm =self.centerfun(CM( coords[self.particle_filt], 
-                               self.atom_mass[self.particle_filt]))
+                               self.particle_mass))
         return cm
     
     @staticmethod
@@ -4226,7 +4253,7 @@ class Analysis_Confined(Analysis):
     
         return correlations
     
-    def calc_chainCM_t(self,filters={'all':None}, dads=1,option='',coord_type=None):
+    def calc_chainCM_t(self,filters={'all':None}, dads=1,option=''):
         '''
         Computes chains center of mass as a function of time
         Parameters
@@ -4255,7 +4282,7 @@ class Analysis_Confined(Analysis):
         vec_t = dict()
         filt_per_t = dict()
         
-        args = (filters,dads,vec_t,filt_per_t,coord_type)
+        args = (filters,dads,vec_t,filt_per_t)
         
         nframes = self.loop_trajectory('chainCM_t'+option, args)
       
@@ -5636,13 +5663,12 @@ class coreFunctions():
         return
     
     @staticmethod
-    def chainCM_t(self,filters,dads,vec_t,filt_per_t,coord_type=None):
+    def chainCM_t(self,filters,dads,vec_t,filt_per_t):
         
         frame = self.current_frame
-        if coord_type is None:
-            coords = self.get_coords(frame)
-        elif coord_type =='whole':
-            coords = self.get_whole_coords(frame)
+
+        coords = self.get_coords(frame)
+
         
         
         box = self.get_box(frame)
@@ -5654,8 +5680,8 @@ class coreFunctions():
         if frame == self.first_frame:
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
-        pf = self.particle_filt
-        cm = CM(coords[pf],self.atom_mass[pf])
+        
+        cm = CM(coords[self.particle_filt],self.particle_mass)
         vec_t[key] =  chain_cm - cm
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
@@ -5680,7 +5706,8 @@ class coreFunctions():
             self.time_zero=time
         key = self.get_timekey(time,self.time_zero)
         
-        vec_t[key] =  seg_cm
+        cm = CM(coords[self.particle_filt],self.particle_mass)
+        vec_t[key] =  seg_cm -cm
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
                             ids1,ids2,coords,dads)
