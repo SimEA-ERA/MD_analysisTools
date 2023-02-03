@@ -28,42 +28,57 @@ class logs():
     '''
     A class for modifying the loggers
     '''
-    LOGGING_LEVEL = logging.DEBUG
+    def __init__(self):
+        self.logger = self.get_logger()
+        
+    def get_logger(self):
     
-    logger = logging.getLogger(__name__)
-    logger.setLevel(LOGGING_LEVEL)
-    logFormat = '%(asctime)s\n[ %(levelname)s ]\n[%(filename)s -> %(funcName)s() -> line %(lineno)s]\n%(message)s\n --------'
-    formatter = logging.Formatter(logFormat)
-    
-    logfile_handler = logging.FileHandler('md_analysis.log',mode='w')
-    logfile_handler.setFormatter(formatter)
-    
-    logger.addHandler(logfile_handler)
-    
-    stream = logging.StreamHandler()
-    stream.setLevel(logging.DEBUG)
-    stream.setFormatter(formatter)
-    
-    logger.addHandler(stream)
-    
-    fieldstyle = {'asctime': {'color': 'magenta'},
-                  'levelname': {'bold': True, 'color': 'green'},
-                  'filename':{'color':'green'},
-                  'funcName':{'color':'green'},
-                  'lineno':{'color':'green'}}
-                                       
-    levelstyles = {'critical': {'bold': True, 'color': 'red'},
-                   'debug': {'color': 'blue'}, 
-                   'error': {'color': 'red'}, 
-                   'info': {'color':'cyan'},
-                   'warning': {'color': 'yellow'}}
-    
-    coloredlogs.install(level=LOGGING_LEVEL,
-                        logger=logger,
-                        fmt=logFormat,
-                        datefmt='%H:%M:%S',
-                        field_styles=fieldstyle,
-                        level_styles=levelstyles)
+        LOGGING_LEVEL = logging.DEBUG
+        
+        logger = logging.getLogger(__name__)
+        logger.setLevel(LOGGING_LEVEL)
+        logFormat = '%(asctime)s\n[ %(levelname)s ]\n[%(filename)s -> %(funcName)s() -> line %(lineno)s]\n%(message)s\n --------'
+        formatter = logging.Formatter(logFormat)
+        
+
+        if not logger.hasHandlers():
+            logfile_handler = logging.FileHandler('md_analysis.log',mode='w')
+            logfile_handler.setFormatter(formatter)
+            logger.addHandler(logfile_handler)
+            self.log_file = logfile_handler
+            stream = logging.StreamHandler()
+            stream.setLevel(logging.DEBUG)
+            stream.setFormatter(formatter)
+            
+            logger.addHandler(stream)
+         
+        fieldstyle = {'asctime': {'color': 'magenta'},
+                      'levelname': {'bold': True, 'color': 'green'},
+                      'filename':{'color':'green'},
+                      'funcName':{'color':'green'},
+                      'lineno':{'color':'green'}}
+                                           
+        levelstyles = {'critical': {'bold': True, 'color': 'red'},
+                       'debug': {'color': 'blue'}, 
+                       'error': {'color': 'red'}, 
+                       'info': {'color':'cyan'},
+                       'warning': {'color': 'yellow'}}
+        
+        coloredlogs.install(level=LOGGING_LEVEL,
+                            logger=logger,
+                            fmt=logFormat,
+                            datefmt='%H:%M:%S',
+                            field_styles=fieldstyle,
+                            level_styles=levelstyles)
+        return logger
+    def __del__(self):
+        self.logger.handlers.clear()
+        self.log_file.close()
+
+logobj = logs()        
+logger = logobj.logger
+
+
 
 class ass():
     '''
@@ -129,11 +144,7 @@ class ass():
             itrunc = np.where(dl[-1] == dko)[0][0]
             return itrunc
     
-    @staticmethod
-    def clear_logs():
-        logs.logger.handlers.clear()
-        logs.logfile_handler.close()
-        return
+
     @staticmethod
     def is_dict_of_dicts(data):
         ks = list(data.keys())
@@ -164,7 +175,7 @@ class ass():
             
             mult_data.update(trunc_data_old)
             data_old = data
-            logs.logger.info('wrapped file {:s}'.format(file))
+            logger.info('wrapped file {:s}'.format(file))
         mult_data.update(data)
         if ass.is_dict_of_dicts(mult_data):
             mult_data = ass.rearrange_dict_keys(mult_data)
@@ -181,7 +192,7 @@ class ass():
         else:
             s2 = ' Time/frame --> {:s}\n'.format( ass.readable_time(tf/nf))
         x = '-'*(len(name)+11)
-        logs.logger.info('Function "{:s}"\n{:s} Total time --> {:s}'.format(name,s2,s1))
+        logger.info('Function "{:s}"\n{:s} Total time --> {:s}'.format(name,s2,s1))
     
     @staticmethod
     def print_stats( stats):
@@ -625,7 +636,7 @@ class plotter():
             
                 args = np.concatenate( (args, np.array(lgsample,dtype=int)) )
             except ValueError as e:
-                logs.logger.warning('Excepted ValueError{}\nConsider increasing number of sumpling points'.format(e))
+                logger.warning('Excepted ValueError{}\nConsider increasing number of sumpling points'.format(e))
             i=np.log10(mid)
   
         return np.unique(args[args<x.shape[0]])
@@ -980,7 +991,7 @@ class fitData():
         try:
             regbest =  regs[np.argmin(crit)]
         except Exception as err:
-            logs.logger.debug('Something strange happend --> {}'.format(err))
+            logger.debug('Something strange happend --> {}'.format(err))
             raise Exception(err)
         return regbest
       
@@ -1248,7 +1259,7 @@ class Analytical_Functions():
         naxis = np.cross((rp-r0)/norm2(rp-r0),rrel/norm2(rrel))
         rrot = Analytical_Functions().rotate_around_an_axis(naxis, rrel, theta)
         newth = calc_angle(rp,r0,r0+rrot)
-        #logs.logger.debug('th0 = {:6.5f}, new th = {:6.5f} '.format(th0*180/np.pi,newth*180/np.pi))
+        #logger.debug('th0 = {:6.5f}, new th = {:6.5f} '.format(th0*180/np.pi,newth*180/np.pi))
         return rrot,newth
     
     @staticmethod
@@ -1261,7 +1272,7 @@ class Analytical_Functions():
         s = -np.sign(r01)
         
         rrel = np.array([s[0]*dhalf,s[1]*dhalf,-s[2]*dhalf])
-        #logs.logger.debug('theta target = {:4.3f}'.format(theta*180/np.pi))
+        #logger.debug('theta target = {:4.3f}'.format(theta*180/np.pi))
         
         newth = theta +1    
         af = Analytical_Functions()
@@ -1426,7 +1437,7 @@ class add_atoms():
             if noise is not None:
                 noise_coords =  np.random.normal(0,noise,ghost_coords.shape) 
                 ghost_coords += noise_coords
-                logs.logger.debug('Adding noise mean = {:4.3f}'.format(np.mean(np.abs(noise_coords))))
+                logger.debug('Adding noise mean = {:4.3f}'.format(np.mean(np.abs(noise_coords))))
             self.timeframes[frame]['ghost_coords'] = ghost_coords
         return
     
@@ -1645,10 +1656,12 @@ class Distance_Functions():
 
     @staticmethod
     def zcylindrical(self,coords,c):
-         d = Distance_Functions.distance(coords[:,0:2],c[0:2])
+         #d = Distance_Functions.distance(coords[:,0:2],c[0:2])
+         r = coords[:,0:2]-c[0:2]
+         d = np.sqrt(np.sum(r*r,axis=1))
          #r = coords[:,0:2]-c[0:2] ; d = np.sqrt(np.sum(r*r,axis=1))
          d = self.global_cylindrical_radius-d
-         #logs.logger.debug('{:d} and {:d}'.format(d.shape[0],c.shape[0]))
+         #logger.debug('{:d} and {:d}'.format(d.shape[0],c.shape[0]))
          return d
      
 class bin_Volume_Functions():
@@ -1678,6 +1691,7 @@ class bin_Volume_Functions():
 
     @staticmethod
     def zcylindrical(self,bin_low,bin_up):
+        box = self.get_box(self.current_frame)
         binl = bin_up - bin_low
         rm = self.global_cylindrical_radius -(bin_low + 0.5*binl)
         if rm<0: return 1e16 # negative has no meaning therefore we give a large number to devide with it and make density zero
@@ -1856,6 +1870,7 @@ class Analysis:
         self.find_unique_dihedral_types()
         self.dict_to_sorted_numpy('connectivity') #necessary to unwrap the coords efficiently
         
+        self.find_args_per_residue(np.ones(self.mol_ids.shape[0],dtype=bool),'molecule_args')
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
             
@@ -2168,7 +2183,7 @@ class Analysis:
             try:
                 bonds-=bonds.min()
             except ValueError as e:
-                logs.logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
+                logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
             tf = perf_counter()
             return  bonds
     
@@ -2290,7 +2305,7 @@ class Analysis:
             id1 = int(b[-1]) - starts_from
             conn_id,c_type =  self.sorted_id_and_type((id0,id1))
             if conn_id in self.connectivity:
-                logs.logger.warning('{} is already in connectivity '.format(conn_id))
+                logger.warning('{} is already in connectivity '.format(conn_id))
             self.connectivity[conn_id] = c_type
         
         self.mass_map = dict()
@@ -2418,13 +2433,13 @@ class Analysis:
         try:
             time = self.get_equal_from_string(line.strip(),'t')
         except:
-            logs.logger.warning('Warning: in gro file. There is no time info')
+            logger.warning('Warning: in gro file. There is no time info')
             time = 0
         try:
             step = self.get_equal_from_string(line.strip(),'step',int)
         except:
             step = 0
-            logs.logger.warning('Warning: in gro file. There is no step info')
+            logger.warning('Warning: in gro file. There is no step info')
         self.timeframes[frame] = {'time':time,'step':step}
         # second line
         natoms = int(ofile.readline().strip())
@@ -2605,6 +2620,55 @@ class Analysis:
         ofile.write('%f  %f  %f\n' % (box[0],box[1],box[2]))
         return  
     
+    def renumber_residues(self,start_from=1):
+        mol_ids = np.empty(self.natoms,dtype=int)        
+        counter =start_from
+        mol_ids[0] = start_from
+        
+        for i in range(1,self.natoms):
+            mid0 = self.mol_ids[i-1]
+            mid1 = self.mol_ids[i]
+            if mid1!=mid0:
+                counter+=1
+            mol_ids[i] = counter
+        self.mol_ids=mol_ids
+    
+        return
+    
+    def renumber_ids(self,start_from=0):
+        at_ids = np.arange(0,self.natoms,1,dtype=int)
+        at_ids+=start_from
+        self.at_ids = at_ids
+        return
+    def filter_the_system(self,filt):
+        self.at_ids = self.at_ids[filt]
+        self.at_types = self.at_types[filt]
+        self.mol_ids = self.mol_ids[filt]
+        self.mol_names = self.mol_names[filt]
+        for frame in self.timeframes:
+            self.timeframes[frame]['coords'] = self.get_coords(frame)[filt]
+        self.renumber_ids()
+        self.renumber_residues()
+        return
+    def remove_residues(self,crit,frame=0,reinit=True):
+        coords = self.get_coords(frame)
+        filt = crit(coords)
+        res_cut = self.mol_ids[filt]
+        filt = ~np.isin(self.mol_ids,res_cut)
+        self.at_ids = self.at_ids[filt]
+        self.at_types = self.at_types[filt]
+        self.mol_ids = self.mol_ids[filt]
+        
+        self.mol_names = self.mol_names[filt]
+        for frame in self.timeframes:
+            self.timeframes[frame]['coords'] = self.get_coords(frame)[filt]
+        
+        self.renumber_ids()
+        self.renumber_residues()
+        
+        if reinit:
+            self.analysis_initialization()
+        return
     def write_residues(self,res,fname='selected_residues.gro',
                        frames=(0,0),box=None,boxoff=0.4):
         with open(fname,'w') as ofile:
@@ -2613,7 +2677,7 @@ class Analysis:
             for frame in self.timeframes:
                 if frames[0] <= frame <= frames[1]:
 
-                    coords = self.get_whole_coords(frame) [fres]
+                    coords = self.get_coords(frame) [fres]
                     coords -= coords.min(axis=0)
                     at_ids = self.at_ids[fres] 
                     ofile.write('Made by write_residues\n')
@@ -2630,9 +2694,74 @@ class Analysis:
             
             ofile.closed
         return
-
-            
     
+    @property
+    def nmolecules(self):
+        return np.unique(self.mol_ids).shape[0]
+    
+    def find_args_per_residue(self,filt,attr_name):
+        args = dict()
+        for j in np.unique(self.mol_ids[filt]):
+            x = np.where(self.mol_ids==j)[0]
+            args[j] = x
+        setattr(self,attr_name,args)
+        setattr(self,'N'+attr_name, len(args))
+        return 
+    
+
+    
+    def multiply_periodic(self,multiplicity):
+        if len(multiplicity) !=3:
+            raise Exception('give the multyplicity in the form (times x, times y, times z)')
+        for d,mult in enumerate(multiplicity):
+            if mult ==0: continue
+        #multiplicity= np.array([t for t in multiplicity])
+            natoms = self.natoms
+            nmols = self.nmolecules
+            totm = mult+1
+        
+            if totm<2:
+                raise Exception('multiplicity {} is not valid'.format(multiplicity))
+            #new topology
+            shape = natoms*totm
+            # allocate array
+            at_ids = np.empty(shape,dtype=int)
+            mol_ids = np.empty(shape,dtype=int)
+            at_types = np.empty(shape,dtype=object)
+            mol_names = np.empty(shape,dtype=object)
+            for m in range(0,mult+1):
+                na = m*natoms
+                mm = m*nmols
+                for i in range(natoms):
+                    idx = i+na
+                    at_ids[idx] = idx
+                    at_types[idx] =self.at_types[idx%natoms]
+                    mol_ids[idx] = self.mol_ids[idx%natoms]+mm
+                    mol_names[idx] = self.mol_names[idx%natoms]
+            self.at_ids = at_ids
+            self.at_types = at_types
+            self.mol_ids = mol_ids
+            self.mol_names = mol_names
+        
+            #allocate coords
+            
+            for frame in self.timeframes:
+                coords = np.empty((shape,3))
+                c = self.get_coords(frame)
+                box = self.get_box(frame)
+            
+                idx = 0
+                coords[idx:idx+natoms] = c.copy()
+                for j in range(1,mult+1):
+                    L = box[d]*j
+                    idx=j*natoms
+                    coords[idx:idx+natoms] = c.copy()
+                    coords[idx:idx+natoms,d]+=L
+            
+                self.timeframes[frame]['coords'] = coords
+                self.timeframes[frame]['boxsize'][d]*=mult+1
+        
+        return
     def unwrap_coords(self,coords,box):   
         '''
         Do not trust this function. Works only for linear polymers
@@ -2741,6 +2870,42 @@ class Analysis:
             
         self.timeframes = new_dict
         return 
+    
+    def calc_atomic_coordination(self,maxdist,type1,type2):
+        
+        t0 = perf_counter()
+        def find_args_of_type(types):
+            if not ass.iterable(types):
+                types = [types]
+            ids = np.array([],dtype=int)
+            for ty in types:
+                a1 = np.where([self.at_types==ty])[1]
+                ids = np.concatenate((ids,a1))
+            ids = np.unique(ids)
+            return ids
+        
+        args1 = find_args_of_type(type1)
+        args2 = find_args_of_type(type2)
+        
+        
+        coordination = np.zeros(args1.shape[0])
+        args = (maxdist,args1,args2,coordination)
+        
+        nframes = self.loop_trajectory('atomic_coordination',args)
+        
+        coordination/=nframes
+        def tkey(ty):
+            if ass.iterable(ty):
+                k = '_'.join(ty)
+            else:
+                k = ty
+            return k
+        
+        key ='-'.join([tkey(type1),tkey(type2)])
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return {key:coordination}
     
     def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
                                density='',normalize=False,**kwargs):
@@ -3043,15 +3208,7 @@ class Analysis_Confined(Analysis):
 
         
     ############## General Supportive functions Section #####################
-    def find_args_per_residue(self,filt,attr_name):
-        args = dict()
-        for j in np.unique(self.mol_ids[filt]):
-            x = np.where(self.mol_ids==j)[0]
-            args[j] = x
-        setattr(self,attr_name,args)
-        setattr(self,'N'+attr_name, len(args))
-        return 
-    
+
     def find_connectivity_per_chain(self):
         cargs =dict()
         x = self.sorted_connectivity_keys
@@ -3277,7 +3434,7 @@ class Analysis_Confined(Analysis):
         if ty is str or ty is int:
             ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
 
-        #logs.logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
+        #logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
         return ids1,ids2
     
     ###############End of General Supportive functions Section#########
@@ -3298,7 +3455,7 @@ class Analysis_Confined(Analysis):
         
         # check if belong to different particle
         if self.nparticles !=1:
-            logs.logger.warning('WARNING Function {:s}: This Function was never examined in test cases of more than one nanoparticles'.format(inspect.currentframe().f_code.co_name))
+            logger.warning('WARNING Function {:s}: This Function was never examined in test cases of more than one nanoparticles'.format(inspect.currentframe().f_code.co_name))
             r0 = coords[istart]
             re = coords[iend]
             CMps = np.empty((self.nparticles,3),dtype=float)
@@ -3415,7 +3572,7 @@ class Analysis_Confined(Analysis):
         ftrain,image_trains = self.get_filt_train(dads, coords, box)
         args_train = np.nonzero(ftrain)[0]
         periodic_image_args = set(np.nonzero(image_trains)[0])
-        #logs.logger.debug('Number of periodic image trains ={:d}\n Number of trains = {:d}'.format(len(periodic_image_args),args_train.shape[0]))
+        #logger.debug('Number of periodic image trains ={:d}\n Number of trains = {:d}'.format(len(periodic_image_args),args_train.shape[0]))
         #ads_chains
         ads_chains = np.unique(self.mol_ids[ftrain])
         #check_occurances(ads_chains)
@@ -3492,7 +3649,7 @@ class Analysis_Confined(Analysis):
                     if not self.is_bridge(coords,istart,iend,periodic_image_args):    
                         args_loop = np.concatenate( (args_loop, chunk) )             
                     else:
-                        #logs.logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
+                        #logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
                         args_bridge = np.concatenate( (args_bridge, chunk) )
                 else:
                     args_tail = np.concatenate( (args_tail, chunk) )
@@ -3677,7 +3834,7 @@ class Analysis_Confined(Analysis):
             args = (nbins,bins,rho,mass_pol,rho_mean**2)
             func =  'mass'+'_density_profile'+'_flux'
             if mode !='mass' or option!='':
-                logs.logger.warning('mass mode and total density fluxuations are calculated')
+                logger.warning('mass mode and total density fluxuations are calculated')
         else:
             func =  mode+'_density_profile'+contr    
         
@@ -3764,7 +3921,7 @@ class Analysis_Confined(Analysis):
         
         ids1, ids2 = self.find_vector_ids(topol_vector)
         nvectors = ids1.shape[0]
-        logs.logger.info('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
+        logger.info('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
         nlayers = len(d_center)
         costh_unv = [[] for i in range(len(dlayers))]
         costh = np.empty(nvectors,dtype=float)
@@ -4530,7 +4687,7 @@ class Analysis_Confined(Analysis):
         func_name = '{:s}__kernel'.format(name)
         args_func_name = '{:s}__args'.format(af_name)
         
-        logs.logger.info(' func name : "{:s}" \n argsFunc name : "{:s}" \n innerFunc name : "{:s}" '.format(func_name,args_func_name,inner_func_name))
+        logger.info(' func name : "{:s}" \n argsFunc name : "{:s}" \n innerFunc name : "{:s}" '.format(func_name,args_func_name,inner_func_name))
         
         funcs = (globals()[func_name],
                  globals()[args_func_name],
@@ -4611,7 +4768,7 @@ class Analysis_Confined(Analysis):
             #prop_kernel(prop_nump, nv, x_nump, f_nump, nfr)
             prop_kernel(*args)
         except ZeroDivisionError as err:
-            logs.logger.error('Dynamics Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
+            logger.error('Dynamics Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
             return None
         
        
@@ -4623,7 +4780,7 @@ class Analysis_Confined(Analysis):
         tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
-        #logs.logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
+        #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
         ass.print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "{}'.format(prop))
         return dynamical_property
     
@@ -4651,7 +4808,7 @@ class Analysis_Confined(Analysis):
             func_args = 'get_weighted__args'
             func_name = 'Kinetics_inner_weighted__kernel'
         
-        logs.logger.info('func name : {:s} , argsFunc name : {:s}'.format(func_name,func_args))
+        logger.info('func name : {:s} , argsFunc name : {:s}'.format(func_name,func_args))
         
         return globals()[func_name],globals()[func_args]
     
@@ -4697,7 +4854,7 @@ class Analysis_Confined(Analysis):
         
         kinetic_property = {t:p for t,p in zip(xt,Prop_nump)}
         tf = perf_counter()-tinit
-        #logs.logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
+        #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
         ass.print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "Kinetics')
         return kinetic_property
     
@@ -4765,7 +4922,7 @@ class Analysis_Confined(Analysis):
         
         s = ''.join( ['f{:d}={:s} \n'.format(i,f) for i,f in enumerate(func_names)] )
         
-        logs.logger.info(s)
+        logger.info(s)
         
         funcs = tuple([ globals()[f] for f in func_names])
         return funcs
@@ -5071,7 +5228,17 @@ class coreFunctions():
     '''
     def __init__():
         pass
-    
+    @staticmethod
+    def atomic_coordination(self,maxdist,args1,args2,coordination):
+        
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+        coords1 = coords[args1]
+        coords2 = coords[args2]
+        numba_coordination(coords1,coords2,box,maxdist,coordination)
+        return
+                
     @staticmethod
     def particle_size(self,part_size):
         frame = self.current_frame
@@ -5080,7 +5247,7 @@ class coreFunctions():
         coords = self.translate_particle_in_box_middle(coords,box)
         part_coords = coords[self.particle_filt]
         part_s = part_coords.max(axis = 0 ) - part_coords.min(axis = 0 )
-        #logs.logger.debug('frame = {:d} --> part size = {} '.format(frame,part_s))
+        #logger.debug('frame = {:d} --> part size = {} '.format(frame,part_s))
         part_size += part_s
         return 
     
@@ -5528,7 +5695,7 @@ class coreFunctions():
                                     ids1,ids2,coords,dads)
         tf = perf_counter()
         if frame ==1:
-            logs.logger.info('Dihedrals_as_t: Estimate time consuption --> Main: {:2.1f} %, Filters: {:2.1f} %'.format((tm-t0)*100/(tf-t0),(tf-tm)*100/(tf-t0)))
+            logger.info('Dihedrals_as_t: Estimate time consuption --> Main: {:2.1f} %, Filters: {:2.1f} %'.format((tm-t0)*100/(tf-t0),(tf-tm)*100/(tf-t0)))
         return
 
     @staticmethod
@@ -6353,6 +6520,21 @@ def pair_dists(coords,box,dists):
             dists[idx_i+j] = dist[j]
     
     return
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def numba_coordination(coords1,coords2,box,maxdist,coordination):
+    n1 = coords1.shape[0]
+    n2 = coords2.shape[0] 
+    for i in prange(n1):
+        rel_coords = coords1[i] - coords2
+        rc = minimum_image(rel_coords,box)
+        dist = np.sqrt(np.sum(rc*rc,axis=1))
+        for j in range(n2):
+            if dist[j]<maxdist:
+                coordination[i]+=1
+                
+    return
+
 @jit(nopython=True,fastmath=True,parallel=True)
 def pair_dists_general(coords1,coords2,box,dists):
     n1 = coords1.shape[0]
