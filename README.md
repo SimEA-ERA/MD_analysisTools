@@ -10,3 +10,4 @@ To test and run the examples in "testing_v1.0" directory except from this folder
 https://drive.google.com/drive/folders/1_pcklrLmcNQxfSegpVxI20ndxRgJiioK?usp=sharing
 The trr files are large and may took you some time
 Add the "trr" directory to the "testing_v1.0" directory
+(Check also the i-python notebook to get familiar with the code)

@@ -1,0 +1,7 @@
+Typically not within the python module: matplotlib, numba, pytrr, coloredlogs
+
+# typically you will need to install numba, pytrr (for reading gromacs trr files) and coloredlogs
+
+pip install numba
+pip install pytrr
+pip install coloredlogs
