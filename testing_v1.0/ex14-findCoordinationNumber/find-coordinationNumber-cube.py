@@ -14,7 +14,7 @@ maxdist = 0.2
 type1='Alt'
 type2='O'
 coordination_cube = obj.calc_atomic_coordination(maxdist,type1,type2)
-coordination_cube.update(obj.calc_atomic_coordination(0.28,['Alo','Alt'], 'O'))
+coordination_cube.update(obj.calc_atomic_coordination(0.28,'Alo', 'O'))
 t = coordination_sub['Alt-O']
 o = coordination_sub['Alo-O']
 xt = np.count_nonzero(t==3)*100/t.shape[0]

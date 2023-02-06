@@ -24,8 +24,14 @@ for i in range(c.shape[0]):
     zi = c[i,2]
     if obj.at_types[i] == 'Alt':
         if cmin < zi < cmax:
-            counter+=1    
-            obj.at_types[i] == 'Alo'
-obj.write_gro_file('cube_mod.gro')
-print(counter)
+            counter += 1    
+            obj.at_types[i] = 'Alo'
 
+fx = np.logical_and(c[:,0]>0,c[:,0]<20)
+fy = np.logical_and(c[:,1]>0,c[:,1]<20)
+filt = np.logical_and(fx,fy)
+obj.timeframes[0]['boxsize'] = np.array([20.0,20.0, 20.0])
+obj.filter_the_system(filt)
+obj.mol_ids[:]=1
+print(counter)
+obj.write_gro_file('cube_mod.gro')
