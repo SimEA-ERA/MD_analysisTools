@@ -35,8 +35,8 @@ bulk.read_file()
 
 
 # calculations
-chain_chars = confined.calc_chain_characteristics(0.5,dmax,binl)
-bulk_chars = bulk.calc_chain_characteristics(0.5,4.5,binl)
+chain_chars = confined.calc_chain_characteristics(binl,dmax)
+bulk_chars = bulk.calc_chain_characteristics(binl,4.5)
 # store in shorter variables
 d = chain_chars
 b = bulk_chars

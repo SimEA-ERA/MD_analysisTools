@@ -7,10 +7,10 @@ Created on Fri May 27 16:40:44 2022
 # you need to have md_analysis in the current path,
 # or your python packages path, e.g. C:\Users\n.patsalidis\Anaconda3\ 
 # or insert the path of the file like below
-'''
+
 import sys
 sys.path.insert(0, '/Users/n.patsalidis/Desktop/PHD/REPOSITORIES/MDanalysis')
-'''
+
 
 import md_analysis as mda  
 # Reading a bulk system

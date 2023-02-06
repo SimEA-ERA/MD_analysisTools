@@ -3992,7 +3992,7 @@ class Analysis_Confined(Analysis):
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return distrib
     
-    def calc_chain_characteristics(self,binl,dmax,dmin=0):
+    def calc_chain_characteristics(self,dmin,dmax,binl):
         '''
         Chain characteristics as a function of distance of chain center of mass
         Parameters
