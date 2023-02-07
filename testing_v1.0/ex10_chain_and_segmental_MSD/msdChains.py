@@ -49,18 +49,16 @@ for di in ['','xy-','z-']: # we decompose each direction
         for t in cmt:
             cmt[t][:,0:2] = 0
     
-    MSD[di+'ads']= results.Dynamics('MSD',cmt, 
-                                    mda.ass.stay_True(filt_t['ads']),filt_option='strict')
-    MSD[di+'free']= results.Dynamics('MSD',cmt, 
-                                    mda.ass.stay_True(filt_t['free']),filt_option='strict')
+    MSD[di+'ads']= results.Dynamics('MSD',cmt, filt_t['ads'],filt_option='const')
+    MSD[di+'free']= results.Dynamics('MSD',cmt,filt_t['free'],filt_option='const')
 
     MSD[di+'system'] = results.Dynamics('MSD',cmt) #here we pass with no filter
     
 
 #Plots #########
-ls = mda.ass.linestyles.lst_map
+ls = mda.plotter.linestyles.lst_map
 lsmap = {'xy':ls['densely dashed'],'z':ls['loosely dotted']}
-c = mda.ass.colors.qualitative.colors6
+c = mda.plotter.colors.qualitative
 cmap = {'ads':c[0],'free':c[3],'bulk':c[5],'system':c[4]}
 MSDn = {k : v for k,v in MSD.items() if  'xy' in k and 'degree' not in k}
 MSDn.update({k : v for k,v in MSD.items() if  'z' in k and 'degree' not in k} )
@@ -79,4 +77,4 @@ mda.plotter.plotDynamics(msdnorm,fname = fname,style='lines',lstmap=lstmap,
 
 mda.ass.print_time(perf_counter()-t0, 'MAIN',1000)
 #mda.ass.try_beebbeeb()
-mda.ass.clear_logs()
+

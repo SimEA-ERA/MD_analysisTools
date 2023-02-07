@@ -46,11 +46,10 @@ def msdSegments(trajf,directions):
             for t in segcm_t:
                 st[t][:,0:2] = 0
    
-        MSD.update({ lab+k :results.Dynamics('MSD',
-                    st,mda.ass.stay_True(fa),filt_option='strict')
+        MSD.update({ lab+k :results.Dynamics('MSD',st,fa,filt_option='const')
                     for k,fa in filt_t.items() 
-                    }
-                   )
+                   }
+                  )
 
     return MSD
 
@@ -64,15 +63,15 @@ MSD =  msdSegments('../trr/PRnj_dt1.trr',directions) # just pass the trajectory 
 ################
 #Plots #########
 
-ls = mda.ass.linestyles.lst_map
+ls = mda.plotter.linestyles.lst_map
 
-c = mda.ass.colors.qualitative.colors6
+c = mda.plotter.colors.qualitative
 cmap = {'train':c[0],'loop':c[1],'tail':c[2],'free':c[3],'bulk':c[5]}
 MSDn = {k : v for k,v in MSD.items() if  'xy' in k }
 MSDn.update({k : v for k,v in MSD.items() if  'z' in k })
 
 
-ls = mda.ass.linestyles.lst_map
+
 lsmap = {'xy':ls['densely dashed'],'z':ls['loosely dotted']}
 MSDn = {k : v for k,v in MSD.items() if  'xy' in k and 'degree' not in k}
 MSDn.update({k : v for k,v in MSD.items() if  'z' in k and 'degree' not in k} )
@@ -93,4 +92,4 @@ mda.plotter.plotDynamics(msdnorm,fname = fname,style='lines',lstmap=lstmap,
     
 mda.ass.print_time(perf_counter()-t0, 'MAIN',1000)
 mda.ass.try_beebbeeb()
-mda.ass.clear_logs()
+

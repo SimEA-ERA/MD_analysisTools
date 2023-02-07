@@ -180,8 +180,6 @@ class ass():
         if ass.is_dict_of_dicts(mult_data):
             mult_data = ass.rearrange_dict_keys(mult_data)
         
-        ass.clear_logs()
-        
         return mult_data
     
     @staticmethod
@@ -781,23 +779,38 @@ class plotter():
         return
 
 class dielectric_constants():
-    def __init__(self,t,ft,de=1,omega=1.0):
+    def __init__(self,t,ft,omega,omega_0=1e-16,omega_oo=1e16):
         self.t = t
         self.ft = ft
-        self.de=de
-        self.omega=omega
+        self.omega = omega
+        self.omega_0 = omega_0
+        self.omega_oo = omega_oo
         return
-    def find_epsilon(self):
+    
+    def find_epsilon(self,normalize=True):
         
-        def ep_epp(t,ft,de,o):
-            
-            I = simpson(ft*np.exp(-1j*o*t),x=t)
-            eps = (1-1j*o*I)*de
-            return eps
+        def derft(ft,t):
+            d = np.empty(ft.shape[0],dtype=float)
+            d[0] = (ft[1]-ft[0])/(t[1]-t[0])
+            d[-1] = (ft[-2]-ft[-1])/(t[-1]-t[-2])
+            for i in range(1,ft.shape[0]-1):
+                d[i] = (ft[i+1]-ft[i-1])/(t[i+1]-t[i-1])
+            return d
+        
+        def ep_epp(t,dft,o):
+            I = -simpson(dft*np.exp(-1j*o*t),x=t)
+            return I
+        
+        dft = derft(self.ft,self.t)
         if ass.iterable(self.omega):
-            eps = [ ep_epp(self.t,self.ft,self.de,o) for o in self.omega]
+            eps = [ ep_epp(self.t,dft,o) for o in self.omega]
+            eps = np.array(eps)
+            if normalize:
+                eps0 = ep_epp(self.t,dft,self.omega_0)
+                epsoo = ep_epp(self.t,dft,self.omega_oo)
+                eps = eps*(eps0-epsoo)+epsoo
         else:
-            eps = ep_epp(self.t,self.ft,self.de,self.omega)
+            eps = ep_epp(self.t,dft,self.omega)
         return eps
     
     
@@ -808,6 +821,8 @@ class fitData():
     def __init__(self,xdata,ydata,func,method='distribution',bounds=None,
                  search_grid=None,reg_bounds=None,minimum_res=1e-2,
                  nw=50,regd=1000,maxiter=200,**options):
+        
+        self.method = method
         self.ydata = ydata
         self.xdata = xdata
         self.mode = func
@@ -820,10 +835,12 @@ class fitData():
             self.bounds = bounds
         else:
             self.bounds = (1e-7,1e7)
+            
         if search_grid is not None:
             self.search_grid= search_grid
         else:
             self.search_grid= (12,4,4)
+        
         if reg_bounds is not None:
             self.reg_bounds = reg_bounds
         else:
@@ -833,6 +850,10 @@ class fitData():
         self.maxiter=maxiter
         self.regd = regd
         
+        if 'weights' in options:
+            self.weights = options['weights']
+        if 'weighting_method' in options:
+            self.weights = self.get_weights(options['weighting_method'])
         if 'is_distribution' in options:
             self.is_distribution = options['is_distribution']
         else:
@@ -849,15 +870,52 @@ class fitData():
             self.show_report = True
         if 'init_method' in options:
             self.init_method = options['init_method']
+
         else:
             self.init_method = 'ones'
-            
+        if 'p0' in options:
+            self.p0 = options['p0']    
         if 'opt_method' in options:
             self.opt_method = options['opt_method']
         else:
             self.opt_method = 'SLSQP'
         return
-            
+    def get_weights(self,wm):
+        if wm =='high-y':
+            w = np.abs(self.ydata)+0.02
+        else:
+            w = np.ones(self.ydata.shape[0])
+        return w
+    
+    def simpleFit(self):
+        
+        bounds = self.bounds
+        if hasattr(self,'p0'):
+            p0= self.p0
+        else:
+            p0 = np.array([0.5*(b[0]+b[1]) for b in bounds])
+        xdata = self.xdata.copy()
+        ydata = self.ydata.copy()
+        if hasattr(self,'weights'):
+            weights = self.weights
+        else:
+            weights = 1.0 
+        def costf(p):
+            r = (self.func(xdata,*p)-ydata)*weights
+            return np.sqrt(np.sum(r*r))/r.shape[0]
+        if self.opt_method =='DA':
+            opt_res = dual_annealing(costf,bounds,x0=p0,maxiter=100)
+        else:
+            opt_res = minimize(costf,p0,bounds=bounds,method = self.opt_method,
+                    options = {'maxiter':self.maxiter,
+                               'disp':self.show_report})
+        
+        self.params = opt_res.x
+        self.opt_res = opt_res
+        self.data_res = costf(self.params)
+        
+        return opt_res
+    
     def search_best(self):
         self.crit = []
         self.smv = []
@@ -895,8 +953,7 @@ class fitData():
         for reg in lreg:
             self.current_reg = reg
             self.exactFit(a,b,n,reg)
-           # print('lr = {:.3e}'.format(lr))
-
+            #print('lr = {:.3e}'.format(lr))
             s = self.smoothness ; d = self.data_res
             crit = np.sqrt(s**2 + d**2)
             
@@ -909,6 +966,7 @@ class fitData():
                 self.report()
             #self.show_relaxation_modes(title='lr = {:.3e}'.format(lr))
         return
+    
     
     @staticmethod
     def get_logtimes(a,b,n):
@@ -979,6 +1037,7 @@ class fitData():
             a = getattr(self,k)
             print('{:s} = {}'.format(k,a))
         return
+    
     @property
     def bestreg(self):
         regs = np.array(self.regs)
@@ -1010,7 +1069,7 @@ class fitData():
         plt.tick_params(direction='in', which='major',length=size*3)
         d = np.array(self.drv)
         s = np.array(self.smv)
-
+        
         plt.xscale('log')
         plt.yscale('log')
         plt.yticks(fontsize=2.5*size)
@@ -1079,13 +1138,17 @@ class fitData():
             plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
+    
     def fitted_data(self):
-        return self.func(self.xdata,*self.params)
+        return self.fitted_curve(self.xdata)
     
     def fitted_curve(self,x):
+        if self.method =='distribution':
+            return self.func(x,self.bounds[0],self.bounds[1],self.params)
+        else:
+            return self.func(x,*self.params)
         
-        return self.func(x,self.bounds[0],self.bounds[1],self.params)
-
+    
 class fitKernels():
     @staticmethod
     def freq(t,f):
@@ -1109,26 +1172,10 @@ class fitFuncs():
         for i,ta in enumerate(taus):
             s+= w[i]*np.exp(-t*ta)
         return s
-    
-class Analytical_Expressions():
+      
     @staticmethod
-    def KWW_simple(t,beta,tww):
+    def KWW(t,tww,beta,A=1):
         #Kohlrausch–Williams–Watts
-        #A is initial point shift
-        #tc changes the shape of the fast motion(slow times)
-        #beta changes the shape of the curve. 
-        #very small beta makes the curve linear.
-        #the larger the beta the sharpest the curve
-        #all curves regardless beta pass through the same point
-        phi = np.exp( -(t/tww )**beta )
-        return phi
-
-
-    @staticmethod
-    def KWW(t,A,beta,tww):
-        #Kohlrausch–Williams–Watts
-        #A is initial point shift
-        #tc changes the shape of the fast motion(slow times)
         #beta changes the shape of the curve. 
         #very small beta makes the curve linear.
         #the larger the beta the sharpest the curve
@@ -1137,13 +1184,19 @@ class Analytical_Expressions():
         return phi
     
     @staticmethod
-    def KWW2(t,tw1,tw2,b1,b2,A):
-        s = 0 
-        tww = np.array([tw1,tw2])
-        beta =np.array([b1,b2])
-        for tw,b in zip(tww,beta):
-            s+= Analytical_Expressions.KWW(t,A,b,tw)
-        return s
+    def KWW2(t,tw1,tw2,b1,b2,A1=1,A2=1):
+        phi1 = fitFuncs.KWW(t,tw1,b1,A1)
+        phi2 = fitFuncs.KWW(t,tw2,b2,A2)
+        return phi1 + phi2
+    
+    @staticmethod
+    def exp(t,t0,A=1):
+        #A parameter shifts the starting point to A
+        phi = A*np.exp(-t/t0)
+        return phi
+    
+class Analytical_Expressions():
+
     
     @staticmethod
     def expDecay_sum(t,t0v):
@@ -4742,7 +4795,10 @@ class Analysis_Confined(Analysis):
         if filt_t is not None:
             f_nump = self.init_xt(filt_t,dtype=bool)
             if filt_option is None:
-                filt_option= 'simple'
+                filt_option = 'simple'
+            if filt_option =='const':
+                filt_option = 'strict'
+                filt_t = ass.stay_True(filt_t)
         else:
             f_nump = None
             filt_option = None
@@ -4973,6 +5029,9 @@ class Analysis_Confined(Analysis):
             f_nump = self.init_xt(filt_t,dtype=bool)
             if filt_option is None:
                 filt_option= 'simple'
+            if filt_option =='const':
+                filt_option = 'strict'
+                filt_t = ass.stay_True(filt_t)
         else:
             f_nump = None
             filt_option = None

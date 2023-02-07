@@ -56,11 +56,11 @@ phi_t, fphi_t = results.calc_dihedrals_t(phi,
 # use the dictionary comprehension
 phidict = {k: results.TACF('sin',phi_t,fs) for k,fs in fphi_t.items()}   
   
-const = mda.ass.stay_True(fphi_t['train']) #modifies the filter to stay True
+
 # see documentation for filt option 
 # TACF is a time autocorrelation function for scalar variables. Passing sin takes the sin of the scalar variable
 phidict[r'train (at $\tau_0,t$)'] =results.TACF('sin',phi_t,fphi_t['train'],filt_option='strict',) 
-phidict['train (const)'] =results.TACF('sin',phi_t,const,filt_option='strict') 
+phidict['train (const)'] =results.TACF('sin',phi_t,fphi_t['train'],filt_option='const') 
 phidict['train (changed)'] =results.TACF('sin',phi_t,fphi_t['train'],filt_option='change')
     
  
@@ -73,14 +73,16 @@ if dihedral =='alpha':
            'tail':5,
            'free':1,#
            'train (at $\\tau_0,t$)':500,
-          'train (const)':1000}
+          'train (const)':1000,
+          'train (changed)':1000}
 elif dihedral =='beta':
     cutf ={'train':1100,
            'loop':10,
            'tail':5,
            'free':1,#
            'train (at $\\tau_0,t$)':900,
-          'train (const)':500
+          'train (const)':500,
+          'train (changed)':1000,
           }
 ylab ='{'+'\phi_\{}(t)'.format(dihedral)+'}'
 
@@ -93,7 +95,6 @@ mda.plotter.plotDynamics(phi,fname=fname,ylabel=ylabel,
 
 mda.ass.try_beebbeeb()
 mda.ass.print_time(perf_counter()-t0, 'MAIN',1000)
-mda.ass.clear_logs()
 
 
 
