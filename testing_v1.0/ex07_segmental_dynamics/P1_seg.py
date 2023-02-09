@@ -80,7 +80,7 @@ dyn['bulk'] = bulk.Dynamics('P1',vect)
 
 
 size = 3.5
-
+de = 0.00572909
 figsize = (size,size)
 dpi = 300
 fig=plt.figure(figsize=figsize,dpi=dpi)
@@ -90,10 +90,10 @@ plt.tick_params(direction='in', which='major',length=size*3)
 plt.xscale('log')
 plt.xticks(fontsize=2.5*size)
 plt.yticks(fontsize=2.5*size)
-plt.xlabel(r'$t (ns)$',fontsize=3*size)
-plt.ylabel(r'$P_1(t)$',fontsize=3*size)
+plt.xlabel(r'$\epsilon_{x}$',fontsize=3*size)
+plt.ylabel(r'$P_1(\epsilon_{x})$',fontsize=3*size)
 for i,(k,dy) in enumerate(dyn.items()):    
-    x = mda.ass.numpy_keys(dy)/1000 # make the keys of the dictionary array
+    x = x.argsort()*de 
     y = mda.ass.numpy_values(dy) # make the values of the dictionary array
     x = x[1:]
     y = y[1:]
