@@ -4810,7 +4810,8 @@ class Analysis_Confined(Analysis):
         return funcs
   
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
-                 filt_option='simple', block_average=False):
+                 filt_option='simple', block_average=False,
+                 multy_orgins=True):
         '''
         
 
@@ -4840,7 +4841,8 @@ class Analysis_Confined(Analysis):
             Ways of averaginf
             True  <  < >|population  >|time origins
             False < >|population,time origins
-
+        multy_orgins: bool
+            if True use multiple origins in averaging (assumes that all origins are equivalent)
         Returns
         -------
         dynamical_property : dictionary
@@ -4876,14 +4878,15 @@ class Analysis_Confined(Analysis):
         args = (func,func_args,func_inner,
                 Prop_nump,nv,
                 x_nump,f_nump,w_nump,
-                block_average)
+                block_average,
+                multy_orgins)
         
-        prop_kernel = globals()['DynamicProperty_kernel']
+        #prop_kernel = DynamicProperty_kernel
         overheads = perf_counter() - tinit
         
         try:
             #prop_kernel(prop_nump, nv, x_nump, f_nump, nfr)
-            prop_kernel(*args)
+            DynamicProperty_kernel(*args)
         except ZeroDivisionError as err:
             logger.error('Dynamics Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
             return None
@@ -4929,7 +4932,7 @@ class Analysis_Confined(Analysis):
         
         return globals()[func_name],globals()[func_args]
     
-    def Kinetics(self,xt,wt=None,block_average=False):
+    def Kinetics(self,xt,wt=None,block_average=False,multy_origins=True):
         '''
 
         Parameters
@@ -4966,7 +4969,8 @@ class Analysis_Confined(Analysis):
         args = (func_name,func_args,
                 Prop_nump,nv,
                 x_nump,w_nump,
-                block_average)
+                block_average,
+                multy_origins)
         Kinetics_kernel(*args)
         
         kinetic_property = {t:p for t,p in zip(xt,Prop_nump)}
@@ -6030,11 +6034,15 @@ def fill_property(prop,nv,i,j,value,mi,block_average):
 @jit(nopython=True,fastmath=True,parallel=True)
 def Kinetics_kernel(func,func_args,
                     Prop,nv,xt,wt=None,
-                    block_average=False):
+                    block_average=False,
+                    multy_origins=True):
     
     n = xt.shape[0]
     
-    for i in range(n):
+    if multy_origins: mo = n
+    else: mo = 1
+    
+    for i in range(mo):
         for j in prange(i,n):
             args = func_args(i,j,xt,None,wt)
             
@@ -6220,11 +6228,14 @@ def TACF_kernel(func, func_args, inner_func,
 @jit(nopython=True,fastmath=True,parallel=True)
 def DynamicProperty_kernel(func,func_args,inner_func,
               Prop,nv,xt,ft=None,wt=None,
-              block_average=False):
-    
+              block_average=False,multy_origins=True):
+        
     n = xt.shape[0]
-
-    for i in range(n):
+    
+    if multy_origins: mo = n
+    else: mo = 1
+    
+    for i in range(mo):
         for j in prange(i,n):
             
             args = func_args(i,j,xt,ft,wt)

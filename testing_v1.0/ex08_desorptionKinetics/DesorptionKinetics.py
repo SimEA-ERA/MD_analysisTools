@@ -65,4 +65,3 @@ plt.show()
 
 mda.ass.print_time(perf_counter()-t0, 'MAIN',1000)
 mda.ass.try_beebbeeb()
-mda.ass.clear_logs()
