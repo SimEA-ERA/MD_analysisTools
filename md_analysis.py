@@ -399,6 +399,45 @@ class Energetic_Analysis():
                 plt.savefig('{}'.format(fname),bbox_inches='tight')
         plt.show()
         
+class XPCS_communicator():
+    @staticmethod
+    def ReadPlot_XPCSdistribution(files,**plot_kwargs):
+        datadict = dict()
+        for file in files:
+            key = file.split('/')[-1].split('.XPCSCONTINbatch')[0].replace('xpcs_','')
+            datadict[key] = XPCS_Reader(file)
+        plotter.relaxation_time_distributions(datadict,**plot_kwargs)
+        return datadict
+    
+    @staticmethod
+    def write_xy_forXPCS(fname,x,y):
+        data = np.zeros((x.shape[0],3),dtype=float)
+        data[:,0] = x
+        data[:,1] = y
+        data[:,2]+= np.random.uniform(0,1e-9,x.shape[0])
+        np.savetxt(fname,data)
+        return
+    
+    @staticmethod
+    def write_data_forXPCS(datadict,path='XPCS_data',cutf=None,midtime=None,num=100):
+        
+        if cutf is None:
+            cutf ={k:10**10 for k in datadict}
+        for k,dy in datadict.items():
+            
+            fn = '{:s}\\xpcs_{:s}.txt'.format(path,k)
+            
+            x = ass.numpy_keys(dy)/1000
+            y = ass.numpy_values(dy)
+            t = x<=cutf[k]
+            x = x[t]
+            y = y[t]
+            
+            args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
+            xw = x[args]
+            yw = y[args]
+            XPCS_communicator.write_xy_forXPCS(fn, xw,yw+1)
+        return
 class XPCS_Reader():
     def __init__(self,fname):
         self.relaxation_modes = []
@@ -498,12 +537,14 @@ class plotter():
     @staticmethod
     def relaxation_time_distributions(datadict,
                                       size=3.5,fname=None,title=None,
-                                      cmap=None,xlim=(-6,6),
+                                      cmap=None,xlim=(-6,6),pmap=None,
                                       units='ns',mode='tau'):
         
         if cmap is None:
             c = plotter.colors.semisafe
             cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
+        if pmap is None:
+            pmap = {k:'o' for k in datadict}
         figsize = (size,size)
         dpi = 300
         fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
@@ -528,7 +569,7 @@ class plotter():
         ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         for i,(k,f) in enumerate(datadict.items()):
 
-            plt.plot(f.relaxation_modes,f.params,ls='--',lw=0.25*size,marker = 'o',
+            plt.plot(f.relaxation_modes,f.params,ls='--',lw=0.25*size,marker = pmap[k],
                 markersize=size*1.2,markeredgewidth=0.15*size,fillstyle='none',color=cmap[k],label=k)
             #plt.plot(f.relaxation_modes,f.params,ls='--',label=k,color=cmap[k])
         plt.legend(frameon=False,fontsize=2.3*size)
@@ -563,44 +604,7 @@ class plotter():
            dc = {'data1':data1,'data2':data2}
            plotter.relaxation_time_distributions(dc,**kwargs) 
         return                
-    @staticmethod
-    def ReadPlot_XPCSdistribution(files,**plot_kwargs):
-        datadict = dict()
-        for file in files:
-            key = file.split('\\')[-1].split('.')[0]
-            datadict[key] = XPCS_Reader(file)
-        plotter.relaxation_time_distributions(datadict,**plot_kwargs)
-        return datadict
-    
-    @staticmethod
-    def write_xy_forXPCS(fname,x,y):
-        data = np.zeros((x.shape[0],3),dtype=float)
-        data[:,0] = x
-        data[:,1] = y
-        data[:,2]+= np.random.uniform(0,1e-9,x.shape[0])
-        np.savetxt(fname,data)
-        return
-    
-    @staticmethod
-    def write_data_forXPCS(datadict,path='XPCS_data',cutf=None,midtime=None,num=100):
-        
-        if cutf is None:
-            cutf ={k:10**10 for k in dataddict}
-        for k,dy in datadict.items():
-            
-            fn = '{:s}\\xpcs_{:s}.txt'.format(path,k)
-            
-            x = ass.numpy_keys(dy)/1000
-            y = ass.numpy_values(dy)
-            t = x<=cutf[k]
-            x = x[t]
-            y = y[t]
-            
-            args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
-            xw = x[args]
-            yw = y[args]
-            plotter.write_xy_forXPCS(fn, xw,yw+1)
-        return
+
         
     @staticmethod
     def sample_logarithmically_array(x,midtime=None,num=100,first_ten=True):
@@ -2783,6 +2787,13 @@ class Analysis:
                     ofile.write('%f  %f  %f\n' % (box[0],box[1],box[2]))  
             
             ofile.closed
+        return
+    
+    def apply_pbc(self):
+        for frame in self.timeframes:
+            box = self.get_box(frame)
+            coords = self.get_coords(frame)
+            self.timeframes[frame]['coords'] = implement_pbc(coords,box)
         return
     
     @property
