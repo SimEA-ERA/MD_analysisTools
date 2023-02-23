@@ -22,10 +22,11 @@ conftype = 'zdir'
 topol_vector = 4
 dads=1.025
 conformations = ['train','loop','tail','free']
-filt = {'conformations':conformations} 
+filt = {'conformations':conformations}
 save_data_into_pickle=False
 
-trajf = '../trr/PRwh_dt1.trr'
+trajf = '../trr/PRwhbench.trr'
+
 traj = mda.Analysis_Confined(trajf,['../itp/topol_UA_PB30.itp','../itp/alu_to.itp'],
                     conftype, 
                     topol_file ='../gro/alupb.gro',
@@ -53,7 +54,8 @@ seg_t, fseg = traj.calc_segmental_vectors_t(topol_vector,
 #We will store them in a dictionary. We can save them later in pickle form and plot them easily
 #way one
 dyn = dict()
-dyn['system'] = traj.Dynamics('P1',seg_t) # to compute the dynamics of the whole system I give seg_t, without any boolean data
+dyn['system'] = traj.Dynamics('P1',seg_t)
+ # to compute the dynamics of the whole system I give seg_t, without any boolean data
 # to distinguish the population we give the boolean data
 dyn['train'] = traj.Dynamics('P1',seg_t,fseg['train'])
 dyn['loop'] = traj.Dynamics('P1',seg_t,fseg['loop'])
@@ -80,7 +82,6 @@ dyn['bulk'] = bulk.Dynamics('P1',vect)
 
 
 size = 3.5
-de = 0.00572909
 figsize = (size,size)
 dpi = 300
 fig=plt.figure(figsize=figsize,dpi=dpi)
@@ -90,11 +91,11 @@ plt.tick_params(direction='in', which='major',length=size*3)
 plt.xscale('log')
 plt.xticks(fontsize=2.5*size)
 plt.yticks(fontsize=2.5*size)
-plt.xlabel(r'$\epsilon_{x}$',fontsize=3*size)
-plt.ylabel(r'$P_1(\epsilon_{x})$',fontsize=3*size)
+plt.xlabel(r'$t (ns)$',fontsize=3*size)
+plt.ylabel(r'$P_1(t)$',fontsize=3*size)
 for i,(k,dy) in enumerate(dyn.items()):    
-    x = x.argsort()*de 
     y = mda.ass.numpy_values(dy) # make the values of the dictionary array
+    x = mda.ass.numpy_keys(dy)/1000
     x = x[1:]
     y = y[1:]
     args = mda.plotter.sample_logarithmically_array(x,num=80) # use this to sabsample logarithmically your data

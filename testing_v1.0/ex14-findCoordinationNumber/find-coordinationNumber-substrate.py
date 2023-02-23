@@ -20,4 +20,3 @@ o = coordination_sub['Alo_Alt-O']
 xt = np.count_nonzero(t==3)*100/t.shape[0]
 xo =  np.count_nonzero(o==6)*100/o.shape[0]
 print('COORDINATION ACCURACY: Alt--> {:4.3f} %, Alo --> {:4.3f} %'.format(xt,xo))
-mda.ass.clear_logs()

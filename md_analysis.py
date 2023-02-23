@@ -23,7 +23,6 @@ import re
 import lammpsreader 
 
 
-
 class logs():
     '''
     A class for modifying the loggers
@@ -84,6 +83,84 @@ logobj = logs()
 logger = logobj.logger
 
 
+class gromacsTop():
+    def __init__(self,analysis_system,funmap=dict()):
+        asys = analysis_system
+        self.asys = asys
+        self.mol_info = dict()
+        for mol_name in np.unique(asys.mol_names):
+            self.mol_info[mol_name] = dict()
+            mol_args =asys.molecule_args[asys.mol_ids[asys.mol_names==mol_name][0]]
+            molcon = {bid:t 
+                      for bid,t in asys.connectivity.items()
+                      if bid[0] in mol_args
+                      }
+            molang = {aid:t 
+                      for aid,t in asys.angles.items()
+                      if aid[0] in mol_args
+                      }
+            moldih =  {did:t 
+                      for did,t in asys.dihedrals.items()
+                      if did[0] in mol_args
+                      }
+            self.mol_info[mol_name]['atoms'] = mol_args
+            self.mol_info[mol_name]['connectivity'] = molcon
+            self.mol_info[mol_name]['angles'] = molang
+            self.mol_info[mol_name]['dihedrals'] = moldih
+            self.funmap = funmap
+        return
+    def get_fun(self,k,bestrict=False):
+        if len(k) == 2:
+            ty = self.asys.connectivity[k]
+        elif len(k) ==3:
+            ty = self.asys.angles[k]
+        elif len(k) ==4:
+            ty = self.asys.dihedrals[k]
+        if ty in self.funmap:
+            return self.funmap[ty]
+        else:
+            if bestrict:
+                raise Exception('You need to provide me the function for interaction type {}\n Add all the interaction types and functions in the funmap dictionary when you initialize'.format(ty))
+            else:
+                return 1
+            
+    def write_itp(self,mol_name,nexl=3,fname=None,bestrict=False):
+        if fname is None:
+            fname = mol_name+'.itp'
+        info = self.mol_info[mol_name]
+        first_id = self.asys.at_ids[info['atoms'][0]]
+        subtr = first_id -1
+        with open(fname,'w') as f:
+            f.write('[moleculetype] \n ; Name      nrexcl \n')
+            f.write('{:5s}   {:1d} \n'.format(mol_name,nexl))
+            f.write('[atoms]\n')
+            f.write('; nr    type   resnr  residu    atom  cgnr  charge mass\n')
+            
+            for i in info['atoms']:
+                aid = self.asys.at_ids[i] - subtr
+                ty = self.asys.at_types[i]
+                mass = self.asys.atom_mass[i]
+                charge = self.asys.charge_map[ty]
+                f.write('{:5d}  {:5s}  {:5d}  {:5s}  {:5s}  {:5d}  {:4.5f}  {:4.5f} \n'.format(aid,
+                                ty,aid,mol_name,ty,1,charge,mass))
+            
+            f.write('[bonds]\n;         ai      aj     funct\n')
+            for k,b in info['connectivity'].items():
+                ids = [i-subtr for i in k ]
+                fun = self.get_fun(k,bestrict)
+                f.write('{:5d}   {:5d}   {:2d} \n'.format(*ids,fun))
+            f.write('[angles]\n;         ai      aj     ak    funct\n')
+            for k,an in info['angles'].items():
+                ids = [i-subtr for i in k ]
+                fun = self.get_fun(k,bestrict)
+                f.write('{:5d}   {:5d}   {:5d}   {:2d} \n'.format(*ids,fun))
+            f.write('[dihedrals]\n;         ai      aj     ak    funct\n')
+            for k,di in info['dihedrals'].items():
+                ids = [i-subtr for i in k ]
+                fun = self.get_fun(k,bestrict)
+                f.write('{:5d}   {:5d}   {:5d}   {:5d}   {:2d} \n'.format(*ids,fun))
+           
+        return
 
 class ass():
     '''
@@ -532,7 +609,9 @@ class plotter():
                 lst_map['densely dotted']]
     @staticmethod
     def boldlabel(label):
-        return r'$\mathbf{'+label+'}$'
+        label = label.split(' ')
+        boldl = ' '.join([r'$\mathbf{'+l+'}$' for l in label])
+        return boldl
     
     @staticmethod
     def relaxation_time_distributions(datadict,
@@ -653,7 +732,7 @@ class plotter():
              fname =None,title=None,size=3.5,xlim=None,ylim=None,pmap=None,
              cmap = None,ylabel=None,units='ns',midtime=None,labmap=None,
              num=100,cutf=None,lstmap=None,write_plot_data=False,yscale=None,
-             edgewidth=0.3,markersize=1.5):
+             xscale='log',edgewidth=0.3,markersize=1.5,legend=True):
 
         if labmap is None:
             labmap  = {k:k for k in datadict}
@@ -684,25 +763,32 @@ class plotter():
         plt.minorticks_on()
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
-        plt.xscale('log')
+        if xscale =='log':
+            plt.xscale('log')
         if yscale is not None:
             plt.yscale(yscale)
         if xlim is None:
             plt.xticks(fontsize=2.5*size) 
         else:
-            xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
-            plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
-            locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
-            ax.xaxis.set_minor_locator(locmin)
-            ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+            if xscale =='log':
+                xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
+                plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
+                locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+                ax.xaxis.set_minor_locator(locmin)
+                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                plt.xlim([min(xticks),max(xticks)])
         if ylim is None:
             plt.yticks(fontsize=2.5*size)
         else:
-            yticks = [10**y for y in range(ylim[0],ylim[1]+1)]
-            plt.yticks(yticks,fontsize=min(2.5*size,2.5*size*8/len(yticks)))
-            locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
-            ax.yaxis.set_minor_locator(locmin)
-            ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+            if yscale =='log':
+                yticks = [10**y for y in range(ylim[0],ylim[1]+1)]
+                plt.yticks(yticks,fontsize=min(2.5*size,2.5*size*8/len(yticks)))
+                locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+                ax.yaxis.set_minor_locator(locmin)
+                ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+            else:
+                plt.yticks(fontsize=2.5*size)
+                plt.ylim(ylim)
         plt.xlabel(r'$t ({})$'.format(units),fontsize=3*size)
         plt.ylabel(ylabel,fontsize=3*size)
 
@@ -727,8 +813,9 @@ class plotter():
                 label=labmap[k],color=cmap[k])
             else:
                 raise NotImplemented('Implement here you own plotting style. Use elif statement')
-        
-        plt.legend(frameon=False,fontsize=2.0*size,loc=locleg,ncol=ncolleg)
+        if legend:
+            plt.legend(frameon=False,fontsize=2.0*size,
+                   loc=locleg,ncol=ncolleg)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
@@ -736,7 +823,7 @@ class plotter():
     
     @staticmethod
     def fits(datadict,fitteddict,locleg='lower left',ncolleg=1,
-             fname =None,title=None,size=3.5,xlim=(-6,6),
+             fname =None,title=None,size=3.5,xlim=(-6,6),pmap=None,
              cmap = None,ylabel=None,units='ns',midtime=None,
              num=100,cutf=None,write_plot_data=False):
 
@@ -750,6 +837,10 @@ class plotter():
             except:
                 c = plotter.colors.qualitative*3
                 cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
+        
+        if pmap is None:
+            pmap = {k:'o' for k in datadict}
+        
         if ylabel is None:
             ylabel =r'$P_1(t)$'
         else:
@@ -788,7 +879,7 @@ class plotter():
             yee =fitd.fitted_curve(xf)
             plt.plot(xf,yee,ls ='-.',color=cmap[k],label ='fit {}'.format(k))
             
-            plt.plot(x[args],y[args],ls='none',marker = 'o',markeredgewidth=0.2*size,
+            plt.plot(x[args],y[args],ls='none',marker = pmap[k],markeredgewidth=0.2*size,
         markersize=size*1.2,fillstyle='none',color=cmap[k],label=k)
         plt.legend(frameon=False,fontsize=2.0*size,loc=locleg,ncol=ncolleg)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
@@ -1859,14 +1950,16 @@ class Analysis:
     '''
     def __init__(self,
                  trajectory_file, # gro/trr for now
-                 connectivity_file, #itp
+                 connectivity_info, #itp #ltop
                  topol_file = None,
                  memory_demanding=False,
                  types_from_itp=True,
                  **kwargs):
         t0 = perf_counter()
         self.trajectory_file = trajectory_file
-        self.connectivity_file = connectivity_file
+        self.connectivity_info = connectivity_info
+        self.connectivity_file = connectivity_info
+        
         self.memory_demanding = memory_demanding
         self.types_from_itp = types_from_itp
         '''
@@ -2321,9 +2414,16 @@ class Analysis:
     def read_topology(self):
         if '.gro' == self.topol_file[-4:]:
             self.read_gro_topol()  # reads from gro file
-            self.find_topology_from_itp() # reads your itp files to get the connectivity
+            try:
+                self.connectivity_file
+            except:
+                raise NotImplemented('connectivity_info = {} is not implemented yet'.format(self.connectivity_file))
+            else:
+                self.find_topology_from_itp() # reads your itp files to get the connectivity
+        
         elif '.ltop' == self.topol_file[-5:]:
             self.read_lammps_topol()
+        
         return
     
     def read_lammps_topol(self):
@@ -3281,7 +3381,7 @@ class Analysis_Confined(Analysis):
     '''
     
     def __init__(self, trajectory_file,   
-                 connectivity_file,       # itp or mol2
+                 connectivity_info,       
                  conftype,
                  topol_file = None,
                  memory_demanding=False,
@@ -3289,7 +3389,7 @@ class Analysis_Confined(Analysis):
                  polymer_method = 'molname',
                  **kwargs):
         super().__init__(trajectory_file,
-                         connectivity_file,
+                         connectivity_info,
                          topol_file,
                          memory_demanding,**kwargs)
         self.conftype = conftype
@@ -4932,7 +5032,8 @@ class Analysis_Confined(Analysis):
         
         return globals()[func_name],globals()[func_args]
     
-    def Kinetics(self,xt,wt=None,block_average=False,multy_origins=True):
+    def Kinetics(self,xt,wt=None,stayed=False,block_average=False,
+                 multy_origins=True,):
         '''
 
         Parameters
@@ -4943,6 +5044,8 @@ class Analysis_Confined(Analysis):
         wt : dictionary
             keys: time
             values: float array (total population,)
+        stayed: bool
+         if True gives one only if from t0 to t it was True
         block_average : bool
             Ways of averaginf
             True  <  < >|population  >|time origins
@@ -4955,6 +5058,8 @@ class Analysis_Confined(Analysis):
             values: float (it represents the percentage of state change)
         '''
         tinit = perf_counter()
+        if stayed:
+            xt = ass.stay_True(xt)
         
         Prop_nump,nv = self.init_prop(xt)
         x_nump = self.init_xt(xt,dtype=bool)
@@ -5158,7 +5263,7 @@ class Filters():
         #coords = self.get_whole_coords(self.current_frame)
 
         d1 = self.get_distance_from_particle(ids = ids1)
-        d2 = self.get_distance_from_particle(ids =ids2)
+        d2 = self.get_distance_from_particle(ids = ids2)
         
         f1 = Filters.filtLayers(layers,0.5*(d1+d2))
         return f1
@@ -5924,7 +6029,7 @@ class coreFunctions():
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
                             chain_cm, coords, dads)
-        
+       
         return 
     
     @staticmethod
