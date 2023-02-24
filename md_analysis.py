@@ -894,7 +894,19 @@ class dielectric_constants():
         self.omega_0 = omega_0
         self.omega_oo = omega_oo
         return
-    
+    def find_chi(self):
+        def compute_chi(t,dft,o):
+            I = o*simpson(dft*np.exp(-1j*o*t),x=t)
+            return I
+        dft = self.ft
+        
+        if ass.iterable(self.omega):
+            chi = [ compute_chi(self.t,dft,o) for o in self.omega]
+            chi = np.array(chi)
+        else:
+            chi = compute_chi(self.t,dft,self.omega)
+
+        return chi
     def find_epsilon(self,normalize=True):
         
         def derft(ft,t):
@@ -913,12 +925,12 @@ class dielectric_constants():
         if ass.iterable(self.omega):
             eps = [ ep_epp(self.t,dft,o) for o in self.omega]
             eps = np.array(eps)
-            if normalize:
-                eps0 = ep_epp(self.t,dft,self.omega_0)
-                epsoo = ep_epp(self.t,dft,self.omega_oo)
-                eps = eps*(eps0-epsoo)+epsoo
         else:
             eps = ep_epp(self.t,dft,self.omega)
+        if normalize:
+            eps0 = ep_epp(self.t,dft,self.omega_0)
+            epsoo = ep_epp(self.t,dft,self.omega_oo)
+            eps = eps*(eps0-epsoo)+epsoo
         return eps
     
     
@@ -4663,7 +4675,18 @@ class Analysis_Confined(Analysis):
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return vec_t,filt_per_t
-    
+    def calc_coords_t(self,filters={'all':None},dads=0):
+        t0 = perf_counter()
+        ids1 = self.polymer_ids
+        c_t = dict()
+        filt_t = dict()
+        args = (filters,dads,ids1,c_t,filt_t)
+        nframes = self.loop_trajectory('coords_t', args)
+        filt_t = ass.rearrange_dict_keys(filt_t)
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return c_t,filt_t
     def calc_segCM_t(self,topol_vector,segbond,
                      filters={'all':None}, dads=1,option=''):
         '''
@@ -4883,9 +4906,12 @@ class Analysis_Confined(Analysis):
         '''
         mapper = {'p1':'costh_kernel',
                   'p2':'cos2th_kernel',
-                  'msd':'norm_square_kernel'}
-        inner_func_name = mapper[prop.lower()] 
-        
+                  'msd':'norm_square_kernel'
+                  }
+        if prop in mapper:
+            inner_func_name = mapper[prop.lower()] 
+        else:
+            inner_func_name = prop
         name = 'dynprop'
         af_name = 'get'
         
@@ -4911,7 +4937,7 @@ class Analysis_Confined(Analysis):
   
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
                  filt_option='simple', block_average=False,
-                 multy_orgins=True):
+                 multy_orgins=True,every=1):
         '''
         
 
@@ -4979,7 +5005,8 @@ class Analysis_Confined(Analysis):
                 Prop_nump,nv,
                 x_nump,f_nump,w_nump,
                 block_average,
-                multy_orgins)
+                multy_orgins,
+                every)
         
         #prop_kernel = DynamicProperty_kernel
         overheads = perf_counter() - tinit
@@ -5905,6 +5932,19 @@ class coreFunctions():
         return
 
     @staticmethod
+    def coords_t(self,filters,dads,ids,c_t,filt_t):
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+
+
+        key = self.get_key()
+        c_t[key] = coords[ids]
+        
+        filt_t[key] = Filters.calc_filters(self,filters,
+                                    ids,ids,coords,dads)
+        return
+    
+    @staticmethod
     def vects_t(self,ids1,ids2,filters,dads,vec_t,filt_per_t):
         frame = self.current_frame
         coords = self.get_coords(frame)
@@ -6174,11 +6214,9 @@ def Kinetics_inner_weighted__kernel(x0,xt,w0):
     for i in range(x0.shape[0]):
         if x0[i]:
             wi = w0[i]
-            m += wi
-            
             if xt[i]:
                 value += wi
-            
+            m += wi
     return value,m
 
 @jit(nopython=True,fastmath=True)
@@ -6333,14 +6371,15 @@ def TACF_kernel(func, func_args, inner_func,
 @jit(nopython=True,fastmath=True,parallel=True)
 def DynamicProperty_kernel(func,func_args,inner_func,
               Prop,nv,xt,ft=None,wt=None,
-              block_average=False,multy_origins=True):
+              block_average=False,multy_origins=True,
+              every=1):
         
     n = xt.shape[0]
     
     if multy_origins: mo = n
     else: mo = 1
     
-    for i in range(mo):
+    for i in range(0,mo,every):
         for j in prange(i,n):
             
             args = func_args(i,j,xt,ft,wt)
@@ -6534,6 +6573,15 @@ def costh_kernel(r1,r2):
     rn2 = rn2**0.5
     costh/=rn1*rn2
     return costh
+
+@jit(nopython=True,fastmath=True)
+def Fs12(r1,r2):
+    nm = 0
+    for i in range(r1.shape[0]):
+        ri = r2[i] - r1[i]
+        nm+=ri
+    #nm = np.sqrt(nm)
+    return np.cos(12*nm)
 
 @jit(nopython=True,fastmath=True)
 def norm_square_kernel(r1,r2):
