@@ -91,6 +91,7 @@ class gromacsTop():
         for mol_name in np.unique(asys.mol_names):
             self.mol_info[mol_name] = dict()
             mol_args =asys.molecule_args[asys.mol_ids[asys.mol_names==mol_name][0]]
+            
             molcon = {bid:t 
                       for bid,t in asys.connectivity.items()
                       if bid[0] in mol_args
@@ -124,7 +125,7 @@ class gromacsTop():
             else:
                 return 1
             
-    def write_itp(self,mol_name,nexl=3,fname=None,bestrict=False):
+    def write_itp(self,mol_name,nexl=3,fname=None,bestrict=False,**kwargs):
         if fname is None:
             fname = mol_name+'.itp'
         info = self.mol_info[mol_name]
@@ -159,9 +160,16 @@ class gromacsTop():
                 ids = [i-subtr for i in k ]
                 fun = self.get_fun(k,bestrict)
                 f.write('{:5d}   {:5d}   {:5d}   {:5d}   {:2d} \n'.format(*ids,fun))
-           
+            if 'k' in kwargs and 'r' in kwargs:
+                self.write_posres(f,info['atoms'].shape[0],k=kwargs['k'],r=kwargs['r'])
+                
         return
-
+    
+    def write_posres(self,file,natoms,k=10000,r=0):
+        file.write('[position_restraints]\n')
+        for i in range(natoms):
+            file.write('{:d}  {:d}  {:d}  {:8.5f}  {:8.5f} \n'.format(i+1,2,1,r,k))
+        return
 class ass():
     '''
     The ASSISTANT class
@@ -621,7 +629,11 @@ class plotter():
         
         if cmap is None:
             c = plotter.colors.semisafe
-            cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
+            try:
+                cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
+            except IndexError:
+                color_map = matplotlib.cm.get_cmap('viridis')
+                cmap = {k: color_map(i/len(datadict)) for i,k in enumerate(datadict.keys())}
         if pmap is None:
             pmap = {k:'o' for k in datadict}
         figsize = (size,size)
@@ -732,7 +744,7 @@ class plotter():
              fname =None,title=None,size=3.5,xlim=None,ylim=None,pmap=None,
              cmap = None,ylabel=None,units='ns',midtime=None,labmap=None,
              num=100,cutf=None,lstmap=None,write_plot_data=False,yscale=None,
-             xscale='log',edgewidth=0.3,markersize=1.5,legend=True):
+             xscale='log',edgewidth=0.3,legfont=2.0,markersize=1.5,legend=True):
 
         if labmap is None:
             labmap  = {k:k for k in datadict}
@@ -814,7 +826,7 @@ class plotter():
             else:
                 raise NotImplemented('Implement here you own plotting style. Use elif statement')
         if legend:
-            plt.legend(frameon=False,fontsize=2.0*size,
+            plt.legend(frameon=False,fontsize=legfont*size,
                    loc=locleg,ncol=ncolleg)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
         plt.show()
@@ -886,7 +898,7 @@ class plotter():
         plt.show()
         return
 
-class dielectric_constants():
+class inverseFourrier():
     def __init__(self,t,ft,omega,omega_0=1e-16,omega_oo=1e16):
         self.t = t
         self.ft = ft
@@ -894,34 +906,23 @@ class dielectric_constants():
         self.omega_0 = omega_0
         self.omega_oo = omega_oo
         return
-    def find_chi(self):
-        def compute_chi(t,dft,o):
-            I = o*simpson(dft*np.exp(-1j*o*t),x=t)
-            return I
-        dft = self.ft
-        
-        if ass.iterable(self.omega):
-            chi = [ compute_chi(self.t,dft,o) for o in self.omega]
-            chi = np.array(chi)
-        else:
-            chi = compute_chi(self.t,dft,self.omega)
-
-        return chi
+    @staticmethod
+    def derft(ft,t):
+        d = np.empty(ft.shape[0],dtype=float)
+        d[0] = (ft[1]-ft[0])/(t[1]-t[0])
+        d[-1] = (ft[-2]-ft[-1])/(t[-1]-t[-2])
+        for i in range(1,ft.shape[0]-1):
+            d[i] = (ft[i+1]-ft[i-1])/(t[i+1]-t[i-1])
+        return d
+    
     def find_epsilon(self,normalize=True):
         
-        def derft(ft,t):
-            d = np.empty(ft.shape[0],dtype=float)
-            d[0] = (ft[1]-ft[0])/(t[1]-t[0])
-            d[-1] = (ft[-2]-ft[-1])/(t[-1]-t[-2])
-            for i in range(1,ft.shape[0]-1):
-                d[i] = (ft[i+1]-ft[i-1])/(t[i+1]-t[i-1])
-            return d
-        
+
         def ep_epp(t,dft,o):
             I = -simpson(dft*np.exp(-1j*o*t),x=t)
             return I
         
-        dft = derft(self.ft,self.t)
+        dft = self.derft(self.ft,self.t)
         if ass.iterable(self.omega):
             eps = [ ep_epp(self.t,dft,o) for o in self.omega]
             eps = np.array(eps)
@@ -933,7 +934,17 @@ class dielectric_constants():
             eps = eps*(eps0-epsoo)+epsoo
         return eps
     
-    
+    def find_inverse(self):
+        def succ(t,f,o):
+            I = o*simpson(f*np.exp(-1j*o*t),x=t)
+            return I
+        f = self.ft
+        if ass.iterable(self.omega):
+            s = [ succ(f,self.t,o) for o in self.omega]
+            s = np.array(s)
+        else:
+            s = succ(self.t,dft,self.omega)
+        return s
 class fitData():
     
     from scipy.optimize import dual_annealing,minimize
@@ -2010,10 +2021,13 @@ class Analysis:
             if topol_file is None:
                topol_file = self.connectivity_file
             self.topol_file = topol_file
+
         else:
             raise NotImplementedError('Trajectory file format ".{:s}" is not yet Implemented'.format(trajectory_file.split('.')[-1]))
         self.read_topology()
         
+        if 'types_map' in kwargs:
+            self.map_types(kwargs['types_map'])
         if 'key_method' not in kwargs:
             self.key_method = 'get_timekey'
         else:
@@ -2023,14 +2037,20 @@ class Analysis:
             self.round_dec = 7
         else:
             self.round_dec = kwargs['round_dec']
-    
-        self.analysis_initialization()
+            
         
+        self.analysis_initialization()
+ 
         self.timeframes = dict() # we will store the coordinates,box,step and time here
         tf = perf_counter()-t0
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
-    
+    def map_types(self,types_map):
+        for i in range(self.natoms):
+            self.at_types[i] = types_map[self.at_types[i]]
+        self.mass_map = {types_map[k]:v for k,v in self.mass_map.items()}
+        self.charge_map = {types_map[k]:v for k,v in self.charge_map.items()}
+        return
     def analysis_initialization(self):
         '''
         Finds some essential information for the system and stores it in self
@@ -2839,6 +2859,20 @@ class Analysis:
     
         return
     
+    def merge_system(self,obj,reinit=False):
+        self.at_ids = np.concatenate((self.at_ids,obj.at_ids))
+        self.at_types = np.concatenate((self.at_types,obj.at_types))
+        self.mol_ids = np.concatenate((self.mol_ids,obj.mol_ids))
+        self.mol_names = np.concatenate((self.mol_names,obj.mol_names))
+        for frame in self.timeframes:
+            self.timeframes[frame]['coords'] = np.concatenate((self.get_coords(frame),obj.get_coords(frame)))
+        
+        self.renumber_ids()
+        self.renumber_residues()
+        
+        if reinit:
+            self.analysis_initialization()
+    
     def renumber_ids(self,start_from=0):
         at_ids = np.arange(0,self.natoms,1,dtype=int)
         at_ids+=start_from
@@ -2863,8 +2897,8 @@ class Analysis:
         self.at_ids = self.at_ids[filt]
         self.at_types = self.at_types[filt]
         self.mol_ids = self.mol_ids[filt]
-        
         self.mol_names = self.mol_names[filt]
+        
         for frame in self.timeframes:
             self.timeframes[frame]['coords'] = self.get_coords(frame)[filt]
         
@@ -2973,7 +3007,7 @@ class Analysis:
             
                 self.timeframes[frame]['coords'] = coords
                 self.timeframes[frame]['boxsize'][d]*=mult+1
-        
+        self.analysis_initialization()
         return
     def unwrap_coords(self,coords,box):   
         '''
@@ -3025,6 +3059,7 @@ class Analysis:
         '''
         
         funtocall = getattr(coreFunctions,fun)
+        
         if len(self.timeframes) == 0 or self.memory_demanding:
             with self.traj_opener(*self.traj_opener_args) as ofile:
                 nframes=0
@@ -3040,6 +3075,7 @@ class Analysis:
         return nframes
     
     def loop_timeframes(self,funtocall,args):
+        
         for frame in self.timeframes:
             self.current_frame = frame
             funtocall(self,*args)
@@ -3120,8 +3156,36 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return {key:coordination}
     
-    def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
-                               density='',normalize=False,**kwargs):
+    def find_q(self,dmin,dq,dmax,direction):
+        qmag = np.arange(dmin,dmax+dq,dq)
+       
+        if direction is None:
+            q = np.array([np.ones(3)*qm**(1/3) for qm in qmag] )
+        else:
+            if len(direction)!=3:
+                raise Exception('Wrong direction vector')
+            d = np.array([di for di in direction],dtype=float)
+            dm = np.sum(d*d)**0.5
+            d/=dm
+            q = np.array([d*qm for qm in qmag])
+                    
+        return q
+    
+    def calc_Sq(self,dmin,dq,dmax,direction=None,ids=None):
+        t0 = perf_counter()
+        if isinstance(self,Analysis_Confined):
+            ids = self.polymer_ids
+        q = self.find_q(dmin,dq,dmax,direction)
+        Sq = np.zeros(q.shape[0],dtype=float)
+        args =(q,Sq,ids)
+        nframes = self.loop_trajectory('Sq',args)
+        Sq/=nframes
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return 1+Sq
+    
+    def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,ids=None,direction=None,
+                               density='number',normalize=False,**kwargs):
         '''
         Used to calculate pair distribution functions between two atom types
         Could be the same type. If one type is None then the distribution is 
@@ -3170,7 +3234,12 @@ class Analysis:
         if type1 is None and type2 is None:
             func = 'gofr'
             args = ()
-            nc1 = self.natoms
+            if ids is None:
+                nc1 = self.natoms
+            else:
+                nc1 =ids.shape[0]
+                func = 'gofr_ids'
+                args = (ids,direction)
             nc2 = (nc1-1)/2
         elif type1 is not None and type2 is None:
             func = 'gofr_type_to_all'
@@ -3204,16 +3273,16 @@ class Analysis:
 
         gofr/=nframes
         cb = center_of_bins(bins)
-        if 'number' in density:
+        if  density in ['number','pair_number']:
             
             const = 4*np.pi/3
             for i in range(0,bins.shape[0]-1):
                 vshell = const*(bins[i+1]**3-bins[i]**3)
                 gofr[i]/=vshell
-            if 'pair' in density:
+            if 'pair_number' == density:
                 pass
             else:
-                gofr/=nc1
+                gofr/=nc2
             if normalize:
                 if 'bulk_region' in kwargs:
                     bulk_region = kwargs['bulk_region']
@@ -3270,6 +3339,7 @@ class Analysis:
         distmatrix : numpy array shape = (ids.shape[0],ids.shape[0])
         
         '''
+        
         t0 = perf_counter()
         size = ids.shape[0]
         distmatrix = np.zeros((size,size),dtype=int)
@@ -3623,6 +3693,30 @@ class Analysis_Confined(Analysis):
             ids2 = np.concatenate( (ids2,i[:,-1]) )
         return ids1,ids2
     
+    def ids_from_backbone(self,bondsdist):
+        ids1 = np.empty(0,dtype=int)
+        ids2 = np.empty(0,dtype=int)
+        for j,ids in self.chain_args.items(): 
+            bd = self.bond_distance_matrix(ids) 
+            b1,b2 = np.nonzero(bd ==8)
+            ids1 = np.concatenate((ids1,b1))
+            ids2 = np.concatenate((ids2,b2))
+        return ids1,ids2
+    
+    def ids_from_backbone(self,bonddist):
+        ids = self.polymer_ids
+        if hasattr(self,'backbone_dist_matrix'):
+            bd = self.backbone_dist_matrix
+        else:
+            bd = self.bond_distance_matrix(ids) 
+            self.backbone_dist_matrix = bd
+        
+        b1,b2 = np.nonzero(bd == bonddist)
+        ids1 = ids[b1]
+        ids2 = ids[b2]
+        
+        return ids1,ids2
+    
     def find_vector_ids(self,topol_vector,exclude=[]):
         '''
         
@@ -3640,14 +3734,16 @@ class Analysis_Confined(Analysis):
         ids2 : int array of atom ids
 
         '''
-        #t0 = perf_counter()
+        t0 = perf_counter()
         ty = type(topol_vector)
         if ty is list or ty is tuple:
             ids1,ids2 = self.ids_from_topology(topol_vector)
         if ty is str or ty is int:
-            ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
-
-        #logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
+            if int(topol_vector)<=4:
+                ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
+            else:
+                ids1,ids2 = self.ids_from_backbone(int(topol_vector))
+        logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
         return ids1,ids2
     
     ###############End of General Supportive functions Section#########
@@ -4435,10 +4531,17 @@ class Analysis_Confined(Analysis):
             charge = np.empty(self.at_types.shape[0],dtype=float)
             for i,ty in enumerate(self.at_types):
                 charge[i] = self.charge_map[ty]
-            self.partial_charge = charge
+            self.partial_charge = charge.reshape((charge.shape[0],1))
         return
     
-    def calc_chain_dipole_moment_t(self,filters={'all':None},dads=1):
+    def segment_ids_per_chain(self,segmental_ids):
+        seg0 = segmental_ids[:,0]
+        segch = {j: np.isin(seg0,chargs)
+                 for j,chargs in self.chain_args.items()}           
+        return segch
+    def calc_chain_dipole_moment_t(self,option='',
+                                   filters={'all':None},dads=1,
+                                   **kwargs,):
         '''
         Chain dipole moment as a function of t
 
@@ -4467,9 +4570,24 @@ class Analysis_Confined(Analysis):
         
         dipoles_t = dict()
         filters_t = dict()
-        args = (filters,dads,dipoles_t,filters_t)
-        
-        nframes = self.loop_trajectory('chain_dipole_moment',args)
+        if option =='contour':
+            ids1,ids2 = self.find_vector_ids(kwargs['monomer'])
+            segmental_ids = self.find_segmental_ids(ids1, ids2, kwargs['segbond'])
+            segch = self.segment_ids_per_chain(segmental_ids)
+            args = (filters,dads,ids1,ids2,segmental_ids,
+                    segch,dipoles_t,filters_t)
+            ext ='__contour'
+        elif option=='':
+            ext =''
+            args = (filters,dads,dipoles_t,filters_t)
+        elif option=='endproj':
+            ext ='__endproj'
+            args = (filters,dads,dipoles_t,filters_t)
+        elif option=='proj':
+            ext ='__proj'
+            projvec = np.array([x for x in kwargs['projvec']])
+            args = (filters,dads,projvec,dipoles_t,filters_t)
+        nframes = self.loop_trajectory('chain_dipole_moment'+ext,args)
         
         filters_t = ass.rearrange_dict_keys(filters_t)
         
@@ -4908,7 +5026,7 @@ class Analysis_Confined(Analysis):
                   'p2':'cos2th_kernel',
                   'msd':'norm_square_kernel'
                   }
-        if prop in mapper:
+        if prop in mapper or prop.lower() in mapper:
             inner_func_name = mapper[prop.lower()] 
         else:
             inner_func_name = prop
@@ -4981,13 +5099,15 @@ class Analysis_Confined(Analysis):
         Prop_nump,nv = self.init_prop(xt)
         x_nump = self.init_xt(xt)
         
+        
+        
         if filt_t is not None:
             f_nump = self.init_xt(filt_t,dtype=bool)
             if filt_option is None:
                 filt_option = 'simple'
-            if filt_option =='const':
-                filt_option = 'strict'
+            elif filt_option =='const':
                 filt_t = ass.stay_True(filt_t)
+                filt_option='strict'
         else:
             f_nump = None
             filt_option = None
@@ -5484,6 +5604,21 @@ class coreFunctions():
     '''
     def __init__():
         pass
+    
+
+    
+    @staticmethod
+    def Sq(self,q,Sq,ids=None):
+        frame = self.current_frame
+        coords =self.get_coords(frame)
+        
+        box = self.get_box(frame)
+        coords = implement_pbc(coords,box)
+        if ids is not None:
+            coords = coords[ids]
+        numba_Sq(coords,box,q,Sq)
+        return
+    
     @staticmethod
     def atomic_coordination(self,maxdist,args1,args2,coordination):
         
@@ -5573,7 +5708,7 @@ class coreFunctions():
                                 segment_args,dipoles_t,filt_per_t):
         
         frame = self.current_frame
-        coords = self.get_whole_coords(frame)
+        coords = self.get_coords(frame)
         
         box = self.get_box(frame)
         
@@ -5592,11 +5727,13 @@ class coreFunctions():
                                     ids1,ids2,coords,dads)
         
         return
+    
     @staticmethod
-    def chain_dipole_moment(self,filters,dads,dipoles_t,filt_per_t):
+    def chain_dipole_moment(self,filters,dads,
+                           dipoles_t,filt_per_t):
         
         frame = self.current_frame
-        coords = self.get_whole_coords(frame)
+        coords = self.get_coords(frame)
         box = self.get_box(frame)
 
         chain_cm = self.chains_CM(coords)
@@ -5616,6 +5753,116 @@ class coreFunctions():
                             chain_cm, coords, dads)
         
         return
+    
+    
+    @staticmethod
+    def chain_dipole_moment__proj(self,filters,dads,projvec,
+                           dipoles_t,filt_per_t):
+        
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+
+        chain_cm = self.chains_CM(coords)
+        
+        key = self.get_key()
+        
+        n = chain_cm.shape[0]
+        
+        dipoles = np.empty((n,3),dtype=float)
+        
+        pc = self.partial_charge.reshape((self.partial_charge.shape[0],1))
+        for i,(j, cargs) in enumerate(self.chain_args.items()):
+            c = coords[cargs]
+            dipole = np.sum(pc[cargs]*c,axis=0)
+            proj = np.sum(dipole*projvec)*projvec/np.sum(projvec*projvec)**0.5
+            
+            dipoles[i] = proj
+        
+        dipoles_t[key] = dipoles  
+        
+        filt_per_t[key] = Filters.calc_filters(self,filters,
+                            chain_cm, coords, dads)
+        
+        return
+    
+    
+    @staticmethod
+    def chain_dipole_moment__endproj(self,filters,dads,
+                           dipoles_t,filt_per_t):
+        
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+
+        chain_cm = self.chains_CM(coords)
+        
+        key = self.get_key()
+        
+        n = chain_cm.shape[0]
+        
+        dipoles = np.empty((n,3),dtype=float)
+        
+        pc = self.partial_charge.reshape((self.partial_charge.shape[0],1))
+        for i,(j, cargs) in enumerate(self.chain_args.items()):
+            c = coords[cargs]
+            dipole = np.sum(pc[cargs]*c,axis=0)
+            ree = c[199] - c[0]
+            proj = np.sum(dipole*ree)*ree/np.sum(ree*ree)**0.5
+            dipoles[i] = proj
+        dipoles_t[key] = dipoles  
+        
+        filt_per_t[key] = Filters.calc_filters(self,filters,
+                            chain_cm, coords, dads)
+        
+        return
+    
+    
+    @staticmethod
+    def chain_dipole_moment__contour(self,filters,dads,ids1,ids2,
+                            segmental_ids,segs_per_chain,dipoles_t,filt_per_t):
+        
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+
+        chain_cm = self.chains_CM(coords)
+        
+        key = self.get_key()
+        
+        n = segmental_ids.shape[0]
+        seg_dipoles = np.empty((n,3),dtype=float)
+        pc = self.partial_charge
+        numba_dipoles(pc,coords,segmental_ids,seg_dipoles)
+        
+        v = coords[segmental_ids[:,2]] - coords[segmental_ids[:,1]]
+        #self.segmental_ids = segmental_ids
+        vd = np.sum(v*v,axis=1)**0.5
+        vd = vd.reshape((vd.shape[0],1))
+        uv = v/vd
+        #self.segs_per_chain = segs_per_chain
+        chain_dipoles = np.empty_like(chain_cm)
+        
+        for i,j in enumerate(self.chain_args):
+            f = segs_per_chain[j]
+            segdp = seg_dipoles[f]
+            v12 = v[f]
+            uv12 = uv[f]
+            vd12 = vd[f]
+            #print(vd14.shape,uv14.shape)
+            proj = 0
+            for k in range(uv12.shape[0]):
+                proj+= np.abs(np.sum(v12[k]*segdp[k])/(vd12[k]**2))*uv12[k]
+            chain_dipoles[i] = proj
+
+        
+        dipoles_t[key] = chain_dipoles
+        
+        filt_per_t[key] = Filters.calc_filters(self,filters,
+                            chain_cm, coords, dads)
+        
+        return
+    
     
     @staticmethod
     def mass_density_profile(self,nbins,bins,
@@ -5747,7 +5994,7 @@ class coreFunctions():
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
 
-        coreFunctions.conformation_dens(self, dlayers, dens,
+        coreFunctions.conformation_dens(self, dlayers, dens,ads_chains,
                                            args_train, args_tail,
                                            args_loop, args_bridge)
         
@@ -5764,7 +6011,7 @@ class coreFunctions():
         return args_free
     
     @staticmethod
-    def conformation_dens(self, dlayers,dens,
+    def conformation_dens(self, dlayers,dens,ads_chains,
                              args_train, args_tail, 
                              args_loop, args_bridge):
         frame = self.current_frame
@@ -6109,6 +6356,29 @@ class coreFunctions():
         return
     
     @staticmethod
+    def gofr_ids(self,ids,direction,bins,gofr):
+        frame = self.current_frame
+        coords = self.get_coords(frame)[ids]
+        box = self.get_box(frame)
+        if direction is None or direction=='':
+            pass
+        elif direction=='xy':
+            coords = coords.copy()
+            coords[:,2] = 0
+        elif direction =='z':
+            coords = coords.copy()
+            coords[:,0:2] = 0
+            
+        n = coords.shape[0]
+        pd = np.empty(int(n*(n-1)/2),dtype=float)
+
+        pair_dists(coords,box,pd)
+        pd = pd[pd<=bins.max()]
+        numba_bin_count(pd,bins,gofr)
+        
+        return
+    
+    @staticmethod
     def gofr_type(self,fty,bins,gofr):
         frame = self.current_frame
         coords = self.get_coords(frame)[fty]
@@ -6400,6 +6670,13 @@ def get__args(i,j,xt,ft,wt):
 def get_weighted__args(i,j,xt,ft,wt):
     return (xt[i], xt[j],  wt[i])
 
+@jit(nopython=True,fastmath=True)
+def get_const__args(i,j,xt,ft,wt):
+    const = np.empty_like(ft[i])
+    for k in range(const.shape[0]):
+        for t in range(i,j+1):
+            const[k] = const[k] and ft[t][k]
+    return (xt[i],xt[j],const)
 
 @jit(nopython=True,fastmath=True)
 def get_simple__args(i,j,xt,ft,wt):
@@ -6469,6 +6746,19 @@ def dynprop_change__kernel(inner_kernel,r1,r2,ft0,fte):
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and not fte[i]:
+            inner = inner_kernel(r1[i],r2[i])
+            tot+=inner
+            mi+=1
+    return tot,mi
+
+@jit(nopython=True,fastmath=True)
+def dynprop_const__kernel(inner_kernel,r1,r2,const):
+    tot = 0
+    mi = 0
+    N = r1.shape[0]
+    t2 = t2 +1
+    for i in prange(N):
+        if const[i]:
             inner = inner_kernel(r1[i],r2[i])
             tot+=inner
             mi+=1
@@ -6575,13 +6865,14 @@ def costh_kernel(r1,r2):
     return costh
 
 @jit(nopython=True,fastmath=True)
-def Fs12(r1,r2):
-    nm = 0
-    for i in range(r1.shape[0]):
-        ri = r2[i] - r1[i]
-        nm+=ri
-    #nm = np.sqrt(nm)
-    return np.cos(12*nm)
+def Fs_xy12(r1,r2):
+    ri =  8.48528137423857*(r2[1] - r1[1] + r2[0] -r1[0])
+    return np.cos(ri)
+
+@jit(nopython=True,fastmath=True)
+def Fs_z12(r1,r2):
+    ri = 12*(r2[2] - r1[2])
+    return np.cos(ri)
 
 @jit(nopython=True,fastmath=True)
 def norm_square_kernel(r1,r2):
@@ -6724,7 +7015,7 @@ def binning(x,bins):
 @jit(nopython=True,fastmath=True)
 def minimum_image(relative_coords,box):
     imaged_rel_coords = relative_coords.copy()
-    for i in prange(relative_coords.shape[0]):
+    for i in range(relative_coords.shape[0]):
         for j in range(3):
             if relative_coords[i][j] > 0.5*box[j]:
                 imaged_rel_coords[i][j] -= box[j]
@@ -6732,10 +7023,46 @@ def minimum_image(relative_coords,box):
                 imaged_rel_coords[i][j] += box[j]  
     return imaged_rel_coords
 
+@jit(nopython=True,parallel=True,fastmath=True)
+def numba_Sq(coords,box,q,Sq):
+    nq = q.shape[0]
+    nc = coords.shape[0]
+    for i in range(nq):
+        s =0.0
+        qi = -q[i]
+
+        for j in prange(nc):
+            rj = coords[j]
+            rk0 = rj - coords[:j]
+            rk0 = minimum_image(rk0,box)
+            rk1 = rj - coords[j+1:]
+            rk1 = minimum_image(rk1,box)
+            d0 = np.dot(rk0,qi)
+            d1 = np.dot(rk1,qi)
+            s += np.cos(d0).sum()+np.cos(d1).sum()
+        Sq[i] = Sq[i] + s/float(nc)
+        
+    return
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def pair_vects(coords,box,v):
+    n = coords.shape[0]
+    coords = implement_pbc(coords,box)
+    for i in prange(n):
+        rel_coords = coords[i] - coords[i+1:]
+        rc = minimum_image(rel_coords,box)
+        idx_i = i*n
+        for k in range(0,i+1):
+            idx_i-=k
+        for j in range(rc.shape[0]):
+            v[idx_i+j] = rc[j]
+    return
+
+
 @jit(nopython=True,fastmath=True,parallel=True)
 def pair_dists(coords,box,dists):
     n = coords.shape[0]
-
     for i in prange(n):
         rel_coords = coords[i] - coords[i+1:]
         rc = minimum_image(rel_coords,box)
@@ -6745,7 +7072,6 @@ def pair_dists(coords,box,dists):
             idx_i-=k
         for j in range(rc.shape[0]):
             dists[idx_i+j] = dist[j]
-    
     return
 
 @jit(nopython=True,fastmath=True,parallel=True)
