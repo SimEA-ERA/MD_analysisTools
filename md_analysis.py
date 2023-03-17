@@ -5613,10 +5613,15 @@ class coreFunctions():
         coords =self.get_coords(frame)
         
         box = self.get_box(frame)
-        coords = implement_pbc(coords,box)
+            
         if ids is not None:
             coords = coords[ids]
-        numba_Sq(coords,box,q,Sq)
+        n = coords.shape[0]
+        npairs = int(n*(n-1)/2)
+        v = np.empty((npairs,3),dtype=float)
+        pair_vects(coords,box,v)
+        self.v = v
+        numba_Sq2(n,v,q,Sq)
         return
     
     @staticmethod
@@ -7023,25 +7028,36 @@ def minimum_image(relative_coords,box):
                 imaged_rel_coords[i][j] += box[j]  
     return imaged_rel_coords
 
-@jit(nopython=True,parallel=True,fastmath=True)
-def numba_Sq(coords,box,q,Sq):
-    nq = q.shape[0]
-    nc = coords.shape[0]
-    for i in range(nq):
-        s =0.0
-        qi = -q[i]
 
-        for j in prange(nc):
-            rj = coords[j]
-            rk0 = rj - coords[:j]
-            rk0 = minimum_image(rk0,box)
-            rk1 = rj - coords[j+1:]
-            rk1 = minimum_image(rk1,box)
-            d0 = np.dot(rk0,qi)
-            d1 = np.dot(rk1,qi)
-            s += np.cos(d0).sum()+np.cos(d1).sum()
-        Sq[i] = Sq[i] + s/float(nc)
-        
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def numba_Sq(nc,v,q,Sq):
+    nq = q.shape[0]
+    npairs = v.shape[0]
+    nc = float(nc)
+    for i in range(nq):
+        qi = -q[i]
+        s =0.0
+        for j in prange(npairs):
+            s += np.cos(np.sum(v[j]*qi))
+        Sq[i] += 2*s/nc
+
+    return
+
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def numba_Sq2(nc,v,q,Sq):
+    nq = q.shape[0]
+    npairs = v.shape[0]
+    nc = float(nc)
+    s = np.empty_like(Sq)
+    qm = -q
+    for i in range(nq):
+        s[i] = 0.0
+    for j in prange(npairs):
+        s += np.cos(np.dot(qm,v[j]))
+    Sq += 2*s/nc
+
     return
 
 
