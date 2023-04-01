@@ -23,6 +23,7 @@ import re
 import lammpsreader 
 
 
+
 class logs():
     '''
     A class for modifying the loggers
@@ -668,6 +669,7 @@ class plotter():
             plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return 
+    
     @staticmethod
     def compare_data(data1,data2,plot_args=[],**kwargs):
         if type(data1) is dict:
@@ -2021,7 +2023,8 @@ class Analysis:
             if topol_file is None:
                topol_file = self.connectivity_file
             self.topol_file = topol_file
-
+        elif '.mol2' == self.trajectory_file[-5:]:
+            raise Exception('mol2 only for topology')
         else:
             raise NotImplementedError('Trajectory file format ".{:s}" is not yet Implemented'.format(trajectory_file.split('.')[-1]))
         self.read_topology()
@@ -2045,13 +2048,14 @@ class Analysis:
         tf = perf_counter()-t0
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
+    
     def map_types(self,types_map):
         for i in range(self.natoms):
             self.at_types[i] = types_map[self.at_types[i]]
         self.mass_map = {types_map[k]:v for k,v in self.mass_map.items()}
         self.charge_map = {types_map[k]:v for k,v in self.charge_map.items()}
         return
-    def analysis_initialization(self):
+    def analysis_initialization(self,reinit=False):
         '''
         Finds some essential information for the system and stores it in self
         like angles,dihedrals
@@ -2059,6 +2063,13 @@ class Analysis:
         '''
         t0 = perf_counter()
         ## We want masses into numpy array
+        if reinit:
+            self.connectivity = dict()
+            self.neibs = dict()
+            self.angles = dict()
+            self.dihedrals = dict()
+            self.find_locGlob()
+            self.find_topology_from_itp()
         self.find_masses()
         
         #Now we want to find the connectivity,angles and dihedrals
@@ -2136,7 +2147,9 @@ class Analysis:
         ids = {v : np.array(temp_ids[v]) for v in types}
         setattr(self,attr_name+'_per_type',ids)
         return 
-    
+    def find_topology_from_mol2(self):
+        
+        return
     def find_topology_from_itp(self):
         #t0 = perf_counter()
 
@@ -2451,11 +2464,16 @@ class Analysis:
             except:
                 raise NotImplemented('connectivity_info = {} is not implemented yet'.format(self.connectivity_file))
             else:
+                #if self.connectivity_file[-4:] =='.itp':
                 self.find_topology_from_itp() # reads your itp files to get the connectivity
-        
+                #elif self.connectivity_file[-5:] =='mol2':
+                    #self.find_topology_from_mol2() 
         elif '.ltop' == self.topol_file[-5:]:
             self.read_lammps_topol()
-        
+        else:
+            raise Exception('file {:s} not implemented'.format(self.topol_file.split('.')[-1]))
+        #elif '.mol2' == self.topol_file[-5:]:
+            #self.read_mol2_topol()
         return
     
     def read_lammps_topol(self):
@@ -2690,6 +2708,8 @@ class Analysis:
             header,data = ofile.read_frame()
         except EOFError:
             raise EOFError
+        except Exception:
+            return True
         self.timeframes[frame] = header
         self.timeframes[frame]['boxsize'] = np.diag(data['box'])
         self.timeframes[frame]['coords'] = data['x']
@@ -2799,9 +2819,10 @@ class Analysis:
             self.read_lammpstrj_file()
         return 
     
-    def write_gro_file(self,fname=None,option='',frames=None,step=None):
+    def write_gro_file(self,fname=None,whole=False,
+                       option='',frames=None,step=None,**kwargs):
         t0 = perf_counter()
-        options = ['','unwrap','transmiddle']
+        options = ['','transmiddle','translate']
         if option not in options:
             raise ValueError('Available options are : {:s}'.format(', '.join(options)))
         
@@ -2815,16 +2836,22 @@ class Analysis:
                 if step is not None:
                     if frame%step  !=0: 
                         continue
-                if option == 'unwrap':
-                    coords = self.get_whole_coords(frame)
-                elif option =='transmiddle':
+
+                if option =='transmiddle':
                     coords = self.translate_particle_in_box_middle(self.get_coords(frame),
-                                                                   self.get_box(frame))
+                                                          self.get_box(frame))
                 elif option=='':
-                
                     coords = self.get_coords(frame)
+                    
+                elif option=='translate':
+                    v = np.array(kwargs['trans'])
+                    coords = self.get_coords(frame) + v
+                    coords = implement_pbc(coords,d['boxsize'])
                 else:
                     raise NotImplementedError('option "{:}" Not implemented'.format(option))
+                if whole:
+                        coords = self.unwrap_coords(coords, d['boxsize'])                             
+                
                 self.write_gro_by_frame(ofile,
                                         coords, d['boxsize'],
                                         time = d['time'], 
@@ -2906,7 +2933,7 @@ class Analysis:
         self.renumber_residues()
         
         if reinit:
-            self.analysis_initialization()
+            self.analysis_initialization(reinit)
         return
     
     def write_residues(self,res,fname='selected_residues.gro',
@@ -3184,8 +3211,62 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return 1+Sq
     
-    def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,ids=None,direction=None,
-                               density='number',normalize=False,**kwargs):
+    def calc_Sq_byInverseGr(self,dr,dmax,dq,qmax,
+                            qmin=0,
+                            ids=None,direction=None):
+        def Fourier3D(q,r,gr,rho):
+            dr= r[1]-r[0]
+            Sq = np.zeros(q.shape[0])
+            for i in range(q.shape[0]):
+                Sq[i] = simpson((gr-1)*r*np.sin(q[i]*r)/q[i],r) 
+            return 1+4*np.pi*rho*Sq
+        def Fourier2D(q,r,gr,rho):
+            dr= r[1]-r[0]
+            Sq = np.zeros(q.shape[0])
+            for i in range(q.shape[0]):
+                Sq[i] = simpson((gr-1)*np.sin(q[i]*r)/q[i],r) 
+            return 1+np.pi*rho*Sq
+        def Fourier1D(q,r,gr,rho):
+            dr= r[1]-r[0]
+            Sq = np.zeros(q.shape[0])
+            for i in range(q.shape[0]):
+                Sq[i] = simpson((gr-1)*np.sin(q[i]*r)/(q[i]*r),r) 
+            return 1+rho*Sq
+        res = self.calc_pair_distribution(dr,dmax,density='number',
+                            ids=ids,direction=direction,
+                            normalize=True) 
+        q =np.arange(qmin+dq,qmax+dq,dq)
+        d = res['d']
+        g = res['gr']
+        rho = res['rho']
+        box = self.box_mean()
+        if direction is None or direction =='':
+            Sq = Fourier3D(q,d,g,rho)
+        elif direction =='xy':
+            Sq = Fourier2D(q,d,g,rho*box[2])
+        elif direction =='z':
+            Sq = Fourier1D(q,d,g,rho*box[1]*box[0])
+        
+        res['Sq'] = Sq
+        res['q'] = q
+        
+        
+        return res
+    def calc_internal_distance(self,n,filters=dict()):
+        ids1,ids2 = self.find_vector_ids(n)
+        vect,filt_t = self.vects_per_t(ids1,ids2,filters=filters)
+        
+        dists = {'system':0}
+        dists.update({k:0 for k in filt_t} )
+        for t,v in vect.items():
+            c = v
+            
+        return 
+    def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
+                               ids=None,direction=None,
+                               density='number',normalize=False,
+                               bulkMaxDiff=0.1,perc_bulk=0.75,
+                               **kwargs):
         '''
         Used to calculate pair distribution functions between two atom types
         Could be the same type. If one type is None then the distribution is 
@@ -3225,6 +3306,7 @@ class Analysis:
         '''
         t0 = perf_counter()   
         
+        pair_distribution = dict()
         #if density not in ['number','probability','max']:
             #raise NotImplementedError('density = {:s} is not Impmemented'.format(density))
             
@@ -3274,25 +3356,41 @@ class Analysis:
         gofr/=nframes
         cb = center_of_bins(bins)
         if  density in ['number','pair_number']:
+            if direction is None or direction =='':
+                const = 4*np.pi/3
+                for i in range(0,bins.shape[0]-1):
+                    vshell = const*(bins[i+1]**3-bins[i]**3)
+                    gofr[i]/=vshell
+            elif direction =='xy':
+                const = np.pi*self.box_mean()[2]
+                for i in range(0,bins.shape[0]-1):
+                    surf_shell = const*(bins[i+1]**2-bins[i]**2)
+                    gofr[i]/=surf_shell
+            elif direction =='z':
+                b = self.box_mean()
+                const  = b[0]*b[1]
+                for i in range(0,bins.shape[0]-1):
+                    shell = const*2*(bins[i+1]-bins[i]) # bin is 2binl
+                    gofr[i]/=shell
             
-            const = 4*np.pi/3
-            for i in range(0,bins.shape[0]-1):
-                vshell = const*(bins[i+1]**3-bins[i]**3)
-                gofr[i]/=vshell
             if 'pair_number' == density:
                 pass
             else:
                 gofr/=nc2
+            
             if normalize:
                 if 'bulk_region' in kwargs:
                     bulk_region = kwargs['bulk_region']
                 else:
-                    bulk_region =(0.75*dmax,dmax)
+                    bulk_region =(perc_bulk*dmax,dmax)
                 f = np.logical_and(bulk_region[0]<cb,cb<=bulk_region[1])
-                bulkv = gofr[f].mean()
-                if 100*bulkv<=gofr.max():
+                bulk_rho = gofr[f].mean()
+                mx = gofr[f].max()
+                mn = gofr[f].min()
+                if (mx-mn)/mx>bulkMaxDiff:
                     raise Exception('The bulk region is very small compared to the maximum value\nTry increasing dmax')
-                gofr/=bulkv
+                pair_distribution['rho'] = bulk_rho
+                gofr/=bulk_rho
         elif density =='probability':
             gofr/=nc1*nc2
             if normalize:
@@ -3303,7 +3401,7 @@ class Analysis:
             if normalize:
                 gofr/=gofr.max()
             
-        pair_distribution = {'d':cb, 'gr':gofr }
+        pair_distribution.update( {'d':cb, 'gr':gofr })
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return pair_distribution
@@ -3455,7 +3553,12 @@ class Analysis:
             self.timeframes[nfr+i] = object2.timeframes[frame]
             self.timeframes[nfr+i]['time']+=tlast
         return
-
+    def calc_size(self):
+        size = np.zeros(3)
+        args = (size,)
+        nframes = self.loop_trajectory('minmax_size',args)
+        return size/nframes
+    
 class Analysis_Confined(Analysis):
     '''
     Class for performing the analysis of confined systems
@@ -3618,6 +3721,7 @@ class Analysis_Confined(Analysis):
         coords = self.get_coords(frame)
         box  = self.get_box(frame)          
         cm = self.get_particle_cm(coords)
+        coords = implement_pbc(coords,box)
         d = self.get_distance_from_particle(coords[self.polymer_filt])
         return coords,box,d,cm
     
@@ -3693,16 +3797,7 @@ class Analysis_Confined(Analysis):
             ids2 = np.concatenate( (ids2,i[:,-1]) )
         return ids1,ids2
     
-    def ids_from_backbone(self,bondsdist):
-        ids1 = np.empty(0,dtype=int)
-        ids2 = np.empty(0,dtype=int)
-        for j,ids in self.chain_args.items(): 
-            bd = self.bond_distance_matrix(ids) 
-            b1,b2 = np.nonzero(bd ==8)
-            ids1 = np.concatenate((ids1,b1))
-            ids2 = np.concatenate((ids2,b2))
-        return ids1,ids2
-    
+
     def ids_from_backbone(self,bonddist):
         ids = self.polymer_ids
         if hasattr(self,'backbone_dist_matrix'):
@@ -5606,7 +5701,12 @@ class coreFunctions():
         pass
     
 
-    
+    @staticmethod
+    def minmax_size(self,size):
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+        size+=coords.max(axis=0) - coords.min(axis=0)
+        return
     @staticmethod
     def Sq(self,q,Sq,ids=None):
         frame = self.current_frame
@@ -5875,6 +5975,7 @@ class coreFunctions():
         frame = self.current_frame
         
         coords,box,d,cs = self.get_frame_basics(frame)
+        
         #2) Caclulate profile
         for i in range(nbins):    
             vol_bin = self.volfun(self,bins[i],bins[i+1])
@@ -5888,7 +5989,7 @@ class coreFunctions():
         
         frame = self.current_frame
         coords,box,d,cs = self.get_frame_basics(frame)
-       
+        
         #2) Caclulate profile
         for i in range(nbins):    
             vol_bin = self.volfun(self,bins[i],bins[i+1])
@@ -6875,6 +6976,16 @@ def Fs_xy12(r1,r2):
     return np.cos(ri)
 
 @jit(nopython=True,fastmath=True)
+def Fs_xy13p45(r1,r2):
+    ri =  9.510586206959063*(r2[1] - r1[1] + r2[0] -r1[0])
+    return np.cos(ri)
+
+@jit(nopython=True,fastmath=True)
+def Fs_z13p45(r1,r2):
+    ri = 13.45*(r2[2] - r1[2])
+    return np.cos(ri)
+
+@jit(nopython=True,fastmath=True)
 def Fs_z12(r1,r2):
     ri = 12*(r2[2] - r1[2])
     return np.cos(ri)
@@ -7028,21 +7139,6 @@ def minimum_image(relative_coords,box):
                 imaged_rel_coords[i][j] += box[j]  
     return imaged_rel_coords
 
-
-
-@jit(nopython=True,fastmath=True,parallel=True)
-def numba_Sq(nc,v,q,Sq):
-    nq = q.shape[0]
-    npairs = v.shape[0]
-    nc = float(nc)
-    for i in range(nq):
-        qi = -q[i]
-        s =0.0
-        for j in prange(npairs):
-            s += np.cos(np.sum(v[j]*qi))
-        Sq[i] += 2*s/nc
-
-    return
 
 
 @jit(nopython=True,fastmath=True,parallel=True)
