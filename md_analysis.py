@@ -578,9 +578,12 @@ class plotter():
     class colors():
         qualitative = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33','#a65628','#f781bf','#999999']
         diverging = ['#d73027','#f46d43','#fdae61','#fee08b','#ffffbf','#d9ef8b','#a6d96a','#66bd63','#1a9850']
+        div6 = ['#d73027','#fc8d59','#fee090','#e0f3f8','#91bfdb','#4575b4']
         sequential = ['#fee0d2','#fc9272','#de2d26']
         safe = ['#1b9e77','#d95f02','#7570b3']
         semisafe = ['#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e','#e6ab02','#a6761d','#666666']
+        safe2 = ['#a6cee3','#1f78b4','#b2df8a']
+        qual6 = ['#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e','#e6ab02']
     class linestyles():
         lst_map = {
             'loosely dotted':      (0, (1, 3)),
@@ -837,9 +840,9 @@ class plotter():
     
     @staticmethod
     def fits(datadict,fitteddict,locleg='lower left',ncolleg=1,
-             fname =None,title=None,size=3.5,xlim=(-6,6),pmap=None,
+             fname =None,title=None,size=3.5,ylim=None,xlim=(-6,6),pmap=None,
              cmap = None,ylabel=None,units='ns',midtime=None,
-             num=100,cutf=None,write_plot_data=False):
+             num=100,cutf=None,write_plot_data=False,marksize=1.2):
 
         if write_plot_data:
             plotter.write_data_forXPCS(datadict,cutf=cutf,midtime=midtime)
@@ -869,7 +872,8 @@ class plotter():
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
         plt.xscale('log')
-        
+        if ylim is not None:
+            plt.ylim(ylim)
         xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
         plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
         plt.yticks(fontsize=2.5*size)
@@ -894,13 +898,13 @@ class plotter():
             plt.plot(xf,yee,ls ='-.',color=cmap[k],label ='fit {}'.format(k))
             
             plt.plot(x[args],y[args],ls='none',marker = pmap[k],markeredgewidth=0.2*size,
-        markersize=size*1.2,fillstyle='none',color=cmap[k],label=k)
+        markersize=size*marksize,fillstyle='none',color=cmap[k],label=k)
         plt.legend(frameon=False,fontsize=2.0*size,loc=locleg,ncol=ncolleg)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
 
-class inverseFourrier():
+class inverseFourier():
     def __init__(self,t,ft,omega,omega_0=1e-16,omega_oo=1e16):
         self.t = t
         self.ft = ft
@@ -1614,7 +1618,7 @@ class add_atoms():
     @staticmethod
     def set_all_ghost_coords(self,info,noise=None):
         f,l,th,s,ir1,ir0,ir2 = add_atoms.serialize_info(info)
-        self.unwrap_all()
+        #self.unwrap_all()
         for frame in self.timeframes:      
             ghost_coords = np.empty((len(info),3),dtype=float)
             coords = self.get_coords(frame)
@@ -2234,7 +2238,7 @@ class Analysis:
             raise AttributeError('{}\nCall function "find_EndGroup_args" to set this attribute'.format(err))
         else:
             return args
-        
+    
     def box_variance(self):
         t0 = perf_counter()
         box_var = np.zeros(3)
@@ -4738,6 +4742,35 @@ class Analysis_Confined(Analysis):
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return  seg_ids_numpy
+    def calc_total_dipole_moment_t(self,q=None):
+        '''
+        Calculates total dipole moment vector
+        Parameters
+        -------
+        dipoles_t : dictionary
+            keys: times
+            values: float array (nvector,3)
+
+        '''
+        t0 = perf_counter()
+
+        if not hasattr(self,'partial_charge'):
+            charge = np.empty(self.at_types.shape[0],dtype=float)
+            for i,ty in enumerate(self.at_types):
+                charge[i] = self.charge_map[ty]
+            self.partial_charge = charge
+        dipoles_t = dict()
+        if q is not None:
+            q = np.array(q) ; q = q/np.sum(q*q)**0.5
+            q = q.reshape(1,3)
+        args = (dipoles_t,q)
+        
+        nframes = self.loop_trajectory('total_dipole_moment',args)
+        
+        tf = perf_counter() - t0
+        
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return dipoles_t 
     
     def calc_segmental_dipole_moment_t(self,topol_vector,
                                        segbond,filters={'all':None},
@@ -5807,7 +5840,25 @@ class coreFunctions():
                 except ZeroDivisionError:
                     pass
         return
-                
+    @staticmethod
+    def total_dipole_moment(self,dipoles_t,q=None):
+        
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+        
+        box = self.get_box(frame)
+        
+        key = self.get_key()
+        
+        
+        pc = self.partial_charge.reshape((self.partial_charge.shape[0],1))
+        
+        dipoles = np.sum(pc*coords,axis=0).reshape((1,3))
+        if q is not None:
+            dipoles = np.sum(q*dipoles)*q
+        dipoles_t[key] = dipoles  
+        
+        return                
     @staticmethod
     def segmental_dipole_moment(self,filters,dads,ids1,ids2,
                                 segment_args,dipoles_t,filt_per_t):
