@@ -221,7 +221,7 @@ class LammpsTrajReader:
             
         for i in range(nats):
             cols = self.reader.read().split()
-            
+
             for datai in range(len(data)):
                 data[datai].appendString(cols[datai])
 
