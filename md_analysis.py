@@ -182,28 +182,6 @@ class ass():
     '''
     beebbeeb = True
     @staticmethod
-    def derft(ft,t):
-        d = np.empty(ft.shape[0],dtype=float)
-        d[0] = (ft[1]-ft[0])/(t[1]-t[0])
-        d[-1] = (ft[-2]-ft[-1])/(t[-1]-t[-2])
-        for i in range(1,ft.shape[0]-1):
-            d[i] = (ft[i+1]-ft[i-1])/(t[i+1]-t[i-1])
-        return d
-    def der2ft2(ft,t):
-        d = ass.derft(ass.derft(ft,t),t)
-        return d
-    @staticmethod
-    def find_peaks(t,ft,find='max'):
-
-        d = ass.derft(ft,t)
-        d2 = ass.der2ft2(ft,t)
-        f1 = np.sign(d[:-1]*d[1:]) ==-1
-        if find =='max':
-            f2  = d2[:-1]< 0
-            sch = np.logical_and(f1,f2)
-        return t[0:-1][sch]
-    
-    @staticmethod
     def try_beebbeeb():
         if ass.beebbeeb:
             try:
@@ -795,7 +773,7 @@ class plotter():
             pmap = {k:'o' for k in datadict}
         if cutf is None:
             cutf ={k:10**10 for k in datadict}
-        
+
         figsize = (size,size)
         dpi = 300
         fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
@@ -828,6 +806,8 @@ class plotter():
             else:
                 plt.yticks(fontsize=2.5*size)
                 plt.ylim(ylim)
+        if title is not None:
+            plt.title(r'{:s}'.format(title))
         plt.xlabel(r'$t ({})$'.format(units),fontsize=3*size)
         plt.ylabel(ylabel,fontsize=3*size)
 
@@ -863,7 +843,7 @@ class plotter():
     @staticmethod
     def fits(datadict,fitteddict,locleg='lower left',ncolleg=1,
              fname =None,title=None,size=3.5,ylim=None,xlim=(-6,6),pmap=None,
-             cmap = None,ylabel=None,units='ns',midtime=None,legfont=2.0,
+             cmap = None,ylabel=None,units='ns',midtime=None,
              num=100,cutf=None,write_plot_data=False,marksize=1.2):
 
         if write_plot_data:
@@ -921,7 +901,7 @@ class plotter():
             
             plt.plot(x[args],y[args],ls='none',marker = pmap[k],markeredgewidth=0.2*size,
         markersize=size*marksize,fillstyle='none',color=cmap[k],label=k)
-        plt.legend(frameon=False,fontsize=legfont*size,loc=locleg,ncol=ncolleg)
+        plt.legend(frameon=False,fontsize=2.0*size,loc=locleg,ncol=ncolleg)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
@@ -3239,7 +3219,7 @@ class Analysis:
     
     def calc_Sq_byInverseGr(self,dr,dmax,dq,qmax,
                             qmin=0,
-                            ids=None,direction=None,**grkwargs):
+                            ids=None,direction=None):
         def Fourier3D(q,r,gr,rho):
             dr= r[1]-r[0]
             Sq = np.zeros(q.shape[0])
@@ -3260,7 +3240,7 @@ class Analysis:
             return 1+rho*Sq
         res = self.calc_pair_distribution(dr,dmax,density='number',
                             ids=ids,direction=direction,
-                            normalize=True,**grkwargs) 
+                            normalize=True) 
         q =np.arange(qmin+dq,qmax+dq,dq)
         d = res['d']
         g = res['gr']
@@ -3413,7 +3393,7 @@ class Analysis:
                 bulk_rho = gofr[f].mean()
                 mx = gofr[f].max()
                 mn = gofr[f].min()
-                if (mx-mn)/mx>bulkMaxDiff and 'ignoreException' not in kwargs:
+                if (mx-mn)/mx>bulkMaxDiff:
                     raise Exception('The bulk region is very small compared to the maximum value\nTry increasing dmax')
                 pair_distribution['rho'] = bulk_rho
                 gofr/=bulk_rho
@@ -3644,7 +3624,7 @@ class Analysis_Confined(Analysis):
         elif method =='atomids':
             compare_array = self.at_ids
         else:
-            raise NotImplementedError('method "{}" is not Implemented\n Available methods are "molname","atomtypes","molids","atomids"'.format(method))
+            raise NotImplementedError('method "{}" is not Implemented'.format(method))
         
         try:
             look_name_s = self.kwargs[name]
@@ -6395,17 +6375,10 @@ class coreFunctions():
         x = dict()
         ntot = args_train.shape[0] + args_tail.shape[0] +\
                args_loop.shape[0] + args_bridge.shape[0]
-        if ntot != 0:
-            for k in ['train','tail','loop','bridge']:
-                args = locals()['args_'+k]
-                x['x_'+k] = args.shape[0]/ntot
-                x['n_'+k] = args.shape[0]
-        else:
-            for k in ['train','tail','loop','bridge']:
-                args = locals()['args_'+k]
-                x['x_'+k] = 0
-                x['n_'+k] = 0
-                
+        for k in ['train','tail','loop','bridge']:
+            args = locals()['args_'+k]
+            x['x_'+k] = args.shape[0]/ntot
+            x['n_'+k] = args.shape[0]
         x['x_ads_chains'] = ads_chains.shape[0]/len(self.chain_args)
         x['n_ads_chains'] = ads_chains.shape[0]
         
