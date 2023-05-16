@@ -21,7 +21,8 @@ import coloredlogs
 import matplotlib
 import re
 import lammpsreader 
-
+import scipy
+import pickle
 
 
 class logs():
@@ -953,6 +954,34 @@ class inverseFourier():
         else:
             s = succ(self.t,dft,self.omega)
         return s
+    
+class fitLinear():
+
+    def __init__(self,xdata,ydata,nlines=1):
+        self.xdata = np.array(xdata)
+        self.ydata = np.array(ydata)
+        self.nlines = nlines
+    @staticmethod
+    def piecewise_linear(x, x0, y0, k1, k2):
+            return np.piecewise(x, [x < x0], 
+                                [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
+    @staticmethod
+    def costF(p,x,y):
+        yp = fitLinear.piecewise_linear(x, *p)
+        return np.sum((y-yp)**2)
+    
+    def fitlines(self):
+        import pwlf
+        x = self.xdata
+        y = self.ydata
+        my_pwlf = pwlf.PiecewiseLinFit(x, y)
+        breaks = my_pwlf.fit(2)
+        self.breaks = breaks
+        xd = np.arange(x.min(),x.max(),0.01)
+        self.xyline =  (xd,my_pwlf.predict(xd))
+        return self.xyline
+        
+        
 class fitData():
     
     from scipy.optimize import dual_annealing,minimize
@@ -4171,7 +4200,8 @@ class Analysis_Confined(Analysis):
     ######## Main calculation Functions for structural properties ############      
     
     def calc_density_profile(self,binl,dmax,
-                             mode='mass',option='',flux=None,**kwargs):
+                             mode='mass',option='',flux=None,offset=0,
+                             **kwargs):
         '''
         Master function to compute the density profile
 
@@ -4218,7 +4248,7 @@ class Analysis_Confined(Analysis):
         
         if dmax is None:
             NotImplemented
-        bins  =   np.arange(0, dmax+binl, binl)
+        bins  =   np.arange(offset,offset+dmax+binl, binl)
         nbins = len(bins)-1
         rho = np.zeros(nbins,dtype=float)
         mass_pol = self.atom_mass[self.polymer_filt] 
@@ -4277,7 +4307,7 @@ class Analysis_Confined(Analysis):
         else:
             rho*=scale/nframes 
             d_center = center_of_bins(bins)
-            density_profile.update({'d':d_center})
+            density_profile.update({'d':d_center-offset})
             
             density_profile.update({'rho':rho})
             if option =='pertype':
@@ -4296,6 +4326,7 @@ class Analysis_Confined(Analysis):
                     dens['nrho'] += dens['n'+k]
                     
                 dens['rho'] = dens['mrho']
+                
                 density_profile.update(dens)
                 density_profile.update({'stats':stats})
                 

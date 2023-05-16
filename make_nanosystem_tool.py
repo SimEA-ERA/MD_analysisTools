@@ -607,24 +607,19 @@ def get_defaults(command_args):
     
     if shape=='tube':
         ka = ['diameter','length','outer_diameter']
-        onlyz=False
     elif shape == 'pore':
-        onlyz=True
         ka = ['diameter','length']
     elif shape == 'sphere':
         ka = ['diameter']
-        onlyz=False
     elif shape=='wrap':
-        onlyz=False
         ka = ['diameter','length']
     elif shape =='asis':
         ka =  dict()
-        onlyz=True
     kargs = dict()
     for k in ka:
         kargs[k] = getattr(command_args,k)
     
-    return shape, size, box, type1, type2, ntype1, ntype2, stabilizing_springs, kargs, onlyz
+    return shape, size, box, type1, type2, ntype1, ntype2, stabilizing_springs, kargs
 
 def particle_Checks(command_args):
    
@@ -757,15 +752,21 @@ def main():
     argparser.add_argument("-boxof","--boxoffset", metavar=None,
                            type=float,nargs='+', required=False,default=0,
                            help="boxoffset"+adddef)
-    
+    argparser.add_argument("-expandz","--expandz", metavar=None,
+                           type=bool,default=True,
+                           help="expand polymer only in z direction if True. Otherwise expand in all directions "+adddef)
 
     
     command_args = argparser.parse_args()
         
 
-    shape, size, box, type1, type2, ntype1, ntype2, stabilizing_springs, kargs, onlyz = get_defaults(command_args)
+    shape, size, box, type1, type2, ntype1, ntype2, stabilizing_springs, kargs = get_defaults(command_args)
+    
+    onlyz = command_args.expandz
     
     particle_Checks(command_args)
+    
+    
     
     if shape == 'asis':
         alu = mda.Analysis(command_args.fsolid,command_args.itpsolid)
