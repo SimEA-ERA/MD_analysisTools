@@ -1617,7 +1617,7 @@ class add_atoms():
         return 
     
     @staticmethod
-    def add_ghost_hydrogens(self,types,noise=None):
+    def add_ghost_hydrogens(self,types,noise=None,pickleframes=False):
         t0 = perf_counter()
         
         new_atoms_info = add_atoms.get_new_atoms_info(self,'h',types)
@@ -1631,7 +1631,7 @@ class add_atoms():
         
         #for frame in self.timeframes:    
          #   add_atoms.set_ghost_coords(self, frame, new_atoms_info)
-        add_atoms.set_all_ghost_coords(self,new_atoms_info,noise) 
+        add_atoms.set_all_ghost_coords(self,new_atoms_info,noise,pickleframes=pickleframes) 
         
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
@@ -1647,19 +1647,36 @@ class add_atoms():
         return
     
     @staticmethod
-    def set_all_ghost_coords(self,info,noise=None):
+    def set_all_ghost_coords(self,info,noise=None,pickleframes=False):
+        
         f,l,th,s,ir1,ir0,ir2 = add_atoms.serialize_info(info)
         #self.unwrap_all()
-        for frame in self.timeframes:      
-            ghost_coords = np.empty((len(info),3),dtype=float)
-            coords = self.get_coords(frame)
-            add_atoms.set_ghost_coords_parallel(f,l,th,s,ir1,ir0,ir2,
+        run = False
+        fpickle = '{:s}_N{:d}_.pickle'.format(self.trajectory_file,self.nframes)
+        try:
+            with open(fpickle, 'rb') as handle:
+                timeframes = pickle.load(handle)
+                logger.info('Done: Read from {} '.format(fpickle))
+                self.timeframes = timeframes
+        except:
+            run = True
+            
+        if run or pickleframes==False:
+
+            for frame in self.timeframes:      
+                ghost_coords = np.empty((len(info),3),dtype=float)
+                coords = self.get_coords(frame)
+                add_atoms.set_ghost_coords_parallel(f,l,th,s,ir1,ir0,ir2,
                                                 coords,ghost_coords)
-            if noise is not None:
-                noise_coords =  np.random.normal(0,noise,ghost_coords.shape) 
-                ghost_coords += noise_coords
-                logger.debug('Adding noise mean = {:4.3f}'.format(np.mean(np.abs(noise_coords))))
-            self.timeframes[frame]['ghost_coords'] = ghost_coords
+                self.timeframes[frame]['ghost_coords'] = ghost_coords
+                if frame%1000==0:  logger.info('Done: setting ghost coords frame {}'.format(frame))
+            if pickleframes:
+                logger.info('Done: pickling to {} '.format(fpickle))
+                with open(fpickle,'wb') as handle:
+                    try:
+                        pickle.dump(self.timeframes, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                    except:
+                        os.system('rm {}'.format(fpickle))
         return
     
     @staticmethod
