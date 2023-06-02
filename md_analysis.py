@@ -1,27 +1,24 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from itertools import combinations
-import time
+
 from time import perf_counter
-from scipy.optimize import minimize,dual_annealing,fsolve,differential_evolution
-from numba import jit,njit,prange
+from scipy.optimize import minimize,dual_annealing
+from numba import jit,prange
 from numba.experimental import jitclass
-import warnings
+import os 
 import inspect
 import collections
 import six
 from scipy.integrate import simpson
 from pytrr import GroTrrReader
-import pytrr
-from joblib import Parallel, delayed
-import multiprocessing
+
 import pandas as pd
 import logging
 import coloredlogs
 import matplotlib
-import re
+
 import lammpsreader 
-import scipy
+
 import pickle
 
 
@@ -281,8 +278,8 @@ class ass():
             s2 =''
         else:
             s2 = ' Time/frame --> {:s}\n'.format( ass.readable_time(tf/nf))
-        x = '-'*(len(name)+11)
         logger.info('Function "{:s}"\n{:s} Total time --> {:s}'.format(name,s2,s1))
+        return
     
     @staticmethod
     def print_stats( stats):
@@ -408,10 +405,7 @@ def moving_average(a, n=10) :
 
 def block_average(a, n=100) :
     #block average kernel
-    if a.shape[0]%n!=0:
-        p = 1
-    else:
-        p=0
+ 
     bv = np.empty(int(a.shape[0]/n)+1,dtype=float)
     for i in range(bv.shape[0]):
         x = a[i*n:(i+1)*n]
@@ -421,7 +415,7 @@ def block_average(a, n=100) :
 def block_std(a, n=100) :
     #block standard diviation
     bstd = np.empty(int(a.shape[0]/n),dtype=float)
-    for i in range(bn.shape[0]):
+    for i in range(bstd.shape[0]):
         x = a[i*n:(i+1)*n]
         bstd[i] = x.std()
     return bstd
@@ -461,11 +455,11 @@ class Energetic_Analysis():
         self.data = pd.DataFrame(data,columns=columns)
         return
     
-    def simple_plot(ycols,xcol='time',size = 3.5,dpi = 300, 
+    def simple_plot(self,ycols,xcol='time',size = 3.5,dpi = 300, 
              title='',func=None,
              xlabel=['time (ps)'],save_figs=False,fname=None,path=None):
         figsize = (size,size)
-        fig =plt.figure(figsize=figsize,dpi=dpi)
+        plt.figure(figsize=figsize,dpi=dpi)
         plt.minorticks_on()
         plt.tick_params(direction='in', which='minor',length=1.5*size)
         plt.tick_params(direction='in', which='major',length=1.5*size)
@@ -512,7 +506,7 @@ class XPCS_communicator():
             cutf ={k:10**10 for k in datadict}
         for k,dy in datadict.items():
             
-            fn = '{:s}\\xpcs_{:s}.txt'.format(path,k)
+            fn = '{:s}\\xpcs_{:}.txt'.format(path,k)
             
             x = ass.numpy_keys(dy)/1000
             y = ass.numpy_values(dy)
@@ -832,7 +826,7 @@ class plotter():
                 plt.plot(x[args],y[args],ls=lstmap[k],lw=size/1.5,
                 label=labmap[k],color=cmap[k])
             else:
-                raise NotImplemented('Implement here you own plotting style. Use elif statement')
+                raise NotImplementedError('Implement here you own plotting style. Use elif statement')
         if legend:
             plt.legend(frameon=False,fontsize=legfont*size,
                    loc=locleg,ncol=ncolleg)
@@ -943,17 +937,7 @@ class inverseFourier():
             eps = eps*(eps0-epsoo)+epsoo
         return eps
     
-    def find_inverse(self):
-        def succ(t,f,o):
-            I = o*simpson(f*np.exp(-1j*o*t),x=t)
-            return I
-        f = self.ft
-        if ass.iterable(self.omega):
-            s = [ succ(f,self.t,o) for o in self.omega]
-            s = np.array(s)
-        else:
-            s = succ(self.t,dft,self.omega)
-        return s
+
     
 class fitLinear():
 
@@ -975,7 +959,7 @@ class fitLinear():
         x = self.xdata
         y = self.ydata
         my_pwlf = pwlf.PiecewiseLinFit(x, y)
-        breaks = my_pwlf.fit(2)
+        breaks = my_pwlf.fit(self.nlines)
         self.breaks = breaks
         xd = np.arange(x.min(),x.max(),0.01)
         self.xyline =  (xd,my_pwlf.predict(xd))
@@ -1048,6 +1032,7 @@ class fitData():
         else:
             self.opt_method = 'SLSQP'
         return
+    
     def get_weights(self,wm):
         if wm =='high-y':
             w = np.abs(self.ydata)+0.02
@@ -1106,7 +1091,7 @@ class fitData():
         
         for attr in ['crit','smv','drv','regs']:
             try:
-                dump = getattr(self,attr)
+                getattr(self,attr)
             except AttributeError:
                 setattr(self,attr,[])
                 
@@ -1291,7 +1276,7 @@ class fitData():
         if self.mode=='freq':
             units = r'${:s}^{:s}$'.format(units,'{-1}')
             lab = r'$f$ / {:s}'.format(units)
-        elif mode =='tau':
+        elif self.mode =='tau':
             lab = r'$\tau$ / {:s}'.format(units)
         plt.xlabel(lab,fontsize=3*size)
         if title is None:
@@ -1518,7 +1503,7 @@ class Analytical_Functions():
         r2 = r0 +bondl*(r02)/norm2(r02)
         
         rm = 0.5*(r1+r2)
-        ru1 = r2 - r1 ; u1 = ru1/norm2(ru1)
+        #ru1 = r2 - r1 ; u1 = ru1/norm2(ru1)
         ru2 = r0 - rm ; u2 = ru2/norm2(ru2)
         rn = r0 + bondl*u2
         return rn
@@ -1528,7 +1513,7 @@ class Analytical_Functions():
         '''
         Parameters
         ----------
-        Works for CH2 groups, can be used for CH3 if one hydrogen is added proberly
+        Works for CH2 groups, can be used for CH3 if one hydrogen is added properly
         bondl_h :Float (length units)
             length of the hydrogen bond.
         theta : float (radians)
@@ -1582,7 +1567,7 @@ class add_atoms():
     
     @staticmethod
     def add_ghost_atoms(self,system2,gconnectivity=dict()):
-        t0 = perf_counter()
+        
         for s in ['at_ids','at_types','mol_names','mol_ids']:
             a1 = getattr( system2, s )
             setattr(self,'_'.join(('ghost',s)),a1)
@@ -1725,6 +1710,7 @@ class add_atoms():
     def set_ghost_coords(self,info):
        
         N = len(info)
+        frame = self.current_frame
         ghost_coords = np.empty((N,3),dtype=float)
         coords = self.get_whole_coords(frame)    
         
@@ -1894,12 +1880,9 @@ class Distance_Functions():
 
     @staticmethod
     def zcylindrical(self,coords,c):
-         #d = Distance_Functions.distance(coords[:,0:2],c[0:2])
          r = coords[:,0:2]-c[0:2]
          d = np.sqrt(np.sum(r*r,axis=1))
-         #r = coords[:,0:2]-c[0:2] ; d = np.sqrt(np.sum(r*r,axis=1))
-         d = self.global_cylindrical_radius-d
-         #logger.debug('{:d} and {:d}'.format(d.shape[0],c.shape[0]))
+
          return d
      
 class bin_Volume_Functions():
@@ -1930,10 +1913,7 @@ class bin_Volume_Functions():
     @staticmethod
     def zcylindrical(self,bin_low,bin_up):
         box = self.get_box(self.current_frame)
-        binl = bin_up - bin_low
-        rm = self.global_cylindrical_radius -(bin_low + 0.5*binl)
-        if rm<0: return 1e16 # negative has no meaning therefore we give a large number to devide with it and make density zero
-        return 2*np.pi*rm*binl*box[2]
+        return np.pi*(bin_up**2-bin_low**2)*box[2]
     
     @staticmethod
     def spherical_particle(self,bin_low,bin_up):
@@ -2032,7 +2012,7 @@ class Analysis:
                  memory_demanding=False,
                  types_from_itp=True,
                  **kwargs):
-        t0 = perf_counter()
+        #t0 = perf_counter()
         self.trajectory_file = trajectory_file
         self.connectivity_info = connectivity_info
         self.connectivity_file = connectivity_info
@@ -2065,7 +2045,7 @@ class Analysis:
                 s = 'Your  trajectory file is {:s} while your topol file is {:s}.\n \
                 Give the right format for the topol_file. i.e. ".gro"\n \
                 Only One frame is needed to get the \
-                topology'.format(trajectory_file,gro_file)
+                topology'.format(trajectory_file,topol_file)
                 raise Exception(s)
         elif '.lammpstrj' == self.trajectory_file[-10:]:
             self.traj_file_type ='lammpstrj'
@@ -2097,7 +2077,7 @@ class Analysis:
         self.analysis_initialization()
  
         self.timeframes = dict() # we will store the coordinates,box,step and time here
-        tf = perf_counter()-t0
+        #tf = perf_counter()-t0
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
     
@@ -2170,7 +2150,7 @@ class Analysis:
         return round((et-e0)/e0,self.round_dec)
     
     def dict_to_sorted_numpy(self,attr_name):
-        t0 = perf_counter()
+        #t0 = perf_counter()
         
         attr = getattr(self,attr_name)
         if type(attr) is not dict:
@@ -2184,7 +2164,7 @@ class Analysis:
         x = x[x[:,0].argsort()]
         setattr(self,'sorted_'+attr_name+'_keys',x)
         
-        tf = perf_counter() - t0 
+        #tf = perf_counter() - t0 
         #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return
 
@@ -2209,20 +2189,20 @@ class Analysis:
             for cf in self.connectivity_file:
                 if '.itp' in cf:
                     self.read_atoms_and_connectivity_from_itp(cf)
-                    itp =True           
+                    #itp =True           
                 else:   
                     raise NotImplementedError('Non itp files are not yet implemented')
                 
         else:
             if '.itp' == self.connectivity_file[-4:]:
                 self.read_atoms_and_connectivity_from_itp(self.connectivity_file)
-                itp =True
+                #itp =True
             else:
                 raise NotImplementedError('Non itp files are not yet implemented') 
         self.connectivity = dict()
         
         for j in np.unique(self.mol_ids):
-            global_mol_at_ids = self.at_ids[self.mol_ids==j]
+            #global_mol_at_ids = self.at_ids[self.mol_ids==j]
             res_nm = np.unique(self.mol_names[self.mol_ids==j])
             
             assert res_nm.shape ==(1,),'many names for a residue. Check code or topology file'
@@ -2306,7 +2286,6 @@ class Analysis:
                 box=self.timeframes[nframes]['boxsize']
                 d = np.dot(target_box-box,target_box -box)**0.5
                 if d < mind:
-                    boxold = box
                     mind = d
                     frame_min = nframes
                 if self.memory_demanding:
@@ -2338,7 +2317,7 @@ class Analysis:
             If another atom is bonded to one of them an angle is formed
         We add in the angle the atoms that participate
         '''
-        t0 = perf_counter()
+        #t0 = perf_counter()
         self.angles = dict()
         for k in self.connectivity.keys():
             #"left" side angles k[0]
@@ -2353,7 +2332,7 @@ class Analysis:
                 ang_id ,ang_type = self.sorted_id_and_type((k[0],k[1],neib))
                 if ang_id[::-1] not in self.angles.keys():
                     self.angles[ang_id] = ang_type  
-        tf = perf_counter()-t0
+        #tf = perf_counter()-t0
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return
 
@@ -2367,7 +2346,7 @@ class Analysis:
             If another atom is bonded to one of them a Dihedral is formed is formed
         We add in the angle the atoms that participate
         '''
-        t0 = perf_counter()
+        #t0 = perf_counter()
         self.dihedrals=dict()
         for k in self.angles.keys():
             #"left" side dihedrals k[0]
@@ -2382,7 +2361,7 @@ class Analysis:
                 dih_id,dih_type = self.sorted_id_and_type((k[0],k[1],k[2],neib))
                 if dih_id[::-1] not in self.dihedrals:
                     self.dihedrals[dih_id] = dih_type
-        tf = perf_counter()
+        #tf = perf_counter()
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return
 
@@ -2398,7 +2377,7 @@ class Analysis:
         t0 = perf_counter()
         
         def read_atoms_from_itp(file):
-            t0 = perf_counter()
+           #t0 = perf_counter()
             with open(file,'r') as f:
                 lines = f.readlines()
                 f.closed
@@ -2407,13 +2386,13 @@ class Analysis:
                     jatoms = j
             at_ids = [] ; res_num=[];at_types = [] ;res_name = [] ; cngr =[] 
             charge = dict() ; mass=dict()
-            connectivity = dict()
+            
             atoms = dict()
             i=0
             for line in lines[jatoms+1:]:
                 l = line.split()
                 try:
-                    a = int(l[0])
+                    int(l[0])
                 except:
                     pass
                 else:
@@ -2430,13 +2409,13 @@ class Analysis:
                 if '[' in line or ']' in line:
                     break
                 
-            tf = perf_counter() - t0
+            #tf = perf_counter() - t0
             #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
             
             return np.array(at_ids),np.array(at_types),np.array(res_num),np.array(res_name),atoms,cngr,charge,mass
  
         def read_connectivity_from_itp(file):
-            t0 = perf_counter()
+            #t0 = perf_counter()
             with open(file,'r') as f:
                 lines = f.readlines()
                 f.closed
@@ -2447,7 +2426,7 @@ class Analysis:
                     jbonds = j
             bonds = []
             try:
-                x= jbonds
+                jbonds
             except UnboundLocalError:
                 pass
             else:
@@ -2466,14 +2445,14 @@ class Analysis:
                 bonds-=bonds.min()
             except ValueError as e:
                 logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
-            tf = perf_counter()
+            
             return  bonds
     
         
         at_ids,at_types,res_num,res_name,atoms,cngr,charge,mass \
         = read_atoms_from_itp(file)
         
-        t1 = perf_counter()
+        
         if self.types_from_itp:
             self.correct_types_from_itp(atoms)
         if not hasattr(self, 'charge_map'):
@@ -2493,7 +2472,7 @@ class Analysis:
         for b in bonds:
             i0 = np.where(at_ids == b[0])[0][0]
             i1 = np.where(at_ids == b[1])[0][0]
-            assert res_name[i0] == res_name[i1], 'Bond {:d} - {:d} is between two different residues'.format(i1,i2)
+            assert res_name[i0] == res_name[i1], 'Bond {:d} - {:d} is between two different residues'.format(i0,i1)
             
             res_nm = res_name[i0]
             connectivity_per_resname[res_nm].append(b)
@@ -2514,7 +2493,7 @@ class Analysis:
             try:
                 self.connectivity_file
             except:
-                raise NotImplemented('connectivity_info = {} is not implemented yet'.format(self.connectivity_file))
+                raise NotImplementedError('connectivity_info = {} is not implemented yet'.format(self.connectivity_file))
             else:
                 #if self.connectivity_file[-4:] =='.itp':
                 self.find_topology_from_itp() # reads your itp files to get the connectivity
@@ -2615,7 +2594,7 @@ class Analysis:
     
     def read_gro_topol(self):
         with open(self.topol_file,'r') as f:
-            l = f.readline()
+            f.readline()
             natoms = int(f.readline().strip())
             #allocate memory
             mol_ids = np.empty(natoms,dtype=int)
@@ -2701,13 +2680,12 @@ class Analysis:
         self.dihedral_types = self.unique_values(self.dihedrals.values())
     
     def find_masses(self):
-        t0 = perf_counter()
+        
         mass = np.empty(self.natoms,dtype=float)
         for i in range(self.natoms):
             mass[i] = self.mass_map[self.at_types[i]]
         self.atom_mass = mass
-        tf = perf_counter() -t0
-        #ass.print_time(tf,inspect.currentframe().f_code.co_name)
+       
         return
     
     @staticmethod
@@ -3267,26 +3245,28 @@ class Analysis:
                             qmin=0,
                             ids=None,direction=None):
         def Fourier3D(q,r,gr,rho):
-            dr= r[1]-r[0]
+            
             Sq = np.zeros(q.shape[0])
             for i in range(q.shape[0]):
                 Sq[i] = simpson((gr-1)*r*np.sin(q[i]*r)/q[i],r) 
             return 1+4*np.pi*rho*Sq
         def Fourier2D(q,r,gr,rho):
-            dr= r[1]-r[0]
+            
             Sq = np.zeros(q.shape[0])
             for i in range(q.shape[0]):
                 Sq[i] = simpson((gr-1)*np.sin(q[i]*r)/q[i],r) 
             return 1+np.pi*rho*Sq
         def Fourier1D(q,r,gr,rho):
-            dr= r[1]-r[0]
+            
             Sq = np.zeros(q.shape[0])
             for i in range(q.shape[0]):
                 Sq[i] = simpson((gr-1)*np.sin(q[i]*r)/(q[i]*r),r) 
             return 1+rho*Sq
+        
         res = self.calc_pair_distribution(dr,dmax,density='number',
                             ids=ids,direction=direction,
                             normalize=True) 
+        
         q =np.arange(qmin+dq,qmax+dq,dq)
         d = res['d']
         g = res['gr']
@@ -3301,19 +3281,15 @@ class Analysis:
         
         res['Sq'] = Sq
         res['q'] = q
-        
-        
+             
         return res
+    
     def calc_internal_distance(self,n,filters=dict()):
         ids1,ids2 = self.find_vector_ids(n)
         vect,filt_t = self.vects_per_t(ids1,ids2,filters=filters)
-        
-        dists = {'system':0}
-        dists.update({k:0 for k in filt_t} )
-        for t,v in vect.items():
-            c = v
-            
-        return 
+        dists_t =  {t:np.sum(v*v,axis=1)**0.5 for t,v in vect.items()}
+        return dists_t,filt_t
+    
     def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
                                ids=None,direction=None,
                                density='number',normalize=False,
@@ -3475,7 +3451,7 @@ class Analysis:
         coords = self.unwrap_coords(coords, box)
         return coords
     
-    def bond_distance_matrix(self,ids):
+    def find_bond_distance_matrix(self,ids):
         '''
         takes an array of atom ids and finds how many bonds 
         are between each atom id with the rest on the array
@@ -3605,1524 +3581,12 @@ class Analysis:
             self.timeframes[nfr+i] = object2.timeframes[frame]
             self.timeframes[nfr+i]['time']+=tlast
         return
+    
     def calc_size(self):
         size = np.zeros(3)
         args = (size,)
         nframes = self.loop_trajectory('minmax_size',args)
         return size/nframes
-    
-class Analysis_Confined(Analysis):
-    '''
-    Class for performing the analysis of confined systems
-    Includes functions for Structure and Dynamics
-    '''
-    
-    def __init__(self, trajectory_file,   
-                 connectivity_info,       
-                 conftype,
-                 topol_file = None,
-                 memory_demanding=False,
-                 particle_method = 'molname',
-                 polymer_method = 'molname',
-                 **kwargs):
-        super().__init__(trajectory_file,
-                         connectivity_info,
-                         topol_file,
-                         memory_demanding,**kwargs)
-        self.conftype = conftype
-        self.particle_method = particle_method
-        self.polymer_method = polymer_method
-        self.kwargs = kwargs
-        
-        if self.conftype =='zcylindrical':
-            self.global_cylindrical_radius = kwargs['radius']
-            
-            
-        self.confined_system_initialization()
-        
-        self.polymer_ids = np.where(self.polymer_filt)[0]
-        self.particle_ids = np.where(self.particle_filt)[0]
-        return
-
-        
-    ############## General Supportive functions Section #####################
-
-    def find_connectivity_per_chain(self):
-        cargs =dict()
-        x = self.sorted_connectivity_keys
-        for j,args in self.chain_args.items():
-            f1 = np.isin(x[:,0],args)
-            f2 = np.isin(x[:,1],args)
-            f = np.logical_or(f1,f2)
-            cargs[j] = x[f]
-        self.connectivity_per_chain = cargs
-        return
-    
-    def find_systemic_filter(self,name):
-        method = getattr(self,name+'_method')
-        
-        if method == 'molname':
-            compare_array = self.mol_names
-        elif method == 'atomtypes':
-            compare_array = self.at_types
-        elif method == 'molids':
-            compare_array = self.mol_ids
-        elif method =='atomids':
-            compare_array = self.at_ids
-        else:
-            raise NotImplementedError('method "{}" is not Implemented'.format(method))
-        
-        try:
-            look_name_s = self.kwargs[name]
-        except KeyError:
-            raise Exception('You need to provide the key word "{:s}"'.format(name))
-        else:
-            t1 = type(look_name_s) is str
-            t2 = type(look_name_s) is list
-            t3 = type(look_name_s) is np.ndarray
-            if t1 or t2 or t3:
-                if t2 or t3:
-                    for i in range(1,len(look_name_s)):
-                        if type(look_name_s[i-1]) != type(look_name_s[i]):
-                                raise Exception('elements in variable {:s} must be of the same type'.format(name))
-            else:
-                raise NotImplementedError('{:s} variable is allowed to be either string, list or array'.format(name))
-                
-        filt = np.isin(compare_array,look_name_s)
-        setattr(self,name+'_filt',filt)
-        
-        return
-    def find_particle_filt(self):
-        self.find_systemic_filter('particle')
-        return 
-    
-    def find_polymer_filt(self):
-        self.find_systemic_filter('polymer')
-        return
-       
-    def translate_particle_in_box_middle(self,coords,box):
-        particle_cm = self.get_particle_cm(coords)
-        cds = coords.copy()
-        cds += box/2 - particle_cm
-        cds = implement_pbc(cds,box)
-        return cds
-    
-    def translated_coords(self,frame):
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
-        coords = self.translate_particle_in_box_middle(coords, box)
-        return coords
-   
-    def get_whole_coords(self,frame):
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
-        coords = self.translate_particle_in_box_middle(coords, box)
-        coords = self.unwrap_coords(coords, box)
-        return coords
-   
-    def confined_system_initialization(self):
-        '''
-        IMPORTANT Function
-        This function gets the prober functions depending
-        on the confinment type from a number of classes. 
-        This is done in initialization to increase speed and modularity
-        at the same time        
-
-        '''
-        t0 = perf_counter()
-        self.find_particle_filt()
-        self.nparticle = self.mol_ids[self.particle_filt].shape[0]
-    
-        self.find_polymer_filt()
-        self.npol = self.mol_ids[self.polymer_filt].shape[0]
-    
-        self.particle_mass = self.atom_mass[self.particle_filt]
-        self.polymer_mass = self.atom_mass[self.polymer_filt]
-        
-        #self.find_masses()
-        self.unique_atom_types = np.unique(self.at_types)
-        
-        #Getting the prober functions
-        self.dfun = self.get_class_function(Distance_Functions,self.conftype)
-        self.box_add = self.get_class_function(Box_Additions,self.conftype)
-        self.volfun = self.get_class_function(bin_Volume_Functions,self.conftype)
-        self.centerfun = self.get_class_function(Center_Functions,self.conftype)
-        self.unit_vectorFun = self.get_class_function(unit_vector_Functions,self.conftype)
-        ##########
-        
-        self.find_args_per_residue(self.polymer_filt,'chain_args')
-        self.find_connectivity_per_chain()
-        self.find_args_per_residue(self.particle_filt,'particle_args')
-        self.nparticles = len(self.particle_args.keys())
-        
-        self.all_args = np.arange(0,self.natoms,1,dtype=int)
-        
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        return
-       
-    def get_class_function(self,_class,fun,inplace=False):
-        fun = getattr(_class,fun)
-        if inplace:
-            attr_name = _class+'_function'
-            setattr(self,attr_name, fun)
-        return fun
-     
-    def get_frame_basics(self,frame):
-        #coords = self.translated_coords(frame)
-        coords = self.get_coords(frame)
-        box  = self.get_box(frame)          
-        cm = self.get_particle_cm(coords)
-        coords = implement_pbc(coords,box)
-        d = self.get_distance_from_particle(coords[self.polymer_filt])
-        return coords,box,d,cm
-    
-    def get_whole_frame_basics(self,frame):
-        coords = self.get_whole_coords(frame)
-        box  = self.get_box(frame)          
-        cm = self.get_particle_cm(coords)
-        d = self.dfun(self,coords,cm)
-        return coords,box,d,cm
-
-
-
-    def get_particle_cm(self,coords):
-        '''
-        gets particles center of mass
-
-        Parameters
-        ----------
-        coords : system coordinates
-
-        Returns
-        -------
-        cm : center of mass (the number of coordinates depends on the confinment type)
-
-        '''
-        cm =self.centerfun(CM( coords[self.particle_filt], 
-                               self.particle_mass))
-        return cm
-    
-    @staticmethod
-    def get_layers(dads,dmax,binl):
-        bins = np.arange(dads,dmax+binl,binl)
-        dlayers = [(0,dads)]
-        nbins = len(bins)-1
-        for i in range(0,nbins):
-            dlayers.append((bins[i],bins[i+1]))
-        return dlayers
-
-    def ids_from_topology(self,topol_vector):
-        inter = len(topol_vector)
-        if inter == 2: 
-            ids = self.connectivity_per_type
-        elif inter == 3: 
-            ids = self.angles_per_type
-        elif inter == 4: 
-            ids = self.dihedrals_per_type
-        else:
-            raise Exception('Large topology vectors with size >= {} are not Implemented'.format(inter))
-        topol_vector = tuple(topol_vector)
-      
-        if topol_vector in ids: tp = topol_vector
-        elif topol_vector[::-1] in ids: tp = topol_vector[::-1]
-        else:
-            raise Exception('{} not in {}'.format(topol_vector,list(ids)))
-        
-        arr0 = ids[tp][:,0] ; arr1 = ids[tp][:,-1]
-        
-        return arr0,arr1
-   
-    def ids_from_keyword(self,keyword,exclude=[]):
-        if keyword in ['4',4,'1-4']:
-            ids = self.dihedrals_per_type
-        if keyword in ['3',3,'1-3']:
-            ids = self.angles_per_type
-        if keyword in ['2',2,'1-2']:
-            ids = self.connectivity_per_type
-        ids1 = np.empty(0,dtype=int)
-        ids2 = np.empty(0,dtype=int)
-        for k,i in ids.items():
-            if k in exclude:
-                continue
-            ids1 = np.concatenate( (ids1,i[:,0]) )
-            ids2 = np.concatenate( (ids2,i[:,-1]) )
-        return ids1,ids2
-    
-
-    def ids_from_backbone(self,bonddist):
-        ids = self.polymer_ids
-        if hasattr(self,'backbone_dist_matrix'):
-            bd = self.backbone_dist_matrix
-        else:
-            bd = self.bond_distance_matrix(ids) 
-            self.backbone_dist_matrix = bd
-        
-        b1,b2 = np.nonzero(bd == bonddist)
-        ids1 = ids[b1]
-        ids2 = ids[b2]
-        
-        return ids1,ids2
-    
-    def find_vector_ids(self,topol_vector,exclude=[]):
-        '''
-        
-
-        Parameters
-        ----------
-        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
-            Used to find e.g. the segmental vector ids
-        exclude : TYPE, optional
-            DESCRIPTION. The default is [].
-
-        Returns
-        -------
-        ids1 : int array of atom ids
-        ids2 : int array of atom ids
-
-        '''
-        t0 = perf_counter()
-        ty = type(topol_vector)
-        if ty is list or ty is tuple:
-            ids1,ids2 = self.ids_from_topology(topol_vector)
-        if ty is str or ty is int:
-            if int(topol_vector)<=4:
-                ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
-            else:
-                ids1,ids2 = self.ids_from_backbone(int(topol_vector))
-        logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
-        return ids1,ids2
-    
-    ###############End of General Supportive functions Section#########
-
-    ############### Conformation Calculation Supportive Functions #####
-   
-
-
-   
-    def is_bridge(self,coords,istart,iend,periodic_image_args,box):
-        # used to distinguish loops from bridges
-        
-        # check if one belong to the periodic_images and other not --> this means bridge
-        e = iend in periodic_image_args 
-        s = istart in periodic_image_args
-        if (e and not s) or (s and not e):
-            return True
-        # If both in periodic image args check
-        if e and s:
-            res = coords[[istart,iend]]
-            imin = [1e16,1e16]
-            idxmin = [1e16,1e16]
-            for idx,L in enumerate(self.box_add(box)):
-                cm = self.get_particle_cm(coords+L)
-                d = self.dfun(self,res,cm)
-                for i in range(2):
-                    if d[i]<imin[i]:
-                        idxmin[i] = idx
-                        imin[i]=d[i]
-            return idxmin[0] != idxmin[1] #bridge if they are unequal
-        
-        # check if belong to different particle
-        if self.nparticles !=1:
-            logger.warning('WARNING Function {:s}: This Function was never examined in test cases of more than one nanoparticles'.format(inspect.currentframe().f_code.co_name))
-            r0 = coords[istart]
-            re = coords[iend]
-            CMps = np.empty((self.nparticles,3),dtype=float)
-            for i,(k,args) in enumerate(self.particle_args.items()):
-                CMps[i] = CM(coords[args],self.atom_mass[args])
-            
-            if not e and not s: # if in main box no need to check periodic images
-                rer = CMps-re
-                r0r = CMps -r0
-                de = np.sum(rer*rer,axis=1)
-                d0 = np.sum(r0r*r0r,axis=1)
-            else:
-                de = 1e16 ; d0=1e16
-                for L in self.box_add(self.get_box(self.current_frame)):
-                    r0r = CMps+L -r0
-                    rer = CMps+L -re
-                    de = np.minimum(de,np.sum(rer*rer,axis=1))
-                    d0 = np.minimum(d0,np.sum(r0r*r0r,axis=1))
-            
-            if de.argmin()!=d0.argmin():
-                return True
-                
-        return False
-    
-    def get_filt_train(self,dads,coords,box):
-        '''
-        
-
-        Parameters
-        ----------
-        dads : float. below this distance everything is adsorbed
-        coords : system coords
-        box : systems box
-
-        Returns
-        -------
-        ftrain : bool array (shape = coords.shape[0])
-        image_trains : bool_array() (shape = coords.shape[0])
-
-        '''
-        ftrain = False
-       
-        for L in self.box_add(box):
-            cm = self.get_particle_cm(coords+L)
-            d = self.dfun(self,coords,cm)
-            ftrain = np.logical_or(ftrain,np.less_equal(d,dads))
-        ftrain = np.logical_and(ftrain,self.polymer_filt)
-        
-        self_trains = np.less_equal(
-            self.dfun(self,coords,self.get_particle_cm(coords)),dads)
-        image_trains = np.logical_and(ftrain,np.logical_not(self_trains))
-        
-        return ftrain,image_trains
-    
-    def get_distance_from_particle(self,r=None,ids=None):
-        '''
-        Give either r or ids
-        If you give r then the 
-        minimum image distance of r from particle will be found
-        
-        Parameters
-        ----------
-        r : coordinates (float array shape=(n,3) ).
-        ids : int array
-
-        Returns
-        -------
-        d : minimum image distance (float array shape = (n,) )
-            Depends on the confinment type
-            e.g. for flat surfaces parallel on the xy plane 
-            only the z direction is considered
-
-        '''
-        frame = self.current_frame
-        
-        box = self.get_box(frame)
-        coords = self.get_coords(frame)
-        if r is None:
-            r = coords[ids]
-        cm = self.get_particle_cm(coords)
-        
-        d = 1e16
-        for L in self.box_add(box):
-            d = np.minimum(d,self.dfun(self,r,cm+L))
-        return d
-    
-    def conformations(self,dads,coords):
-        '''
-        Returns the ids of trains,loops,tails 
-        and bridges given the coords
-
-        Parameters
-        ----------
-        dads : float 
-            adsorption distance
-        coords : coordinates (float array shape=(n,3) )
-
-        Returns
-        -------
-        ads_chains : int array
-            ids of adsorbeds chains.
-        args_train : int array
-            ids of trains
-        args_tail : int array
-            ids of tails
-        args_loop : int array
-            ids of loops
-        args_bridge : int arry
-            ids of bridges
-
-        '''
-        box = self.get_box(self.current_frame)
-        
-        ftrain,image_trains = self.get_filt_train(dads, coords, box)
-        args_train = np.nonzero(ftrain)[0]
-        periodic_image_args = set(np.nonzero(image_trains)[0])
-        #logger.debug('Number of periodic image trains ={:d}\n Number of trains = {:d}'.format(len(periodic_image_args),args_train.shape[0]))
-        #ads_chains
-        ads_chains = np.unique(self.mol_ids[ftrain])
-        #check_occurances(ads_chains)
-        fads_chains = np.isin(self.mol_ids,ads_chains)
-        args_ads_chain_atoms = np.nonzero(fads_chains)[0]
-        
-        #tail_loop_bridge
-        f_looptailbridge = np.logical_and(fads_chains, np.logical_not(ftrain))
-        args_looptailbridge = np.nonzero(f_looptailbridge)[0]
-        
-        args_tail = np.empty(0,dtype=int) ; 
-        args_bridge = np.empty(0,dtype=int) ; 
-        args_loop  = np.empty(0,dtype=int)
-        
-        for j in ads_chains:
-            args_chain = self.chain_args[j]
-            connectivity_args = self.connectivity_per_chain[j]
-            nch = args_chain.shape[0]
-            
-            #1) Identiyfy connectivity nodes
-            nodes = []
-            for c in connectivity_args:
-                ft = ftrain[c]
-                if ft[0] and not ft[1]: nodes.append( (c[1],c[0]) )
-                if not ft[0] and ft[1]: nodes.append( (c[0],c[1]) )
-            
-            #2) Loop over nodes and identify chunks
-            for node in nodes:
-
-                chunk = {node[0]}
-                istart = node[1]
-                
-                old_chunk = set() ; loopBridge = False ; found_iend = False
-                new_neibs = chunk.copy()
-                
-                while old_chunk != chunk:
-                    old_chunk = chunk.copy()
-                    new_set = set()
-                    for ii in new_neibs:
-                        for neib in self.neibs[ii]:
-                            
-                            if neib == istart: continue
-    
-                            if ftrain[neib]: 
-                                loopBridge = True
-                                
-                                if not found_iend:
-                                    iend = neib 
-                                    found_iend = True 
-                                continue
-                             
-                            if neib not in chunk:        
-                                new_set.add(neib)
-                                chunk.add(neib)
-                    new_neibs = new_set
-    
-                if not found_iend:
-                    try: del iend
-                    except: pass
-  
-                
-                chunk = np.array(list(chunk),dtype=int)
-                '''
-                assert not ftrain[chunk].any(), \
-                    'chunk in train chain {:d}, node {}, chunk size = {:d}\
-                    ,istart = {:d}, iend ={:d} \n\n chunk =\n {} \n\n'.format(j,
-                    node,chunk.shape[0],istart,iend,chunk)
-                assert fads_chains[chunk].all(),\
-                    'chunk out of adsorbed chains, j = {:d} ,\
-                        node = {} n\n chunk \n {} \n\n'.format(j,
-                        node,chunk)
-                '''
-                if loopBridge:
-                    if not self.is_bridge(coords,istart,iend,periodic_image_args,box):    
-                        args_loop = np.concatenate( (args_loop, chunk) )             
-                    else:
-                        #logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
-                        args_bridge = np.concatenate( (args_bridge, chunk) )
-                else:
-                    args_tail = np.concatenate( (args_tail, chunk) )
-
-        #args_tail = np.unique(args_tail)
-        args_loop = np.unique(args_loop)
-        args_bridge = np.unique(args_bridge)
-        assert not np.isin(args_train,args_tail).any(),\
-        'tails in trains, there are {:d}'.format(np.count_nonzero(np.isin(args_train,args_tail)))
-        
-        assert not np.isin(args_train,args_loop).any(),\
-        'loops in trains, there are {:d}'.format(np.count_nonzero(np.isin(args_train,args_loop)))
-        
-        assert not np.isin(args_tail,args_loop).any(),\
-        'loops in tails, there are {:d}'.format(np.count_nonzero(np.isin(args_tail,args_loop)))
-        
-        
-        assert not np.isin(args_train,args_bridge).any(),\
-        'bridge in trains, there are {:d}'.format(np.count_nonzero(np.isin(args_train,args_bridge)))
-        
-        assert not np.isin(args_tail,args_bridge).any(),\
-        'bridge in tails, there are {:d}'.format(np.count_nonzero(np.isin(args_tail,args_bridge)))
-        
-        assert args_train.shape[0] + args_tail.shape[0] +\
-               args_loop.shape[0] + args_bridge.shape[0] \
-               == np.count_nonzero(fads_chains) , 'Confomormations do not sum up correnctly,\
-                   correct sum = {:d}, sum = {:d}'.format( args_ads_chain_atoms.shape[0],
-                   args_train.shape[0] + args_tail.shape[0] +\
-                   args_loop.shape[0] + args_bridge.shape[0] 
-                                                      )
-    
-        
-        return ads_chains,args_train,args_tail,args_loop,args_bridge
-    
-    def connected_chunks(self,args):
-        '''
-        takes a set of ids and finds the connected chunks from it
-        It is very usefull to find conformation size distributions
-        Parameters
-        ----------
-        args : int array of atom ids
-        
-        Returns
-        -------
-        chunks : list of sets. Each set has the ids of the connected chunks
-
-        '''
-        #t0 = perf_counter()
-        set_args = set(args)
-        chunks = []
-        aold = -1
-        
-        while(len(set_args)>0):
-
-            a = set_args.pop()
-            set_args.add(a)
-            #assert a != aold,'while loop stuck on argument = {}'.format(a)
-            old_set_a = set()
-            new_set_a = {a}
-                    
-            new_neibs = new_set_a.copy()
-            
-            while new_set_a != old_set_a:
-                old_set_a = new_set_a.copy()
-                
-                for j in new_neibs.copy():
-                    new_neibs = set()
-                    for neib in self.neibs[j]:
-                        if neib in set_args:
-                            new_set_a.add(neib)
-                            if neib not in old_set_a:
-                                new_neibs.add(neib)
-
-            chunks.append(new_set_a)
-            set_args.difference_update(new_set_a)
-        
-            #aold # (for debugging-combined with assertion above)
-        #ass.print_time(perf_counter()-t0,'connected_chunks')
-        return chunks
-    
-    def length_of_connected_chunks(self,args,coords,exclude_bonds=None):
-        # this currently is suitable for linear chains in corse-grained or united atom represtation
-        # if there is an all atom representation exclude_bonds must be used
-        bonds = self.sorted_connectivity_keys
-        f1 = np.isin(bonds[:,0],args)
-        f2 = np.isin(bonds[:,1],args)
-        f = np.logical_and(f1,f2)
-        cb = bonds[f]
-        coords1 = coords[cb[:,0]]
-        coords2 = coords[cb[:,1]]
-        r = coords2-coords1
-        dists = np.sqrt(np.sum(r*r,axis=1))
-        return dists.sum()
-    ############### End of Conformation Calculation Supportive Functions #####
-    
-    ######## Main calculation Functions for structural properties ############      
-    
-    def calc_density_profile(self,binl,dmax,
-                             mode='mass',option='',flux=None,offset=0,
-                             **kwargs):
-        '''
-        Master function to compute the density profile
-
-        Parameters
-        ----------
-        binl : float
-            binningl legth
-        dmax : float
-            maximum distance to calculate
-        mode : string
-            'mass' for mass density
-            'number' for number density
-            For conformations option is set automatically to massnumber
-        option : string
-            'pertype' decomposes the density to each atomic type contribution
-            '2side' computes the profile to both sides.
-                Only valid for one directional confinement (i.e. zdir,ydir,xdir) 
-        flux : bool
-            if True it calculates density fluxuations
-            by first calling this function to compute the density.
-            density fluctuations are computed by the standard deviation
-
-        Returns
-        -------
-        density_profile : dictionary containing 
-            discription :  key  |  value
-            the distance: 'd'  | float array 
-            the density: 'rho' | float array
-            density of  'type1' | float array1
-            density of 'type2' | float array2
-                          .
-                          .
-                          .
-            density of 'typen' | float arrayn
-            density fluctuations: 'rho_flux' | float array
-
-        '''
-        t0 = perf_counter()
-        
-        #initialize
-        ##############
-        scale = 1.660539e-3 if mode == 'mass' else 1.0
-        density_profile = dict()
-        
-        if dmax is None:
-            NotImplemented
-        bins  =   np.arange(offset,offset+dmax+binl, binl)
-        nbins = len(bins)-1
-        rho = np.zeros(nbins,dtype=float)
-        mass_pol = self.atom_mass[self.polymer_filt] 
-        
-        
-        if option =='':
-            args = (nbins,bins,rho)
-            contr=''
-        elif option == 'pertype':
-            rho_per_atom_type = {t:np.zeros(nbins,dtype=float) for t in self.unique_atom_types }
-            ftt = {t: t == self.at_types[self.polymer_filt] for t in rho_per_atom_type.keys() }
-            args = (nbins,bins,rho,rho_per_atom_type,ftt)
-            contr ='__pertype'
-        elif option =='2side':
-            rho_down = np.zeros(nbins,dtype=float)
-            args =(nbins,bins,rho,rho_down)
-            contr ='__2side'
-        elif option =='conformations':              
-            confdens = {nm+k:np.zeros(nbins,dtype=float) for nm in ['m','n']
-                        for k in ['rho','train','tail','loop','bridge','free'] 
-                        }         
-            stats = { k : 0 for k in ['adschains','train','looptailbridge',
-                                  'tail','loop','bridge']}
-            dlayers = [(bins[i],bins[i+1]) for i in range(nbins)]
-            args = (kwargs['dads'],dlayers, confdens, stats)
-            contr='__conformations'
-            mode='massnumber'
-            
-        if mode =='mass': args =(*args,mass_pol)
-        
-        
-        if flux is not None and flux !=False:
-            density_profile.update(self.calc_density_profile(binl,dmax,mode,option=option,**kwargs))
-            rho_mean = density_profile['rho'].copy()
-            rho_mean/=scale
-            args = (nbins,bins,rho,mass_pol,rho_mean**2)
-            func =  'mass'+'_density_profile'+'_flux'
-            if mode !='mass' or option!='':
-                logger.warning('mass mode and total density fluxuations are calculated')
-        else:
-            func =  mode+'_density_profile'+contr    
-        
-        
-        #############
-        
-        #calculate
-        #############
-        nframes = self.loop_trajectory(func, args)
-        #############
-        
-        #post_process
-        ##############
-        
-        if flux is not None and flux !=False:
-            density_profile['rho_flux'] = rho*scale**2/nframes
-        else:
-            rho*=scale/nframes 
-            d_center = center_of_bins(bins)
-            density_profile.update({'d':d_center-offset})
-            
-            density_profile.update({'rho':rho})
-            if option =='pertype':
-                for t,rhot in rho_per_atom_type.items(): 
-                    density_profile[t] = rhot*scale/nframes 
-            elif option =='2side':
-                rho_down *=scale/nframes
-                density_profile.update({'rho_up':rho,'rho_down':rho_down,'rho':0.5*(rho+rho_down)})
-            elif option =='conformations':
-                stats = {k+'_perc':v/self.npol/nframes if 'adschains'!=k else v/len(self.chain_args)/nframes
-                         for k,v in stats.items()}
-                dens= {k:v*scale/nframes for k,v in confdens.items()}
-
-                for k in ['train','tail','loop','bridge','free']: 
-                    dens['mrho'] += dens['m'+k] 
-                    dens['nrho'] += dens['n'+k]
-                    
-                dens['rho'] = dens['mrho']
-                
-                density_profile.update(dens)
-                density_profile.update({'stats':stats})
-                
-        #############
-        
-        tf = perf_counter() -t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        
-        return density_profile
-    
-
-    
-    def calc_P2(self,binl,dmax,topol_vector,option='',**kwargs):
-        '''
-        Calculates P2 bond parameter
-        The unit vector is predifined by the type of confinement
-        
-        Parameters
-        ----------
-        binl : float
-            binning legth
-        dmax : float
-            maximum distance.
-        topol_vector : int or list of atom types
-            int is 2,3,4 for 1-2, 1-3, 1-4 bond vectors respectively
-            with a list of atom types it will look 
-            the connectivity for len(topol_vector) ==2
-            the angles for len(topol_vector) ==3
-            the dihedrals for len(topol_vector) ==4
-            and it will get the given vectors
-
-        Returns
-        -------
-        orientation : dictionary containing
-        discription :  key  |  value
-        the distance: 'd'  | float array
-        the function: 'P2' | float array
-        '''
-        t0 = perf_counter()
-
-        bins  =   np.arange(0, dmax, binl)
-        dlayers=[]
-        for i in range(0,len(bins)-1):
-            dlayers.append((bins[i],bins[i+1]))
-        d_center = [0.5*(b[0]+b[1]) for b in dlayers]
-        
-        ids1, ids2 = self.find_vector_ids(topol_vector)
-        nvectors = ids1.shape[0]
-        logger.info('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
-        nlayers = len(d_center)
-        costh_unv = [[] for i in range(len(dlayers))]
-        costh = np.empty(nvectors,dtype=float)
-        if option in ['bridge','loop','train','tail','free']:
-            args = (ids1,ids2,dlayers,kwargs['dads'],option,costh,costh_unv)
-            s = '_conformation'
-        elif option=='':
-            s =''
-            args = (ids1,ids2,dlayers,costh,costh_unv)
-        else:
-            raise NotImplementedError('option "{}" not Implemented.\n Check your spelling when you give strings'.format(option))
-        nframes = self.loop_trajectory('P2'+s, args)
-
-       
-        costh2_mean = np.array([ np.array(c).mean() for c in costh_unv ])
-        costh2_std  = np.array([ np.array(c).std()  for c in costh_unv ])
-        s='P2'
-        orientation = {'d':  d_center} 
-        orientation.update({s: 1.5*costh2_mean-0.5, s+'(std)' : 1.5*costh2_std-0.5 })
-        
-        tf = perf_counter() - t0
-        
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return orientation   
-        
-    def calc_particle_size(self):
-        t0 = perf_counter()
-        part_size = np.zeros(3)
-        args = (part_size,)
-        nframes = self.loop_trajectory('particle_size',args)
-        part_size /= nframes
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return part_size
-        
-    def calc_dihedral_distribution(self,phi,dads=None,filters=dict()):
-        '''
-        Computes dihedral distributions as a function of given populations
-        ----------
-        dads : float
-          adsorption distance
-        dmax : float
-            maximum distance
-        binl : float
-            binning length
-
-        Returns
-        -------
-        dihedral_distr : dictionary
-
-        '''
-        t0 = perf_counter()
-        diht,ft = self.calc_dihedrals_t(phi,dads=dads,filters = filters)
-        distrib = {k: [] for filt in filters.values() for k in filt }
-        
-        for k in distrib:
-            for t,dih in diht.items():
-                distrib[k].extend(dih[ft[k][t]])
-        
-        distrib['system'] = []
-        for t,dih in diht.items():
-            distrib['system'].extend(dih)
-            
-        for k in distrib:
-            distrib[k] = np.array(distrib[k])*180/np.pi
-        
-        tf = perf_counter()-t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        return distrib
-    
-    def calc_chain_characteristics(self,binl,dmax,dmin=0):
-        '''
-        Chain characteristics as a function of distance of chain center of mass
-        Parameters
-        ----------
-        dmin : float
-            minimum distance
-        dmax : float
-            maximumum distance
-        binl : float
-            binning length
-
-        Returns
-        -------
-        chain_chars : dictionary with keys the characteristics in strings
-            and values float arrays. Also the distance is included
-
-        '''
-        t0 = perf_counter()
-        
-        bins = np.arange(dmin,dmax,binl)
-        dlayers = [(bins[i],bins[i+1]) for i in range(len(bins)-1)]
-        d_center = [0.5*(b[0]+b[1]) for b in dlayers]
-        nl = len(dlayers)
-        
-        chars_strlist = ['k2','Rg2','Rg','Ree2','asph','acyl', 'Rgxx_plus_yy', 'Rgxx_plus_yy', 'Rgyy_plus_zz']
-        chars = {k:[[] for d in dlayers] for k in chars_strlist }
-
-        chain_args = self.chain_args
-        
-        # calculate
-        args  = chain_args,dlayers,chars
-        nframes = self.loop_trajectory('chain_characteristics', args)
-                
-        #post_process
-        chain_chars = {'d':np.array(d_center)}
-        
-        for k,v in chars.items():
-            chain_chars[k] = np.array([ np.mean(chars[k][i]) for i in range(nl) ])
-            chain_chars[k+'(std)'] = np.array([ np.std(chars[k][i]) for i in range(nl) ])
-        
-        tf= perf_counter() -t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        
-        return chain_chars
-    
-    ###### End of Main calculation Functions for structural properties ########
-    
-    def vects_per_t(self,ids1,ids2,
-                         filters={},
-                         dads=0):
-        '''
-        Takes two int arrays  of atom ids and finds 
-        the vectors per time between them
-
-        Parameters
-        ----------
-        ids1 : int array of atom ids 1
-        ids2 : int array of atom ids 2
-        filters : dictionary of filters. See filter documentation
-        dads : float
-            adsorption distance
-
-        Returns
-        -------
-        vec_t : dictionary of keys the time and values the vectors in numpy array of shape (n,3)
-        filt_per_t : dictionary of keys the filt name and values
-            dictionary of keys the times and boolian arrays
-
-        '''
-        t0 = perf_counter()
-        vec_t = dict()
-        filt_per_t = dict()
-        
-        args = (ids1,ids2,filters,dads,vec_t,filt_per_t)
-        
-        nframes = self.loop_trajectory('vects_t', args)
-                
-        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
-        tf = perf_counter()-t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return vec_t,filt_per_t
-
-    def chains_CM(self,coords):
-        '''
-        Given the coordinates finds the chains center of mass
-
-        Parameters
-        ----------
-        coords : system coordinates
-
-        Returns
-        -------
-        chain_cm : float array (nchains,3)
-
-        '''
-        chain_arg_keys = self.chain_args.keys()
-        
-        chain_cm = np.empty((len(chain_arg_keys),3),dtype=float)
-        
-        for i,args in enumerate(self.chain_args.values()):
-            chain_cm[i] = CM(coords[args],self.atom_mass[args])
-        
-        return chain_cm
-
-    def segs_CM(self,coords,segids):
-        '''
-        
-        Given the coordinates and the segmental ids finds the segmental center of mass
-        
-        Parameters
-        ----------
-        coords : system coordinates 
-        segids : int array (nsegments,nids_per_segment)
-
-        Returns
-        -------
-        segcm : float array (nsegments,3)
-
-        '''
-        n = segids.shape[0]
-        segcm = np.empty((n,3),dtype=float)
-        numba_CM(coords,segids,self.atom_mass,segcm)
-        return segcm
-            
-
-    def calc_dihedrals_t(self,dih_type,
-                             dads=0,filters={'all':None}):
-        '''
-        Dihedrals per time
-
-        Parameters
-        ----------
-        dih_type : list of 4 strings
-            dihedral type
-        dads : float
-            adsorption distance
-        filters : dictionary
-            see filters documentation.
-
-        Returns
-        -------
-        dihedrals_t : dictionary 
-        keys: times
-        values: float array (ndihedrals,)
-        filt_per_t : see filters documentation
-
-        '''
-        t0 = perf_counter()
-        
-        dihedrals_t = dict()
-        filt_per_t = dict()
-       
-        dih_ids = self.dihedrals_per_type[dih_type] #array (ndihs,4)
-        ids1 = dih_ids[:,0] ; ids2 = dih_ids[:,3] 
-
-        args = (dih_ids,ids1,ids2,filters,dads,dihedrals_t,filt_per_t)
-        
-        nframes = self.loop_trajectory('dihedrals_t', args)
-        
-        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
-        
-        tf = perf_counter()-t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        
-        return dihedrals_t,filt_per_t
-    
-
-
-    def calc_Ree_t(self,filters={},
-                       dads=None):
-        '''
-        End to End vectors as a function of time
-
-        Parameters
-        ----------
-        filters : dictionary
-            see filter documentation
-        dads : adsorption distance
-            adsorption distance
-
-        Returns
-        -------
-        Ree_t : dictionary
-            keys times
-            values: float arrays (nchains,3)
-        filt_per_t : dictionary
-            see filter documentation
-
-        '''
-        
-        t0 = perf_counter()
-        #filters = {'chain_'+k: v for k,v in filters.items()}
-        chain_is = []
-        chain_ie = []
-        for j,ch_args in self.chain_args.items():
-            chain_is.append(ch_args[0])
-            chain_ie.append(ch_args[-1])
-        ids1 = np.array(chain_is)
-        ids2 = np.array(chain_ie)
-      
-        Ree_t,filt_per_t = self.vects_per_t(ids1,ids2,
-                                                     filters,
-                                                     dads)
-        
-        tf = perf_counter()-t0
-        
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        #return {t:v[tot_filt] for t,v in dihedrals_t.items()}
-        return Ree_t,filt_per_t
-    
-    def set_partial_charge(self):
-        if not hasattr(self,'partial_charge'):
-            self.charge_from_maps()
-            charge = np.empty(self.at_types.shape[0],dtype=float)
-            for i,ty in enumerate(self.at_types):
-                charge[i] = self.charge_map[ty]
-            self.partial_charge = charge.reshape((charge.shape[0],1))
-        return
-    
-    def segment_ids_per_chain(self,segmental_ids):
-        seg0 = segmental_ids[:,0]
-        segch = {j: np.isin(seg0,chargs)
-                 for j,chargs in self.chain_args.items()}           
-        return segch
-    def calc_chain_dipole_moment_t(self,option='',
-                                   filters={'all':None},dads=1,
-                                   **kwargs,):
-        '''
-        Chain dipole moment as a function of t
-
-        Parameters
-        ----------
-        filters : dictionary
-            see filter documentation.
-        dads : float
-            adsorption distance.
-
-        Returns
-        -------
-        dipoles_t : dictionary
-            keys: times
-            values: float array (nchains,3)
-        filters_t : dictionary
-            see filter documentation
-
-        '''
-        t0 = perf_counter()
-        
-        filters = {'chain_'+k : v for k,v in filters.items()}
-        
-        self.set_partial_charge()
-
-        
-        dipoles_t = dict()
-        filters_t = dict()
-        if option =='contour':
-            ids1,ids2 = self.find_vector_ids(kwargs['monomer'])
-            segmental_ids = self.find_segmental_ids(ids1, ids2, kwargs['segbond'])
-            segch = self.segment_ids_per_chain(segmental_ids)
-            args = (filters,dads,ids1,ids2,segmental_ids,
-                    segch,dipoles_t,filters_t)
-            ext ='__contour'
-        elif option=='':
-            ext =''
-            args = (filters,dads,dipoles_t,filters_t)
-        elif option=='endproj':
-            ext ='__endproj'
-            args = (filters,dads,dipoles_t,filters_t)
-        elif option=='proj':
-            ext ='__proj'
-            projvec = np.array([x for x in kwargs['projvec']])
-            args = (filters,dads,projvec,dipoles_t,filters_t)
-        nframes = self.loop_trajectory('chain_dipole_moment'+ext,args)
-        
-        filters_t = ass.rearrange_dict_keys(filters_t)
-        
-        tf = perf_counter() - t0
-        
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return dipoles_t,filters_t
-    
-    def find_segmental_ids(self,ids1,ids2,segbond):
-        '''
-        Used to find the segmental ids
-        Works for linear polymers at the moment
-        
-        Parameters
-        ----------
-        ids1 : int array
-            atom ids 1
-        ids2 : int array
-            atom ids 2
-        segbond : tuple of two stings 
-            the type of bond that connects the segments 
-        Returns
-        -------
-        seg_ids_numpy : int array (nsegments,nids_per_segment)
-            an array with the ids of each segment
-
-        '''
-        t0 = perf_counter()
-        conn_cleaned = {k:v for k,v in self.connectivity.items()
-                        if v != segbond
-                        }
-        
-        bond_ids = np.array(list(conn_cleaned.keys()))
-        
-        b0 = bond_ids[:,0]
-        b1 = bond_ids[:,1]
-        
-        seg_ids = {i : list(np.arange(i1,i2+1,dtype='i')) 
-                   for i,(i1,i2) in enumerate(zip (ids1,ids2))
-                  }
-        
-        for i,ids in seg_ids.copy().items():
-            f0 = np.isin(b0,ids)
-            f1 = np.isin(b1,ids)
-            seg_ids[i].extend(b1[f0])
-            seg_ids[i].extend(b0[f1])
-         
-        seg_args = {k:np.unique(v) for k,v in seg_ids.items()}
-        
-        
-        seg_ids_numpy = np.array(list(seg_args.values()))
-        self.segmental_args = seg_ids_numpy
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        return  seg_ids_numpy
-    def calc_total_dipole_moment_t(self,q=None):
-        '''
-        Calculates total dipole moment vector
-        Parameters
-        -------
-        dipoles_t : dictionary
-            keys: times
-            values: float array (nvector,3)
-
-        '''
-        t0 = perf_counter()
-
-        if not hasattr(self,'partial_charge'):
-            charge = np.empty(self.at_types.shape[0],dtype=float)
-            for i,ty in enumerate(self.at_types):
-                charge[i] = self.charge_map[ty]
-            self.partial_charge = charge
-        dipoles_t = dict()
-        if q is not None:
-            q = np.array(q) ; q = q/np.sum(q*q)**0.5
-            q = q.reshape(1,3)
-        args = (dipoles_t,q)
-        
-        nframes = self.loop_trajectory('total_dipole_moment',args)
-        
-        tf = perf_counter() - t0
-        
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return dipoles_t 
-    
-    def calc_segmental_dipole_moment_t(self,topol_vector,
-                                       segbond,filters={'all':None},
-                                       dads=1):
-        '''
-        Calculates dipole moment vectors as a function of time
-
-
-        Parameters
-        ----------
-        topol_vector : list of 4 strings
-            finds the segment edge ids
-        segbond : tuple of 2 strings
-            the bond type connecting the segments
-        filters : dictionary
-            see filter documentation
-        dads : float
-            adsorption distance
-        Returns
-        -------
-        dipoles_t : dictionary
-            keys: times
-            values: float array (nvector,3)
-        filters_t : dictionary
-            see filter documentatin
-
-        '''
-        t0 = perf_counter()
-        
-        if not hasattr(self,'partial_charge'):
-            charge = np.empty(self.at_types.shape[0],dtype=float)
-            for i,ty in enumerate(self.at_types):
-                charge[i] = self.charge_map[ty]
-            self.partial_charge = charge
-            
-        ids1,ids2 = self.find_vector_ids(topol_vector)
-        
-        segmental_ids = self.find_segmental_ids(ids1, ids2, segbond)
-        
-        dipoles_t = dict()
-        filters_t = dict()
-        
-        args = (filters,dads,ids1,ids2,segmental_ids,dipoles_t,filters_t)
-        
-        nframes = self.loop_trajectory('segmental_dipole_moment',args)
-        
-        filters_t = ass.rearrange_dict_keys(filters_t)
-        
-        tf = perf_counter() - t0
-        
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return dipoles_t,filters_t
-    
-    def calc_segmental_dipole_moment_correlation(self,topol_vector,
-                                       segbond,filters={'all':None},
-                                       dads=1.025):
-        '''
-        Computes static correlation between segments
-        
-         Parameters
-        ----------
-        topol_vector : list of 4 strings
-            finds the segment edge ids
-        segbond : tuple of 2 strings
-            the bond type connecting the segments
-        filters : dictionary
-            see filter documentation
-        dads : float
-            adsorption distance
-
-        Returns
-        -------
-        correlations : dictionary
-            keys   : depent on filter 
-            values : dictionary
-                    keys: number of bonds connecting the segments
-                    values: static correlation
-
-        '''
-        t0 = perf_counter()
-        dipoles_t,filters_t = self.calc_segmental_dipole_moment_t(topol_vector,
-                                       segbond,filters,dads=1)
-        
-        ids1,ids2 = self.find_vector_ids(topol_vector)
-        bond_distmatrix = self.bond_distance_matrix(ids1)
-        
-        unb = np.unique(bond_distmatrix)
-        b0 = dict()
-        b1 = dict()
-        for k in unb:
-            if k>0:
-                b =  np.nonzero(bond_distmatrix ==k)
-                b0[k] = b[0]
-                b1[k] = b[1]
-        
-        correlations ={filt:{k:[] for k in unb if k>0} for filt in filters_t}
-        
-        args = (dipoles_t,filters_t,b0,b1,correlations)
-        
-        nframes = self.loop_trajectory('vector_correlations', args)
-        
-        for kf in filters_t:
-            for k in correlations[kf]:
-                c = correlations[kf][k]
-                correlations[kf][k] = {'mean':np.mean(c),'std':np.std(c)}
-                
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-    
-        return correlations
-    
-    def calc_chainCM_t(self,filters={'all':None}, dads=1,option=''):
-        '''
-        Computes chains center of mass as a function of time
-        Parameters
-        ----------
-        filters : dictionary
-            see filter documentation
-        dads : float
-            adsorption distance
-        option : string
-            for feature use
-        coord_type : TYPE, optional
-            DESCRIPTION. The default is None.
-
-        Returns
-        -------
-        vec_t : dictionary
-            keys: times
-            values: float array (nchains,3)
-        filt_per_t : dictionary
-            see filter documentation
-
-        '''
-        t0 = perf_counter()
-        filters = {'chain_'+k: v for k,v in filters.items()} #Need to modify when considering chains
-        
-        vec_t = dict()
-        filt_per_t = dict()
-        
-        args = (filters,dads,vec_t,filt_per_t)
-        
-        nframes = self.loop_trajectory('chainCM_t'+option, args)
-      
-        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
-        
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        
-        return vec_t,filt_per_t
-    def calc_coords_t(self,filters={'all':None},dads=0):
-        t0 = perf_counter()
-        ids1 = self.polymer_ids
-        c_t = dict()
-        filt_t = dict()
-        args = (filters,dads,ids1,c_t,filt_t)
-        nframes = self.loop_trajectory('coords_t', args)
-        filt_t = ass.rearrange_dict_keys(filt_t)
-        
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return c_t,filt_t
-    def calc_segCM_t(self,topol_vector,segbond,
-                     filters={'all':None}, dads=1,option=''):
-        '''
-        Returns the segment center of mass as a function of time
-
-        Parameters
-        ----------
-        topol_vector : list of 4 strings
-            finds the segment edge ids
-        segbond : tuple of 2 strings
-            the bond type connecting the segments
-        filters : dictionary
-            see filter documentation
-        dads : float
-            adsorption distance
-        option: string
-            for feature use
-
-        Returns
-        -------
-        vec_t : dictionary
-            keys: times
-            values: float array (nsegments,3)
-        filt_per_t : dictionary
-            see filter documentation
-
-        '''
-        t0 = perf_counter()
-     
-        ids1,ids2 = self.find_vector_ids(topol_vector)
-        
-        segmental_ids = self.find_segmental_ids(ids1, ids2, segbond)
-        
-        vec_t = dict()
-        filt_per_t = dict()
-        
-        args = (filters,dads,ids1,ids2,segmental_ids,vec_t,filt_per_t)
-        
-        nframes = self.loop_trajectory('segCM_t'+option, args)
-      
-        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
-        
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        
-        return vec_t,filt_per_t
-    
-    def calc_conformations_t(self,dads,option=''):
-        '''
-        computes conformations as a function of time
-
-        Parameters
-        ----------
-        dads : float
-            adsorption distance.
-        option : string
-            for feature use
-
-        Returns
-        -------
-        confs_t : dictionary
-            keys: strings (conformations)
-            values: dictionary
-                keys: times
-                values: number of atoms on the specific conformation
-
-        '''
-        t0 = perf_counter()
-        
-        confs_t = dict()
-        args = (dads,confs_t)
-        nframes = self.loop_trajectory('confs_t'+option, args)
-        confs_t = ass.rearrange_dict_keys(confs_t)
-        
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-    
-        return confs_t
-    
-    def calc_segmental_vectors_t(self,topol_vector,filters={},
-                                     dads=0):
-        '''
-        Calculates 1-2,1-3 or 1-4 segmental vectors as a function of time
-        Parameters
-        ----------
-        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
-            Used to find e.g. the segmental vector ids
-        filters : dictionary.
-            see filters documentation
-        dads : float
-            adsorption distance
-
-        Returns
-        -------
-        segvec_t : dictionary
-            keys: times
-            values: float array (nsegments,3)
-        filt_per_t : dictionary
-            see filter documentation
-        '''
-        ids1,ids2 = self.find_vector_ids(topol_vector)
-        
-        t0 = perf_counter()
-        
-        segvec_t, filt_per_t = self.vects_per_t(ids1, ids2, 
-                                                         filters,
-                                                         dads)
-        
-        tf = perf_counter()-t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        return segvec_t,filt_per_t
-    
-    def calc_adsorbed_segments_t(self,topol_vector,dads):
-        '''
-        Calculates adsorbed segments as a function of time
-
-        Parameters
-        ----------
-        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
-            Used to find e.g. the segmental vector ids
-        dads : float
-            adsorption distance.
-
-        Returns
-        -------
-        dictionary
-            keys: times
-            values: bool array (nsegments,)
-
-        '''
-        t0 = perf_counter()
-        
-        ids1,ids2 = self.find_vector_ids(topol_vector)
-        
-        segvec_t, adsorbed_segments_t = self.vects_per_t(ids1, ids2,
-                                                         filters={'space':(0,dads)})
-        tf = perf_counter()-t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        return adsorbed_segments_t[(0,dads)]
-    
     
     def init_xt(self,xt,dtype=float):
         '''
@@ -5307,7 +3771,7 @@ class Analysis_Confined(Analysis):
                 every)
         
         #prop_kernel = DynamicProperty_kernel
-        overheads = perf_counter() - tinit
+        #overheads = perf_counter() - tinit
         
         try:
             #prop_kernel(prop_nump, nv, x_nump, f_nump, nfr)
@@ -5317,12 +3781,12 @@ class Analysis_Confined(Analysis):
             return None
         
        
-        tf2 = perf_counter()
+        #tf2 = perf_counter()
         if prop.lower() !='p2':
-            dynamical_property = {round(t,4):p for t,p in zip(xt,args[3])}
+            dynamical_property = {round(t,8):p for t,p in zip(xt,args[3])}
         else:
-            dynamical_property = {round(t,4):0.5*(3*p-1) for t,p in zip(xt,args[3])}
-        tf3 = perf_counter() - tf2
+            dynamical_property = {round(t,8):0.5*(3*p-1) for t,p in zip(xt,args[3])}
+        #tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
         #logger.info('Overhead: {:s} dynamics computing time --> {:.3e} sec'.format(prop,overheads+tf3))
@@ -5557,6 +4021,1476 @@ class Analysis_Confined(Analysis):
         
         return TACF_property
     
+    
+    
+    
+    
+    
+class Analysis_Confined(Analysis):
+    '''
+    Class for performing the analysis of confined systems
+    Includes functions for Structure and Dynamics
+    '''
+    
+    def __init__(self, trajectory_file,   
+                 connectivity_info,       
+                 conftype,
+                 topol_file = None,
+                 memory_demanding=False,
+                 adsorption_interval=None,
+                 particle_method = 'molname',
+                 polymer_method = 'molname',
+                 **kwargs):
+        super().__init__(trajectory_file,
+                         connectivity_info,
+                         topol_file,
+                         memory_demanding,**kwargs)
+        self.conftype = conftype
+        self.particle_method = particle_method
+        self.polymer_method = polymer_method
+        self.kwargs = kwargs
+        
+        if adsorption_interval is not None:
+            if not ass.iterable(adsorption_interval[0]):
+                self.adsorption_distance_intervals = (tuple(adsorption_interval),)
+            else:
+                self.adsorption_distance_intervals = tuple(tuple(ai) for ai in adsorption_interval)
+            for ai in self.adsorption_distance_intervals:
+                if len(ai) != 2:
+                    raise ValueError('Wrong value of Adsorption interval = {} --> must be of up and low value'.format(ai))
+        else:
+            self.adsorption_distance_intervals = ((0,0),)
+              
+        self.confined_system_initialization()
+        
+        self.polymer_ids = np.where(self.polymer_filt)[0]
+        self.particle_ids = np.where(self.particle_filt)[0]
+        return
+        
+    ############## General Supportive functions Section #####################
+
+    def find_connectivity_per_chain(self):
+        cargs =dict()
+        x = self.sorted_connectivity_keys
+        for j,args in self.chain_args.items():
+            f1 = np.isin(x[:,0],args)
+            f2 = np.isin(x[:,1],args)
+            f = np.logical_or(f1,f2)
+            cargs[j] = x[f]
+        self.connectivity_per_chain = cargs
+        return
+    
+    def find_systemic_filter(self,name):
+        method = getattr(self,name+'_method')
+        
+        if method == 'molname':
+            compare_array = self.mol_names
+        elif method == 'atomtypes':
+            compare_array = self.at_types
+        elif method == 'molids':
+            compare_array = self.mol_ids
+        elif method =='atomids':
+            compare_array = self.at_ids
+        else:
+            raise NotImplementedError('method "{}" is not Implemented'.format(method))
+        
+        try:
+            look_name_s = self.kwargs[name]
+        except KeyError:
+            raise Exception('You need to provide the key word "{:s}"'.format(name))
+        else:
+            t1 = type(look_name_s) is str
+            t2 = type(look_name_s) is list
+            t3 = type(look_name_s) is np.ndarray
+            if t1 or t2 or t3:
+                if t2 or t3:
+                    for i in range(1,len(look_name_s)):
+                        if type(look_name_s[i-1]) != type(look_name_s[i]):
+                                raise Exception('elements in variable {:s} must be of the same type'.format(name))
+            else:
+                raise NotImplementedError('{:s} variable is allowed to be either string, list or array'.format(name))
+                
+        filt = np.isin(compare_array,look_name_s)
+        setattr(self,name+'_filt',filt)
+        
+        return
+    
+    def find_particle_filt(self):
+        self.find_systemic_filter('particle')
+        return 
+    
+    def find_polymer_filt(self):
+        self.find_systemic_filter('polymer')
+        return
+       
+    def translate_particle_in_box_middle(self,coords,box):
+        particle_cm = self.get_particle_cm(coords)
+        cds = coords.copy()
+        cds += box/2 - particle_cm
+        cds = implement_pbc(cds,box)
+        return cds
+    
+    def translated_coords(self,frame):
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+        coords = self.translate_particle_in_box_middle(coords, box)
+        return coords
+   
+    def get_whole_coords(self,frame):
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+        coords = self.translate_particle_in_box_middle(coords, box)
+        coords = self.unwrap_coords(coords, box)
+        return coords
+   
+    def confined_system_initialization(self):
+        '''
+        IMPORTANT Function
+        This function gets the prober functions depending
+        on the confinment type from a number of classes. 
+        This is done in initialization to increase speed and modularity
+        at the same time        
+
+        '''
+        t0 = perf_counter()
+        self.find_particle_filt()
+        self.nparticle = self.mol_ids[self.particle_filt].shape[0]
+    
+        self.find_polymer_filt()
+        self.npol = self.mol_ids[self.polymer_filt].shape[0]
+    
+        self.particle_mass = self.atom_mass[self.particle_filt]
+        self.polymer_mass = self.atom_mass[self.polymer_filt]
+        
+        #self.find_masses()
+        self.unique_atom_types = np.unique(self.at_types)
+        
+        #Getting the prober functions
+        self.dfun = self.get_class_function(Distance_Functions,self.conftype)
+        self.box_add = self.get_class_function(Box_Additions,self.conftype)
+        self.volfun = self.get_class_function(bin_Volume_Functions,self.conftype)
+        self.centerfun = self.get_class_function(Center_Functions,self.conftype)
+        self.unit_vectorFun = self.get_class_function(unit_vector_Functions,self.conftype)
+        ##########
+        
+        self.find_args_per_residue(self.polymer_filt,'chain_args')
+        self.find_connectivity_per_chain()
+        self.find_args_per_residue(self.particle_filt,'particle_args')
+        self.nparticles = len(self.particle_args.keys())
+        
+        self.all_args = np.arange(0,self.natoms,1,dtype=int)
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        return
+       
+    def get_class_function(self,_class,fun,inplace=False):
+        fun = getattr(_class,fun)
+        if inplace:
+            attr_name = _class+'_function'
+            setattr(self,attr_name, fun)
+        return fun
+     
+    def get_frame_basics(self,frame):
+        #coords = self.translated_coords(frame)
+        coords = self.get_coords(frame)
+        box  = self.get_box(frame)          
+        
+        coords = implement_pbc(coords,box)
+        d = self.get_distance_from_particle(coords[self.polymer_filt])
+        return coords,box,d
+    
+    def get_whole_frame_basics(self,frame):
+        coords = self.get_whole_coords(frame)
+        box  = self.get_box(frame)          
+        cm = self.get_particle_cm(coords)
+        d = self.dfun(self,coords,cm)
+        return coords,box,d,cm
+
+
+
+    def get_particle_cm(self,coords):
+        '''
+        gets particles center of mass
+
+        Parameters
+        ----------
+        coords : system coordinates
+
+        Returns
+        -------
+        cm : center of mass (the number of coordinates depends on the confinment type)
+
+        '''
+        cm =self.centerfun(CM( coords[self.particle_filt], 
+                               self.particle_mass))
+        return cm
+    
+
+    def ids_from_topology(self,topol_vector):
+        inter = len(topol_vector)
+        if inter == 2: 
+            ids = self.connectivity_per_type
+        elif inter == 3: 
+            ids = self.angles_per_type
+        elif inter == 4: 
+            ids = self.dihedrals_per_type
+        else:
+            raise Exception('Large topology vectors with size >= {} are not Implemented'.format(inter))
+        topol_vector = tuple(topol_vector)
+      
+        if topol_vector in ids: tp = topol_vector
+        elif topol_vector[::-1] in ids: tp = topol_vector[::-1]
+        else:
+            raise Exception('{} not in {}'.format(topol_vector,list(ids)))
+        
+        arr0 = ids[tp][:,0] ; arr1 = ids[tp][:,-1]
+        
+        return arr0,arr1
+   
+    def ids_from_keyword(self,keyword,exclude=[]):
+        if keyword in ['4',4,'1-4']:
+            ids = self.dihedrals_per_type
+        if keyword in ['3',3,'1-3']:
+            ids = self.angles_per_type
+        if keyword in ['2',2,'1-2']:
+            ids = self.connectivity_per_type
+        ids1 = np.empty(0,dtype=int)
+        ids2 = np.empty(0,dtype=int)
+        for k,i in ids.items():
+            if k in exclude:
+                continue
+            ids1 = np.concatenate( (ids1,i[:,0]) )
+            ids2 = np.concatenate( (ids2,i[:,-1]) )
+        return ids1,ids2
+    
+
+    def ids_from_backbone(self,bonddist):
+        ids = self.polymer_ids
+        if hasattr(self,'backbone_dist_matrix'):
+            bd = self.backbone_dist_matrix
+        else:
+            bd = self.find_bond_distance_matrix(ids) 
+            self.backbone_dist_matrix = bd
+        
+        b1,b2 = np.nonzero(bd == bonddist)
+        ids1 = ids[b1]
+        ids2 = ids[b2]
+        
+        return ids1,ids2
+    
+    def find_vector_ids(self,topol_vector,exclude=[]):
+        '''
+        
+
+        Parameters
+        ----------
+        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
+            Used to find e.g. the segmental vector ids
+        exclude : TYPE, optional
+            DESCRIPTION. The default is [].
+
+        Returns
+        -------
+        ids1 : int array of atom ids
+        ids2 : int array of atom ids
+
+        '''
+        t0 = perf_counter()
+        ty = type(topol_vector)
+        if ty is list or ty is tuple:
+            ids1,ids2 = self.ids_from_topology(topol_vector)
+        if ty is str or ty is int:
+            if int(topol_vector)<=4:
+                ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
+            else:
+                ids1,ids2 = self.ids_from_backbone(int(topol_vector))
+        logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
+        return ids1,ids2
+    
+    ###############End of General Supportive functions Section#########
+
+    ############### Conformation Calculation Supportive Functions #####
+   
+
+
+   
+    def is_bridge(self,coords,istart,iend,periodic_image_args,box):
+        # used to distinguish loops from bridges
+        
+        # check if one belong to the periodic_images and other not --> this means bridge
+        e = iend in periodic_image_args 
+        s = istart in periodic_image_args
+        if (e and not s) or (s and not e):
+            return True
+        # If both in periodic image args check
+        if e and s:
+            res = coords[[istart,iend]]
+            imin = [1e16,1e16]
+            idxmin = [1e16,1e16]
+            for idx,L in enumerate(self.box_add(box)):
+                cm = self.get_particle_cm(coords+L)
+                d = self.dfun(self,res,cm)
+                for i in range(2):
+                    if d[i]<imin[i]:
+                        idxmin[i] = idx
+                        imin[i]=d[i]
+            return idxmin[0] != idxmin[1] #bridge if they are unequal
+        
+        # check if belong to different particle
+        if self.nparticles !=1:
+            logger.warning('WARNING Function {:s}: This Function was never examined in test cases of more than one nanoparticles'.format(inspect.currentframe().f_code.co_name))
+            r0 = coords[istart]
+            re = coords[iend]
+            CMps = np.empty((self.nparticles,3),dtype=float)
+            for i,(k,args) in enumerate(self.particle_args.items()):
+                CMps[i] = CM(coords[args],self.atom_mass[args])
+            
+            if not e and not s: # if in main box no need to check periodic images
+                rer = CMps-re
+                r0r = CMps -r0
+                de = np.sum(rer*rer,axis=1)
+                d0 = np.sum(r0r*r0r,axis=1)
+            else:
+                de = 1e16 ; d0=1e16
+                for L in self.box_add(self.get_box(self.current_frame)):
+                    r0r = CMps+L -r0
+                    rer = CMps+L -re
+                    de = np.minimum(de,np.sum(rer*rer,axis=1))
+                    d0 = np.minimum(d0,np.sum(r0r*r0r,axis=1))
+            
+            if de.argmin()!=d0.argmin():
+                return True
+                
+        return False
+    
+    
+    def get_filt_train(self):
+        '''
+        
+        Returns
+        -------
+        ftrain : bool array (shape = (n,) )
+        image_trains : bool_array (shape = (n,))
+        where n is the number of TOTAL NUMBER OF ATOMS
+        
+        '''
+        
+        coords = self.get_coords(self.current_frame)
+        ftrain = False
+        nonp_ftrain = False
+              
+        d  = self.get_distance_from_particle() # minimum image distance
+        
+        cmp = self.get_particle_cm(coords)
+        d_nonp = self.dfun(self,coords, cmp) #absolut distance not minimum image
+        
+        for interval in self.adsorption_distance_intervals:
+            dlow = interval[0]
+            dup = interval[1]
+            fin = filt_uplow(d, dlow, dup)
+            ftrain = np.logical_or(ftrain, fin)
+            
+            fin_nonp = filt_uplow(d_nonp,dlow,dup)
+            nonp_ftrain = np.logical_or(nonp_ftrain,fin_nonp)
+        try:
+            func = self.kwargs['lambda_train']
+        except KeyError:
+            pass
+        else:
+            ftrain = func(coords,cmp,ftrain)
+            
+        ftrain = np.logical_and(ftrain, self.polymer_filt)
+        nonp_ftrain = np.logical_and(nonp_ftrain, self.polymer_filt)
+        
+        image_trains = np.logical_and(ftrain,np.logical_not(nonp_ftrain))
+        
+        return ftrain,image_trains
+    
+    def get_distance_from_particle(self,r=None,ids=None):
+        '''
+        Give either r or ids or nothing
+        If you give r then the 
+        minimum image distance of r from particle will be found
+        If you give ids the minimum image distance of coords[ids] will be found
+        else the minimum image distance of coords
+        Parameters
+        ----------
+        r : coordinates (float array shape=(n,3) ).
+        ids : int array
+
+        Returns
+        -------
+        d : minimum image distance (float array shape = (n,) )
+            Depends on the confinment type
+            e.g. for flat surfaces parallel on the xy plane 
+            only the z direction is considered
+
+        '''
+        frame = self.current_frame
+        
+        box = self.get_box(frame)
+        coords = self.get_coords(frame)
+        if r is None:
+            if ids is not None:
+                r = coords[ids]
+            else:
+                r = coords
+        cm = self.get_particle_cm(coords)
+        
+        d = 1e16
+        for L in self.box_add(box):
+            d = np.minimum(d,self.dfun(self,r,cm+L))
+        return d
+    
+    def conformations(self):
+        '''
+        Returns the ids of trains,loops,tails 
+        and bridges given the coords of the current frame
+
+        Returns
+        -------
+        ads_chains : int array
+            ids of adsorbeds chains.
+        args_train : int array
+            ids of trains
+        args_tail : int array
+            ids of tails
+        args_loop : int array
+            ids of loops
+        args_bridge : int arry
+            ids of bridges
+
+        '''
+        box = self.get_box(self.current_frame)
+        
+        ftrain, image_trains = self.get_filt_train()
+        args_train = np.nonzero(ftrain)[0]
+        periodic_image_args = set(np.nonzero(image_trains)[0])
+        #logger.debug('Number of periodic image trains ={:d}\n Number of trains = {:d}'.format(len(periodic_image_args),args_train.shape[0]))
+        #ads_chains
+        ads_chains = np.unique(self.mol_ids[ftrain])
+        #check_occurances(ads_chains)
+        fads_chains = np.isin(self.mol_ids,ads_chains)
+        args_ads_chain_atoms = np.nonzero(fads_chains)[0]
+        
+        #tail_loop_bridge
+        #f_looptailbridge = np.logical_and(fads_chains, np.logical_not(ftrain))
+        #args_looptailbridge = np.nonzero(f_looptailbridge)[0]
+        
+        args_tail = np.empty(0,dtype=int) ; 
+        args_bridge = np.empty(0,dtype=int) ; 
+        args_loop  = np.empty(0,dtype=int)
+        
+        coords = self.get_coords(self.current_frame) # need to identify bridges over loops
+        
+        for j in ads_chains:
+            #args_chain = self.chain_args[j]
+            connectivity_args = self.connectivity_per_chain[j]
+            #nch = args_chain.shape[0]
+            
+            #1) Identiyfy connectivity nodes
+            nodes = []
+            for c in connectivity_args:
+                ft = ftrain[c]
+                if ft[0] and not ft[1]: nodes.append( (c[1],c[0]) )
+                if not ft[0] and ft[1]: nodes.append( (c[0],c[1]) )
+            
+            #2) Loop over nodes and identify chunks
+            for node in nodes:
+
+                chunk = {node[0]}
+                istart = node[1]
+                
+                old_chunk = set() ; loopBridge = False ; found_iend = False
+                new_neibs = chunk.copy()
+                
+                while old_chunk != chunk:
+                    old_chunk = chunk.copy()
+                    new_set = set()
+                    for ii in new_neibs:
+                        for neib in self.neibs[ii]:
+                            
+                            if neib == istart: continue
+    
+                            if ftrain[neib]: 
+                                loopBridge = True
+                                
+                                if not found_iend:
+                                    iend = neib 
+                                    found_iend = True 
+                                continue
+                             
+                            if neib not in chunk:        
+                                new_set.add(neib)
+                                chunk.add(neib)
+                    new_neibs = new_set
+    
+                if not found_iend:
+                    try: del iend
+                    except: pass
+  
+                
+                chunk = np.array(list(chunk),dtype=int)
+                
+                assert not ftrain[chunk].any(), \
+                    'chunk in train chain {:d}, node {}, chunk size = {:d}\
+                    ,istart = {:d}, iend ={:d} \n\n chunk =\n {} \n\n'.format(j,
+                    node,chunk.shape[0],istart,iend,chunk)
+                assert fads_chains[chunk].all(),\
+                    'chunk out of adsorbed chains, j = {:d} ,\
+                        node = {} n\n chunk \n {} \n\n'.format(j,
+                        node,chunk)
+                
+                if loopBridge:
+                    if not self.is_bridge(coords,istart,iend,periodic_image_args,box):    
+                        args_loop = np.concatenate( (args_loop, chunk) )             
+                    else:
+                        #logger.debug('chain = {:d}, chunk | (istart,iend) = ({:d}-{:d}) is bridge'.format(j,istart,iend))
+                        args_bridge = np.concatenate( (args_bridge, chunk) )
+                else:
+                    args_tail = np.concatenate( (args_tail, chunk) )
+
+        #args_tail = np.unique(args_tail)
+        args_loop = np.unique(args_loop)
+        args_bridge = np.unique(args_bridge)
+        assert not np.isin(args_train,args_tail).any(),\
+        'tails in trains, there are {:d}'.format(np.count_nonzero(np.isin(args_train,args_tail)))
+        
+        assert not np.isin(args_train,args_loop).any(),\
+        'loops in trains, there are {:d}'.format(np.count_nonzero(np.isin(args_train,args_loop)))
+        
+        assert not np.isin(args_tail,args_loop).any(),\
+        'loops in tails, there are {:d}'.format(np.count_nonzero(np.isin(args_tail,args_loop)))
+        
+        
+        assert not np.isin(args_train,args_bridge).any(),\
+        'bridge in trains, there are {:d}'.format(np.count_nonzero(np.isin(args_train,args_bridge)))
+        
+        assert not np.isin(args_tail,args_bridge).any(),\
+        'bridge in tails, there are {:d}'.format(np.count_nonzero(np.isin(args_tail,args_bridge)))
+        
+        assert args_train.shape[0] + args_tail.shape[0] +\
+               args_loop.shape[0] + args_bridge.shape[0] \
+               == np.count_nonzero(fads_chains) , 'Confomormations do not sum up correnctly,\
+                   correct sum = {:d}, sum = {:d}'.format( args_ads_chain_atoms.shape[0],
+                   args_train.shape[0] + args_tail.shape[0] +\
+                   args_loop.shape[0] + args_bridge.shape[0] 
+                                                      )
+    
+        
+        return ads_chains,args_train,args_tail,args_loop,args_bridge
+    
+    def connected_chunks(self,args):
+        '''
+        takes a set of ids and finds the connected chunks from it
+        It is very usefull to find conformation size distributions
+        Parameters
+        ----------
+        args : int array of atom ids
+        
+        Returns
+        -------
+        chunks : list of sets. Each set has the ids of the connected chunks
+
+        '''
+        #t0 = perf_counter()
+        set_args = set(args)
+        chunks = []
+        #aold = -1
+        
+        while(len(set_args)>0):
+
+            a = set_args.pop()
+            set_args.add(a)
+            #assert a != aold,'while loop stuck on argument = {}'.format(a)
+            old_set_a = set()
+            new_set_a = {a}
+                    
+            new_neibs = new_set_a.copy()
+            
+            while new_set_a != old_set_a:
+                old_set_a = new_set_a.copy()
+                
+                for j in new_neibs.copy():
+                    new_neibs = set()
+                    for neib in self.neibs[j]:
+                        if neib in set_args:
+                            new_set_a.add(neib)
+                            if neib not in old_set_a:
+                                new_neibs.add(neib)
+
+            chunks.append(new_set_a)
+            set_args.difference_update(new_set_a)
+        
+            #aold # (for debugging-combined with assertion above)
+        #ass.print_time(perf_counter()-t0,'connected_chunks')
+        return chunks
+    
+    def length_of_connected_chunks(self,args,coords,exclude_bonds=None):
+        # this currently is suitable for linear chains in corse-grained or united atom represtation
+        # if there is an all atom representation exclude_bonds must be used
+        bonds = self.sorted_connectivity_keys
+        f1 = np.isin(bonds[:,0],args)
+        f2 = np.isin(bonds[:,1],args)
+        f = np.logical_and(f1,f2)
+        cb = bonds[f]
+        coords1 = coords[cb[:,0]]
+        coords2 = coords[cb[:,1]]
+        r = coords2-coords1
+        dists = np.sqrt(np.sum(r*r,axis=1))
+        return dists.sum()
+    ############### End of Conformation Calculation Supportive Functions #####
+    
+    ######## Main calculation Functions for structural properties ############      
+    
+    def calc_density_profile(self,binl,dmax,
+                             mode='mass',option='',flux=None,offset=0,
+                             **kwargs):
+        '''
+        Master function to compute the density profile
+
+        Parameters
+        ----------
+        binl : float
+            binningl legth
+        dmax : float
+            maximum distance to calculate
+        mode : string
+            'mass' for mass density
+            'number' for number density
+            For conformations option is set automatically to massnumber
+        option : string
+            'pertype' decomposes the density to each atomic type contribution
+            '2side' computes the profile to both sides.
+                Only valid for one directional confinement (i.e. zdir,ydir,xdir) 
+        flux : bool
+            if True it calculates density fluxuations
+            by first calling this function to compute the density.
+            density fluctuations are computed by the standard deviation
+
+        Returns
+        -------
+        density_profile : dictionary containing 
+            discription :  key  |  value
+            the distance: 'd'  | float array 
+            the density: 'rho' | float array
+            density of  'type1' | float array1
+            density of 'type2' | float array2
+                          .
+                          .
+                          .
+            density of 'typen' | float arrayn
+            density fluctuations: 'rho_flux' | float array
+
+        '''
+        t0 = perf_counter()
+        
+        #initialize
+        ##############
+        scale = 1.660539e-3 if mode == 'mass' else 1.0
+        density_profile = dict()
+        
+        if dmax is None:
+            NotImplemented
+        bins  =   np.arange(offset,offset+dmax+binl, binl)
+        nbins = len(bins)-1
+        rho = np.zeros(nbins,dtype=float)
+        mass_pol = self.atom_mass[self.polymer_filt] 
+        
+        
+        if option =='':
+            args = (nbins,bins,rho)
+            contr=''
+        elif option == 'pertype':
+            rho_per_atom_type = {t:np.zeros(nbins,dtype=float) for t in self.unique_atom_types }
+            ftt = {t: t == self.at_types[self.polymer_filt] for t in rho_per_atom_type.keys() }
+            args = (nbins,bins,rho,rho_per_atom_type,ftt)
+            contr ='__pertype'
+        elif option =='2side':
+            rho_down = np.zeros(nbins,dtype=float)
+            args =(nbins,bins,rho,rho_down)
+            contr ='__2side'
+        elif option =='conformations':              
+            confdens = {nm+k:np.zeros(nbins,dtype=float) for nm in ['m','n']
+                        for k in ['rho','train','tail','loop','bridge','free'] 
+                        }         
+            stats = { k : 0 for k in ['adschains','train','looptailbridge',
+                                  'tail','loop','bridge']}
+            dlayers = [(bins[i],bins[i+1]) for i in range(nbins)]
+            args = (dlayers, confdens, stats)
+            contr='__conformations'
+            mode='massnumber'
+            
+        if mode =='mass': args =(*args,mass_pol)
+        
+        
+        if flux is not None and flux !=False:
+            density_profile.update(self.calc_density_profile(binl,dmax,mode,option=option,**kwargs))
+            rho_mean = density_profile['rho'].copy()
+            rho_mean/=scale
+            args = (nbins,bins,rho,mass_pol,rho_mean**2)
+            func =  'mass'+'_density_profile'+'_flux'
+            if mode !='mass' or option!='':
+                logger.warning('mass mode and total density fluxuations are calculated')
+        else:
+            func =  mode+'_density_profile'+contr    
+        
+        
+        #############
+        
+        #calculate
+        #############
+        nframes = self.loop_trajectory(func, args)
+        #############
+        
+        #post_process
+        ##############
+        
+        if flux is not None and flux !=False:
+            density_profile['rho_flux'] = rho*scale**2/nframes
+        else:
+            rho*=scale/nframes 
+            d_center = center_of_bins(bins)
+            density_profile.update({'d':d_center-offset})
+            
+            density_profile.update({'rho':rho})
+            if option =='pertype':
+                for t,rhot in rho_per_atom_type.items(): 
+                    density_profile[t] = rhot*scale/nframes 
+            elif option =='2side':
+                rho_down *=scale/nframes
+                density_profile.update({'rho_up':rho,'rho_down':rho_down,'rho':0.5*(rho+rho_down)})
+            elif option =='conformations':
+                stats = {k+'_perc':v/self.npol/nframes if 'adschains'!=k else v/len(self.chain_args)/nframes
+                         for k,v in stats.items()}
+                dens= {k:v*scale/nframes for k,v in confdens.items()}
+
+                for k in ['train','tail','loop','bridge','free']: 
+                    dens['mrho'] += dens['m'+k] 
+                    dens['nrho'] += dens['n'+k]
+                    
+                dens['rho'] = dens['mrho']
+                
+                density_profile.update(dens)
+                density_profile.update({'stats':stats})
+                
+        #############
+        
+        tf = perf_counter() -t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
+        return density_profile
+    
+
+    
+    def calc_P2(self,binl,dmax,topol_vector,option='',**kwargs):
+        '''
+        Calculates P2 bond parameter
+        The unit vector is predifined by the type of confinement
+        
+        Parameters
+        ----------
+        binl : float
+            binning legth
+        dmax : float
+            maximum distance.
+        topol_vector : int or list of atom types
+            int is 2,3,4 for 1-2, 1-3, 1-4 bond vectors respectively
+            with a list of atom types it will look 
+            the connectivity for len(topol_vector) ==2
+            the angles for len(topol_vector) ==3
+            the dihedrals for len(topol_vector) ==4
+            and it will get the given vectors
+
+        Returns
+        -------
+        orientation : dictionary containing
+        discription :  key  |  value
+        the distance: 'd'  | float array
+        the function: 'P2' | float array
+        '''
+        t0 = perf_counter()
+
+        bins  =   np.arange(0, dmax, binl)
+        dlayers=[]
+        for i in range(0,len(bins)-1):
+            dlayers.append((bins[i],bins[i+1]))
+        d_center = [0.5*(b[0]+b[1]) for b in dlayers]
+        
+        ids1, ids2 = self.find_vector_ids(topol_vector)
+        nvectors = ids1.shape[0]
+        logger.info('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
+        
+        costh_unv = [[] for i in range(len(dlayers))]
+        costh = np.empty(nvectors,dtype=float)
+        if option in ['bridge','loop','train','tail','free']:
+            args = (ids1,ids2,dlayers,option,costh,costh_unv)
+            s = '_conformation'
+        elif option=='':
+            s =''
+            args = (ids1,ids2,dlayers,costh,costh_unv)
+        else:
+            raise NotImplementedError('option "{}" not Implemented.\n Check your spelling when you give strings'.format(option))
+        nframes = self.loop_trajectory('P2'+s, args)
+
+       
+        costh2_mean = np.array([ np.array(c).mean() for c in costh_unv ])
+        costh2_std  = np.array([ np.array(c).std()  for c in costh_unv ])
+        s='P2'
+        orientation = {'d':  d_center} 
+        orientation.update({s: 1.5*costh2_mean-0.5, s+'(std)' : 1.5*costh2_std-0.5 })
+        
+        tf = perf_counter() - t0
+        
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return orientation   
+        
+    def calc_particle_size(self):
+        t0 = perf_counter()
+        part_size = np.zeros(3)
+        args = (part_size,)
+        nframes = self.loop_trajectory('particle_size',args)
+        part_size /= nframes
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return part_size
+        
+    def calc_dihedral_distribution(self,phi,filters=dict()):
+        '''
+        Computes dihedral distributions as a function of given populations
+        ----------
+        dmax : float
+            maximum distance
+        binl : float
+            binning length
+
+        Returns
+        -------
+        dihedral_distr : dictionary
+
+        '''
+        t0 = perf_counter()
+        diht,ft = self.calc_dihedrals_t(phi,filters = filters)
+        distrib = {k: [] for filt in filters.values() for k in filt }
+        
+        for k in distrib:
+            for t,dih in diht.items():
+                distrib[k].extend(dih[ft[k][t]])
+        
+        distrib['system'] = []
+        for t,dih in diht.items():
+            distrib['system'].extend(dih)
+            
+        for k in distrib:
+            distrib[k] = np.array(distrib[k])*180/np.pi
+        
+        tf = perf_counter()-t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        return distrib
+    
+    def calc_chain_characteristics(self,binl,dmax,offset=0):
+        '''
+        Chain characteristics as a function of distance of chain center of mass
+        Parameters
+        ----------
+        dmin : float
+            minimum distance
+        dmax : float
+            maximumum distance
+        binl : float
+            binning length
+
+        Returns
+        -------
+        chain_chars : dictionary with keys the characteristics in strings
+            and values float arrays. Also the distance is included
+
+        '''
+        t0 = perf_counter()
+        
+        bins = np.arange(offset,dmax,binl)
+        dlayers = [(bins[i],bins[i+1]) for i in range(len(bins)-1)]
+        d_center = [0.5*(b[0]+b[1]) for b in dlayers]
+        nl = len(dlayers)
+        
+        chars_strlist = ['k2','Rg2','Rg','Ree2','asph','acyl', 'Rgxx_plus_yy', 'Rgxx_plus_yy', 'Rgyy_plus_zz']
+        chars = {k:[[] for d in dlayers] for k in chars_strlist }
+
+        chain_args = self.chain_args
+        
+        # calculate
+        args  = chain_args,dlayers,chars
+        nframes = self.loop_trajectory('chain_characteristics', args)
+                
+        #post_process
+        chain_chars = {'d':np.array(d_center)-offset}
+        
+        for k,v in chars.items():
+            chain_chars[k] = np.array([ np.mean(chars[k][i]) for i in range(nl) ])
+            chain_chars[k+'(std)'] = np.array([ np.std(chars[k][i]) for i in range(nl) ])
+        
+        tf= perf_counter() -t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
+        return chain_chars
+    
+    ###### End of Main calculation Functions for structural properties ########
+    
+    def vects_per_t(self,ids1,ids2,
+                         filters={}):
+        '''
+        Takes two int arrays  of atom ids and finds 
+        the vectors per time between them
+
+        Parameters
+        ----------
+        ids1 : int array of atom ids 1
+        ids2 : int array of atom ids 2
+        filters : dictionary of filters. See filter documentation
+
+        Returns
+        -------
+        vec_t : dictionary of keys the time and values the vectors in numpy array of shape (n,3)
+        filt_per_t : dictionary of keys the filt name and values
+            dictionary of keys the times and boolian arrays
+
+        '''
+        t0 = perf_counter()
+        vec_t = dict()
+        filt_per_t = dict()
+        
+        args = (ids1,ids2,filters,vec_t,filt_per_t)
+        
+        nframes = self.loop_trajectory('vects_t', args)
+                
+        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
+        tf = perf_counter()-t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return vec_t,filt_per_t
+
+    def chains_CM(self,coords):
+        '''
+        Given the coordinates finds the chains center of mass
+
+        Parameters
+        ----------
+        coords : system coordinates
+
+        Returns
+        -------
+        chain_cm : float array (nchains,3)
+
+        '''
+        chain_arg_keys = self.chain_args.keys()
+        
+        chain_cm = np.empty((len(chain_arg_keys),3),dtype=float)
+        
+        for i,args in enumerate(self.chain_args.values()):
+            chain_cm[i] = CM(coords[args],self.atom_mass[args])
+        
+        return chain_cm
+
+    def segs_CM(self,coords,segids):
+        '''
+        
+        Given the coordinates and the segmental ids finds the segmental center of mass
+        
+        Parameters
+        ----------
+        coords : system coordinates 
+        segids : int array (nsegments,nids_per_segment)
+
+        Returns
+        -------
+        segcm : float array (nsegments,3)
+
+        '''
+        n = segids.shape[0]
+        segcm = np.empty((n,3),dtype=float)
+        numba_CM(coords,segids,self.atom_mass,segcm)
+        return segcm
+            
+
+    def calc_dihedrals_t(self,dih_type,filters={'all':None}):
+        '''
+        Dihedrals per time
+
+        Parameters
+        ----------
+        dih_type : list of 4 strings
+            dihedral type
+        filters : dictionary
+            see filters documentation.
+
+        Returns
+        -------
+        dihedrals_t : dictionary 
+        keys: times
+        values: float array (ndihedrals,)
+        filt_per_t : see filters documentation
+
+        '''
+        t0 = perf_counter()
+        
+        dihedrals_t = dict()
+        filt_per_t = dict()
+       
+        dih_ids = self.dihedrals_per_type[dih_type] #array (ndihs,4)
+        ids1 = dih_ids[:,0] ; ids2 = dih_ids[:,3] 
+
+        args = (dih_ids,ids1,ids2,filters,dihedrals_t,filt_per_t)
+        
+        nframes = self.loop_trajectory('dihedrals_t', args)
+        
+        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
+        
+        tf = perf_counter()-t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
+        return dihedrals_t, filt_per_t
+    
+
+
+    def calc_Ree_t(self,filters={}):
+        '''
+        End to End vectors as a function of time
+
+        Parameters
+        ----------
+        filters : dictionary
+            see filter documentation
+
+        Returns
+        -------
+        Ree_t : dictionary
+            keys times
+            values: float arrays (nchains,3)
+        filt_per_t : dictionary
+            see filter documentation
+
+        '''
+        
+        t0 = perf_counter()
+        #filters = {'chain_'+k: v for k,v in filters.items()}
+        chain_is = []
+        chain_ie = []
+        for j,ch_args in self.chain_args.items():
+            chain_is.append(ch_args[0])
+            chain_ie.append(ch_args[-1])
+        ids1 = np.array(chain_is)
+        ids2 = np.array(chain_ie)
+      
+        Ree_t,filt_per_t = self.vects_per_t(ids1,ids2,filters)
+        
+        tf = perf_counter()-t0
+        
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        #return {t:v[tot_filt] for t,v in dihedrals_t.items()}
+        return Ree_t, filt_per_t
+    
+    def set_partial_charge(self):
+        if not hasattr(self,'partial_charge'):
+            self.charge_from_maps()
+            charge = np.empty((self.at_types.shape[0],1),dtype=float)
+            for i,ty in enumerate(self.at_types):
+                charge[i] = self.charge_map[ty]
+            self.partial_charge = charge
+        return
+    
+    def segment_ids_per_chain(self,segmental_ids):
+        seg0 = segmental_ids[:,0]
+        segch = {j : np.isin(seg0,chargs)
+                 for j,chargs in self.chain_args.items()}           
+        return segch
+    
+    def calc_chain_dipole_moment_t(self,option='',
+                                   filters={'all':None},
+                                   **kwargs,):
+        '''
+        Chain dipole moment as a function of t
+
+        Parameters
+        ----------
+        filters : dictionary
+            see filter documentation.
+
+        Returns
+        -------
+        dipoles_t : dictionary
+            keys: times
+            values: float array (nchains,3)
+        filters_t : dictionary
+            see filter documentation
+
+        '''
+        t0 = perf_counter()
+        
+        filters = {'chain_'+k : v for k,v in filters.items()}
+        
+        self.set_partial_charge()
+
+        
+        dipoles_t = dict()
+        filters_t = dict()
+        if option =='contour':
+            ids1,ids2 = self.find_vector_ids(kwargs['monomer'])
+            segmental_ids = self.find_segmental_ids(ids1, ids2, kwargs['segbond'])
+            segch = self.segment_ids_per_chain(segmental_ids)
+            args = (filters,ids1,ids2,segmental_ids,
+                    segch,dipoles_t,filters_t)
+            ext ='__contour'
+        elif option=='':
+            ext =''
+            args = (filters,dipoles_t,filters_t)
+        elif option=='endproj':
+            ext ='__endproj'
+            args = (filters,dipoles_t,filters_t)
+        elif option=='proj':
+            ext ='__proj'
+            projvec = np.array([x for x in kwargs['projvec']])
+            args = (filters,projvec,dipoles_t,filters_t)
+        nframes = self.loop_trajectory('chain_dipole_moment'+ext,args)
+        
+        filters_t = ass.rearrange_dict_keys(filters_t)
+        
+        tf = perf_counter() - t0
+        
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return dipoles_t,filters_t
+    
+    def find_segmental_ids(self,ids1,ids2,segbond):
+        '''
+        Used to find the segmental ids
+        Works for linear polymers at the moment
+        
+        Parameters
+        ----------
+        ids1 : int array
+            atom ids 1
+        ids2 : int array
+            atom ids 2
+        segbond : tuple of two stings 
+            the type of bond that connects the segments 
+        Returns
+        -------
+        seg_ids_numpy : int array (nsegments,nids_per_segment)
+            an array with the ids of each segment
+
+        '''
+        t0 = perf_counter()
+        conn_cleaned = {k:v for k,v in self.connectivity.items()
+                        if v != segbond
+                        }
+        
+        bond_ids = np.array(list(conn_cleaned.keys()))
+        
+        b0 = bond_ids[:,0]
+        b1 = bond_ids[:,1]
+        
+        seg_ids = {i : list(np.arange(i1,i2+1,dtype='i')) 
+                   for i,(i1,i2) in enumerate(zip (ids1,ids2))
+                  }
+        
+        for i,ids in seg_ids.copy().items():
+            f0 = np.isin(b0,ids)
+            f1 = np.isin(b1,ids)
+            seg_ids[i].extend(b1[f0])
+            seg_ids[i].extend(b0[f1])
+         
+        seg_args = {k:np.unique(v) for k,v in seg_ids.items()}
+        
+        
+        seg_ids_numpy = np.array(list(seg_args.values()))
+        self.segmental_args = seg_ids_numpy
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        return  seg_ids_numpy
+    
+    def calc_total_dipole_moment_t(self,q=None):
+        '''
+        Calculates total dipole moment vector
+        Parameters
+        -------
+        dipoles_t : dictionary
+            keys: times
+            values: float array (nvector,3)
+
+        '''
+        t0 = perf_counter()
+
+        
+        self.set_partial_charge()
+        
+        dipoles_t = dict()
+        if q is not None:
+            q = np.array(q) ; q = q/np.sum(q*q)**0.5
+            q = q.reshape(1,3)
+        args = (dipoles_t,q)
+        
+        nframes = self.loop_trajectory('total_dipole_moment',args)
+        
+        tf = perf_counter() - t0
+        
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return dipoles_t 
+    
+    def calc_segmental_dipole_moment_t(self,topol_vector,
+                                       segbond,filters={'all':None}):
+        '''
+        Calculates dipole moment vectors as a function of time
+
+
+        Parameters
+        ----------
+        topol_vector : list of 4 strings
+            finds the segment edge ids
+        segbond : tuple of 2 strings
+            the bond type connecting the segments
+        filters : dictionary
+            see filter documentation
+        Returns
+        -------
+        dipoles_t : dictionary
+            keys: times
+            values: float array (nvector,3)
+        filters_t : dictionary
+            see filter documentatin
+
+        '''
+        t0 = perf_counter()
+        
+        self.set_partial_charge()
+            
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        
+        segmental_ids = self.find_segmental_ids(ids1, ids2, segbond)
+        
+        dipoles_t = dict()
+        filters_t = dict()
+        
+        args = (filters,ids1,ids2,segmental_ids,dipoles_t,filters_t)
+        
+        nframes = self.loop_trajectory('segmental_dipole_moment',args)
+        
+        filters_t = ass.rearrange_dict_keys(filters_t)
+        
+        tf = perf_counter() - t0
+        
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return dipoles_t,filters_t
+    
+    def calc_segmental_dipole_moment_correlation(self,topol_vector,
+                                       segbond,filters={'all':None}):
+        '''
+        Computes static correlation between segments
+        
+         Parameters
+        ----------
+        topol_vector : list of 4 strings
+            finds the segment edge ids
+        segbond : tuple of 2 strings
+            the bond type connecting the segments
+        filters : dictionary
+            see filter documentation
+
+        Returns
+        -------
+        correlations : dictionary
+            keys   : depent on filter 
+            values : dictionary
+                    keys: number of bonds connecting the segments
+                    values: static correlation
+
+        '''
+        t0 = perf_counter()
+        dipoles_t,filters_t = self.calc_segmental_dipole_moment_t(topol_vector,
+                                       segbond,filters)
+        
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        bond_distmatrix = self.find_bond_distance_matrix(ids1)
+        
+        unb = np.unique(bond_distmatrix)
+        b0 = dict()
+        b1 = dict()
+        for k in unb:
+            if k>0:
+                b =  np.nonzero(bond_distmatrix ==k)
+                b0[k] = b[0]
+                b1[k] = b[1]
+        
+        correlations ={filt:{k:[] for k in unb if k>0} for filt in filters_t}
+        
+        args = (dipoles_t,filters_t,b0,b1,correlations)
+        
+        nframes = self.loop_trajectory('vector_correlations', args)
+        
+        for kf in filters_t:
+            for k in correlations[kf]:
+                c = correlations[kf][k]
+                correlations[kf][k] = {'mean':np.mean(c),'std':np.std(c)}
+                
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+    
+        return correlations
+    
+    def calc_chainCM_t(self,filters={'all':None},option=''):
+        '''
+        Computes chains center of mass as a function of time
+        Parameters
+        ----------
+        filters : dictionary
+            see filter documentation
+        option : string
+            for feature use
+        coord_type : TYPE, optional
+            DESCRIPTION. The default is None.
+
+        Returns
+        -------
+        vec_t : dictionary
+            keys: times
+            values: float array (nchains,3)
+        filt_per_t : dictionary
+            see filter documentation
+
+        '''
+        t0 = perf_counter()
+        filters = {'chain_'+k: v for k,v in filters.items()} #Need to modify when considering chains
+        
+        vec_t = dict()
+        filt_per_t = dict()
+        
+        args = (filters,vec_t,filt_per_t)
+        
+        nframes = self.loop_trajectory('chainCM_t'+option, args)
+      
+        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
+        return vec_t,filt_per_t
+    def calc_coords_t(self,filters={'all':None}):
+        t0 = perf_counter()
+        ids1 = self.polymer_ids
+        c_t = dict()
+        filt_t = dict()
+        args = (filters,ids1,c_t,filt_t)
+        nframes = self.loop_trajectory('coords_t', args)
+        filt_t = ass.rearrange_dict_keys(filt_t)
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return c_t,filt_t
+    
+    def calc_segCM_t(self,topol_vector,segbond,
+                     filters={'all':None}, option=''):
+        '''
+        Returns the segment center of mass as a function of time
+
+        Parameters
+        ----------
+        topol_vector : list of 4 strings
+            finds the segment edge ids
+        segbond : tuple of 2 strings
+            the bond type connecting the segments
+        filters : dictionary
+            see filter documentation
+        option: string
+            for feature use
+
+        Returns
+        -------
+        vec_t : dictionary
+            keys: times
+            values: float array (nsegments,3)
+        filt_per_t : dictionary
+            see filter documentation
+
+        '''
+        t0 = perf_counter()
+     
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        
+        segmental_ids = self.find_segmental_ids(ids1, ids2, segbond)
+        
+        vec_t = dict()
+        filt_per_t = dict()
+        
+        args = (filters,ids1,ids2,segmental_ids,vec_t,filt_per_t)
+        
+        nframes = self.loop_trajectory('segCM_t'+option, args)
+      
+        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
+        return vec_t,filt_per_t
+    
+    def calc_conformations_t(self,option=''):
+        '''
+        computes conformations as a function of time
+
+        Parameters
+        ----------
+        option : string
+            for feature use
+
+        Returns
+        -------
+        confs_t : dictionary
+            keys: strings (conformations)
+            values: dictionary
+                keys: times
+                values: number of atoms on the specific conformation
+
+        '''
+        t0 = perf_counter()
+        
+        confs_t = dict()
+        args = (confs_t)
+        nframes = self.loop_trajectory('confs_t'+option, args)
+        confs_t = ass.rearrange_dict_keys(confs_t)
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+    
+        return confs_t
+    
+    def calc_segmental_vectors_t(self,topol_vector,filters={}):
+        '''
+        Calculates 1-2,1-3 or 1-4 segmental vectors as a function of time
+        Parameters
+        ----------
+        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
+            Used to find e.g. the segmental vector ids
+        filters : dictionary.
+            see filters documentation
+
+        Returns
+        -------
+        segvec_t : dictionary
+            keys: times
+            values: float array (nsegments,3)
+        filt_per_t : dictionary
+            see filter documentation
+        '''
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        
+        t0 = perf_counter()
+        
+        segvec_t, filt_per_t = self.vects_per_t(ids1, ids2, filters)
+        
+        tf = perf_counter()-t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        return segvec_t,filt_per_t
+    
+ 
+
+    
 
 class Filters():
     '''
@@ -5612,11 +5546,11 @@ class Filters():
         return dict()
     
     @staticmethod
-    def BondsTrainFrom(self,bondlayers,ids1,ids2,coords,dads,*args):
+    def BondsTrainFrom(self,bondlayers,ids1,ids2,coords,*args):
         #t0 = perf_counter()
         
         ds_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords)
+        args_loop, args_bridge = self.conformations()
         
         args_rest_train = np.concatenate( (args_tail,args_loop,args_bridge ) )
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_rest_train)
@@ -5625,7 +5559,7 @@ class Filters():
         
         return Filters.filtLayers_inclucive(bondlayers,nbonds)
     
-    def BondsFromEndGroups(self,bondlayers,ids1,ids2,coords,dads,*args):
+    def BondsFromEndGroups(self,bondlayers,ids1,ids2,coords,*args):
         #t0 = perf_counter()
         args_endGroups = self.get_EndGroup_args()
         
@@ -5636,11 +5570,11 @@ class Filters():
         return Filters.filtLayers_inclucive(bondlayers,nbonds)
     
     @staticmethod
-    def BondsFromTrain(self,bondlayers,ids1,ids2,coords,dads,*args):
+    def BondsFromTrain(self,bondlayers,ids1,ids2,coords,*args):
         #t0 = perf_counter()
         
         ds_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords)
+        args_loop, args_bridge = self.conformations()
         
         nbonds1 = self.ids_nbondsFrom_args(ids1,args_train)
         nbonds2 = self.ids_nbondsFrom_args(ids2,args_train)
@@ -5649,11 +5583,11 @@ class Filters():
         return Filters.filtLayers_inclucive(bondlayers,nbonds)
 
     @staticmethod
-    def conformationDistribution(self,fconfs,ids1,ids2,coords,dads,*args):
+    def conformationDistribution(self,fconfs,ids1,ids2,coords,*args):
         
         
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords)
+        args_loop, args_bridge = self.conformations()
        
         filt = dict()
         for conf,intervals in fconfs.items():
@@ -5682,10 +5616,10 @@ class Filters():
         return filt
     
     @staticmethod
-    def conformations(self,fconfs,ids1,ids2,coords,dads,*args):
+    def conformations(self,fconfs,ids1,ids2,coords,*args):
         
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords)
+        args_loop, args_bridge = self.conformations()
         
         all_not_free = np.concatenate((args_train,args_tail,args_loop,args_bridge))
         
@@ -5693,13 +5627,10 @@ class Filters():
         args_free = all_args [ np.logical_not( np.isin(all_args, all_not_free) ) ]
 
         filt = dict()
-        if ass.iterable(fconfs):
-            for conf in fconfs:
-                conf_args = locals()['args_'+conf]
-                filt[conf] = Filters.filt_bothEndsIn(ids1, ids2, conf_args)
-        elif type(fconfs) is str:
-            conf_args = locals()['args_'+fconfs]
-            filt[fconfs] = Filters.filt_bothEndsIn(ids1, ids2, conf_args)
+
+        for conf in fconfs:
+            conf_args = locals()['args_'+conf]
+            filt[conf] = Filters.filt_bothEndsIn(ids1, ids2, conf_args)
         #ass.print_time(perf_counter()-t0,inspect.currentframe().f_code.co_name)
         return filt
     
@@ -5746,23 +5677,23 @@ class Filters():
         return characteristic
             
     @staticmethod
-    def get_ads_degree(self,coords,dads):
+    def get_ads_degree(self):
         chain_arg_keys = self.chain_args.keys()
         cads = np.empty(len(chain_arg_keys),dtype=bool)
         degree = np.empty(cads.shape[0],dtype=float)
-        d = self.get_distance_from_particle(coords)
-        fd = filt_uplow(d,0,dads)
+        fd = self.get_filt_train()
         for i,args in enumerate(self.chain_args.values()):   
             f = fd[args]
             cads[i] = f.any()
             degree[i] = np.count_nonzero(f)/f.shape[0]
         
         return degree,cads
+    
     @staticmethod
-    def chain_adsorption(self,ads_degree, chain_cm, coords, dads,*args):
+    def chain_adsorption(self,ads_degree, chain_cm, *args):
         
         
-        degree,cads = Filters.get_ads_degree(self,coords,dads)
+        degree,cads = Filters.get_ads_degree(self)
             
         filt_ads = dict()
         
@@ -5831,21 +5762,21 @@ class coreFunctions():
         return 
     
     @staticmethod
-    def theFilt(self,filters,dads,ids1,ids2,filt_per_t):
+    def theFilt(self,filters,ids1,ids2,filt_per_t):
         frame = self.current_frame
         coords = self.get_coords(frame)
         
         key = self.get_key()
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                                    ids1,ids2,coords,dads)
+                                    ids1,ids2,coords)
         return
     
     @staticmethod
-    def theChainFilt(self,filters,dads,filt_per_t):
+    def theChainFilt(self,filters,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
-        box = self.get_box(frame)
+        #box = self.get_box(frame)
         
         chain_cm = self.chains_CM(coords)
         
@@ -5853,7 +5784,7 @@ class coreFunctions():
         key = self.get_key()
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, coords, dads)
+                            chain_cm, coords)
         
         return 
     @staticmethod
@@ -5896,12 +5827,9 @@ class coreFunctions():
         frame = self.current_frame
         coords = self.get_coords(frame)
         
-        box = self.get_box(frame)
-        
         key = self.get_key()
-        
-        
-        pc = self.partial_charge.reshape((self.partial_charge.shape[0],1))
+    
+        pc = self.partial_charge
         
         dipoles = np.sum(pc*coords,axis=0).reshape((1,3))
         if q is not None:
@@ -5909,38 +5837,36 @@ class coreFunctions():
         dipoles_t[key] = dipoles  
         
         return                
+    
     @staticmethod
-    def segmental_dipole_moment(self,filters,dads,ids1,ids2,
+    def segmental_dipole_moment(self,filters,ids1,ids2,
                                 segment_args,dipoles_t,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
-        
-        box = self.get_box(frame)
         
         key = self.get_key()
         
         n = segment_args.shape[0]
         
         dipoles = np.empty((n,3),dtype=float)
-        pc = self.partial_charge.reshape((self.partial_charge.shape[0],1))
+        pc = self.partial_charge
         
         numba_dipoles(pc,coords,segment_args,dipoles)
         
         dipoles_t[key] = dipoles  
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                                    ids1,ids2,coords,dads)
+                                    ids1,ids2,coords)
         
         return
     
     @staticmethod
-    def chain_dipole_moment(self,filters,dads,
+    def chain_dipole_moment(self,filters,
                            dipoles_t,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
-        box = self.get_box(frame)
 
         chain_cm = self.chains_CM(coords)
         
@@ -5949,25 +5875,24 @@ class coreFunctions():
         n = chain_cm.shape[0]
         
         dipoles = np.empty((n,3),dtype=float)
-        pc = self.partial_charge.reshape((self.partial_charge.shape[0],1))
+        pc = self.partial_charge
         for i,(j, cargs) in enumerate(self.chain_args.items()):
             dipoles[i] = np.sum(pc[cargs]*coords[cargs],axis=0)
         
         dipoles_t[key] = dipoles  
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, coords, dads)
+                            chain_cm, coords)
         
         return
     
     
     @staticmethod
-    def chain_dipole_moment__proj(self,filters,dads,projvec,
+    def chain_dipole_moment__proj(self,filters,projvec,
                            dipoles_t,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
-        box = self.get_box(frame)
 
         chain_cm = self.chains_CM(coords)
         
@@ -5977,7 +5902,7 @@ class coreFunctions():
         
         dipoles = np.empty((n,3),dtype=float)
         
-        pc = self.partial_charge.reshape((self.partial_charge.shape[0],1))
+        pc = self.partial_charge
         for i,(j, cargs) in enumerate(self.chain_args.items()):
             c = coords[cargs]
             dipole = np.sum(pc[cargs]*c,axis=0)
@@ -5988,18 +5913,17 @@ class coreFunctions():
         dipoles_t[key] = dipoles  
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, coords, dads)
+                            chain_cm, coords)
         
         return
     
     
     @staticmethod
-    def chain_dipole_moment__endproj(self,filters,dads,
+    def chain_dipole_moment__endproj(self,filters,
                            dipoles_t,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
-        box = self.get_box(frame)
 
         chain_cm = self.chains_CM(coords)
         
@@ -6009,7 +5933,7 @@ class coreFunctions():
         
         dipoles = np.empty((n,3),dtype=float)
         
-        pc = self.partial_charge.reshape((self.partial_charge.shape[0],1))
+        pc = self.partial_charge
         for i,(j, cargs) in enumerate(self.chain_args.items()):
             c = coords[cargs]
             dipole = np.sum(pc[cargs]*c,axis=0)
@@ -6019,18 +5943,18 @@ class coreFunctions():
         dipoles_t[key] = dipoles  
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, coords, dads)
+                            chain_cm, coords)
         
         return
     
     
     @staticmethod
-    def chain_dipole_moment__contour(self,filters,dads,ids1,ids2,
+    def chain_dipole_moment__contour(self,filters,ids1,ids2,
                             segmental_ids,segs_per_chain,dipoles_t,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
-        box = self.get_box(frame)
+        
 
         chain_cm = self.chains_CM(coords)
         
@@ -6065,7 +5989,7 @@ class coreFunctions():
         dipoles_t[key] = chain_dipoles
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, coords, dads)
+                            chain_cm, coords)
         
         return
     
@@ -6075,7 +5999,7 @@ class coreFunctions():
                                   rho,mass_pol):
         frame = self.current_frame
         
-        coords,box,d,cs = self.get_frame_basics(frame)
+        coords,box,d = self.get_frame_basics(frame)
         
         #2) Caclulate profile
         for i in range(nbins):    
@@ -6089,7 +6013,7 @@ class coreFunctions():
                                   rho,rho_per_atom_type,ftt,mass_pol):
         
         frame = self.current_frame
-        coords,box,d,cs = self.get_frame_basics(frame)
+        coords,box,d = self.get_frame_basics(frame)
         
         #2) Caclulate profile
         for i in range(nbins):    
@@ -6108,7 +6032,7 @@ class coreFunctions():
     def mass_density_profile_flux(self,nbins,bins,
                                   rho,mass_pol,rho_mean_sq):
         frame = self.current_frame
-        coords,box,d,cs = self.get_frame_basics(frame)
+        coords,box,d = self.get_frame_basics(frame)
       
         #2) Caclulate profile
         
@@ -6123,7 +6047,7 @@ class coreFunctions():
                                   rho_up,rho_down):
         frame = self.current_frame
         coords = self.translated_coords(frame)
-        box = self.get_box(frame)
+        
         cs = self.get_particle_cm(coords)
         
         dfun = getattr(Distance_Functions,self.conftype +'__2side')
@@ -6146,7 +6070,7 @@ class coreFunctions():
                                   rho_up,rho_down,mass_pol):
         frame = self.current_frame
         coords = self.translated_coords(frame)
-        box = self.get_box(frame)
+
         cs = self.get_particle_cm(coords)
         
         dfun = getattr(Distance_Functions,self.conftype +'__2side')
@@ -6167,7 +6091,7 @@ class coreFunctions():
     def number_density_profile__pertype(self,nbins,bins,
                                   rho,rho_per_atom_type,ftt):
         frame = self.current_frame
-        coords,box,d,cs = self.get_frame_basics(frame)
+        coords,box,d = self.get_frame_basics(frame)
        
         #2) Caclulate profile
         for i in range(nbins):    
@@ -6182,7 +6106,7 @@ class coreFunctions():
     @staticmethod
     def number_density_profile(self,nbins,bins,rho):
         frame = self.current_frame
-        coords,box,d,cs = self.get_frame_basics(frame)
+        coords,box,d = self.get_frame_basics(frame)
         
         #2) Caclulate profile
         for i in range(nbins):    
@@ -6192,12 +6116,10 @@ class coreFunctions():
         return
   
     @staticmethod
-    def massnumber_density_profile__conformations(self,dads,dlayers,dens,stats):                
-        frame = self.current_frame
-        coords = self.get_whole_coords(frame)
-        box = self.get_box(frame)
+    def massnumber_density_profile__conformations(self,dlayers,dens,stats):                
+
         #1) ads_chains, trains,tails,loops,bridges
-        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations(dads,coords)
+        ads_chains, args_train, args_tail, args_loop, args_bridge = self.conformations()
         
         #check_occurances(np.concatenate((args_train,args_tail,args_bridge,args_loop)))
 
@@ -6221,10 +6143,8 @@ class coreFunctions():
     def conformation_dens(self, dlayers,dens,ads_chains,
                              args_train, args_tail, 
                              args_loop, args_bridge):
-        frame = self.current_frame
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
-        d = self.get_distance_from_particle(coords)
+        
+        coords,box,d = self.get_frame_basics(self.current_frame)
         
         args_free = coreFunctions.get_args_free(self,ads_chains)
         
@@ -6240,7 +6160,7 @@ class coreFunctions():
             args_fr = args_free[filt_uplow(d_free,dl[0],dl[1])]
             args_tr = args_train[filt_uplow(d_train,dl[0],dl[1])]
             
-            vol_bin=self.volfun(self,dl[0],dl[1])
+            vol_bin = self.volfun(self,dl[0],dl[1])
             
             dens['ntrain'][l] += args_tr.shape[0]/vol_bin
             dens['ntail'][l] += args_tl.shape[0]/vol_bin
@@ -6248,11 +6168,11 @@ class coreFunctions():
             dens['nbridge'][l] += args_br.shape[0]/vol_bin
             dens['nfree'][l] += args_fr.shape[0]/vol_bin
             
-            dens['mtrain'][l] += numba_sum(self.atom_mass[args_tr])/vol_bin
-            dens['mtail'][l] += numba_sum(self.atom_mass[args_tl])/vol_bin
-            dens['mloop'][l] += numba_sum(self.atom_mass[args_lp])/vol_bin
-            dens['mbridge'][l] += numba_sum(self.atom_mass[args_br])/vol_bin
-            dens['mfree'][l] += numba_sum(self.atom_mass[args_fr])/vol_bin
+            dens['mtrain'][l] += np.sum(self.atom_mass[args_tr])/vol_bin
+            dens['mtail'][l] += np.sum(self.atom_mass[args_tl])/vol_bin
+            dens['mloop'][l] += np.sum(self.atom_mass[args_lp])/vol_bin
+            dens['mbridge'][l] += np.sum(self.atom_mass[args_br])/vol_bin
+            dens['mfree'][l] += np.sum(self.atom_mass[args_fr])/vol_bin
         return    
 
     @staticmethod
@@ -6273,8 +6193,7 @@ class coreFunctions():
         frame = self.current_frame
         #1) coords
         coords = self.get_coords(frame)
-        box =self.get_box(frame)
-
+        
         #2) calc_particle_cm
         cs = self.get_particle_cm(coords)
         
@@ -6294,7 +6213,7 @@ class coreFunctions():
         return   
     @staticmethod
     def P2_conformation(self,ids1,ids2,dlayers,
-                        dads,conformation,costh,costh_unv):
+                        conformation,costh,costh_unv):
         frame = self.current_frame
         #1) coords
         coords = self.get_coords(frame)
@@ -6303,7 +6222,7 @@ class coreFunctions():
         #2) calc_particle_cm
         cs = self.get_particle_cm(coords)
         ads_chains, args_train, args_tail,\
-        args_loop, args_bridge = self.conformations(dads,coords)
+        args_loop, args_bridge = self.conformations()
         
         args_free = coreFunctions.get_args_free(self,ads_chains)
         
@@ -6360,14 +6279,11 @@ class coreFunctions():
     
     @staticmethod
     def dihedrals_t(self,
-                dih_ids, ids1, ids2, filters, dads, dihedrals_t, filt_per_t):
+                dih_ids, ids1, ids2, filters,  dihedrals_t, filt_per_t):
         
         t0 = perf_counter()
         frame = self.current_frame
-        coords = self.get_whole_coords(frame)
-        cm = self.get_particle_cm(coords)
-        
-        box = self.get_box(frame)
+        coords = self.get_coords(frame)
 
         dih_val = np.empty(dih_ids.shape[0],dtype=float) # alloc 
         dihedral_values_kernel(dih_ids,coords,dih_val)
@@ -6379,14 +6295,14 @@ class coreFunctions():
         tm = perf_counter()
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                                    ids1,ids2,coords,dads)
+                                    ids1,ids2,coords)
         tf = perf_counter()
         if frame ==1:
             logger.info('Dihedrals_as_t: Estimate time consuption --> Main: {:2.1f} %, Filters: {:2.1f} %'.format((tm-t0)*100/(tf-t0),(tf-tm)*100/(tf-t0)))
         return
 
     @staticmethod
-    def coords_t(self,filters,dads,ids,c_t,filt_t):
+    def coords_t(self,filters,ids,c_t,filt_t):
         frame = self.current_frame
         coords = self.get_coords(frame)
 
@@ -6395,11 +6311,11 @@ class coreFunctions():
         c_t[key] = coords[ids]
         
         filt_t[key] = Filters.calc_filters(self,filters,
-                                    ids,ids,coords,dads)
+                                    ids,ids,coords)
         return
     
     @staticmethod
-    def vects_t(self,ids1,ids2,filters,dads,vec_t,filt_per_t):
+    def vects_t(self,ids1,ids2,filters,vec_t,filt_per_t):
         frame = self.current_frame
         coords = self.get_coords(frame)
 
@@ -6409,17 +6325,17 @@ class coreFunctions():
         vec_t[key] = vec
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                                    ids1,ids2,coords,dads)
+                                    ids1,ids2,coords)
         return     
     
     @staticmethod
-    def confs_t(self,dads,confs_t):
+    def confs_t(self,confs_t):
         frame = self.current_frame
         coords = self.get_coords(frame)
         box = self.get_box(frame)
 
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(dads,coords)
+                                self.conformations()
         x = dict()
         ntot = args_train.shape[0] + args_tail.shape[0] +\
                args_loop.shape[0] + args_bridge.shape[0]
@@ -6437,13 +6353,12 @@ class coreFunctions():
         return
 
     @staticmethod
-    def confs_t__length(self,dads,confs_t):
+    def confs_t__length(self,confs_t):
         frame = self.current_frame
         coords = self.get_coords(frame)
-        box = self.get_box(frame)
-
+       
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(dads,coords)
+                                self.conformations()
         x = dict()
         for args,lab in zip([args_train, args_tail, args_loop, args_bridge],
                         ['l_train','l_tail','l_loop','l_bridge']):
@@ -6464,13 +6379,10 @@ class coreFunctions():
         return  
     
     @staticmethod
-    def confs_t__size(self,dads,confs_t):
-        frame = self.current_frame
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
+    def confs_t__size(self,confs_t):
 
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(dads,coords)
+                                self.conformations()
         x = dict()
         for args,lab in zip([args_train, args_tail, args_loop, args_bridge],
                         ['s_train','s_tail','s_loop','s_bridge']):
@@ -6489,12 +6401,12 @@ class coreFunctions():
     
     
     @staticmethod
-    def confs_t__perchain(self,dads,confs_t):
+    def confs_t__perchain(self,confs_t):
         frame = self.current_frame
         coords,box,d,cs = self.get_whole_frame_basics(frame)
         
         ads_chains, args_train, args_tail, args_loop, args_bridge =\
-                                self.conformations(dads,coords)
+                                self.conformations()
         x = dict()
         for k in ['train','tail','loop','bridge']:
             args = locals()['args_'+k]
@@ -6508,11 +6420,10 @@ class coreFunctions():
         return
     
     @staticmethod
-    def chainCM_t(self,filters,dads,vec_t,filt_per_t):
+    def chainCM_t(self,filters,vec_t,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
-        box = self.get_box(frame)
         
         chain_cm = self.chains_CM(coords)
 
@@ -6522,19 +6433,18 @@ class coreFunctions():
         vec_t[key] =  chain_cm - cm
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            chain_cm, coords, dads)
+                            chain_cm, coords)
        
         return 
     
     @staticmethod
-    def segCM_t(self,filters,dads,
+    def segCM_t(self,filters,
                   ids1,ids2,segment_ids,
                   vec_t,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
-        box = self.get_box(frame)
-        
+       
         seg_cm = self.segs_CM(coords,segment_ids)
     
         key = self.get_key()
@@ -6543,7 +6453,7 @@ class coreFunctions():
         vec_t[key] =  seg_cm -cm
         
         filt_per_t[key] = Filters.calc_filters(self,filters,
-                            ids1,ids2,coords,dads)
+                            ids1,ids2,coords)
         
         return 
     
@@ -6784,7 +6694,7 @@ def secmoment_filt_weighted__kernel(ifunc,x,f,w):
     for i in range(x.shape[0]):
         if f[i]:
             wi = w[i]
-            xi = ifunc(xi[i])
+            xi = ifunc(x[i])
             sec+=wi*xi*xi
             mi+=w[i]
     return sec, mi
@@ -6963,7 +6873,7 @@ def dynprop_const__kernel(inner_kernel,r1,r2,const):
     tot = 0
     mi = 0
     N = r1.shape[0]
-    t2 = t2 +1
+
     for i in prange(N):
         if const[i]:
             inner = inner_kernel(r1[i],r2[i])
@@ -7150,7 +7060,7 @@ def chain_characteristics_kernel(coords,mass,ch_cm,Gyt):
     S =  np.linalg.eigvals(Gyt)
     S =-np.sort(-S) # sorting in desceanding order
     Rg2 =np.sum(S)
-    Shat = Gyt-Rg2*np.identity(3)/3
+    #Shat = Gyt-Rg2*np.identity(3)/3
     asph = S[0] -0.5*(S[1]+S[2])
     acyl = S[1]-S[2]
     k2 = (asph**2 + 0.75*acyl**2)/Rg2**2
