@@ -21,7 +21,22 @@ import lammpsreader
 
 import pickle
 
-
+@jit(nopython=True,fastmath=True)
+def constraint(w,A,y):
+    return np.sum((np.dot(A,w)-y)**2)/y.shape[0]
+    
+@jit(nopython=True,fastmath=True)
+def smoothness(w,regcost):
+    x = np.empty_like(w)
+    x[1:-1] = w[2:]-2*w[1:-1]+w[0:-2]
+    x[0] = w[2]-2*w[1]+w[0]
+    x[1] = w[-1]-2*w[-2]+w[-3]
+    return regcost*(np.sum(x**2))
+'''
+@jit(nopython=True,fastmath=True)
+def smoothness(w,regcost):
+    return regcost*np.sum(w)
+'''
 class logs():
     '''
     A class for modifying the loggers
@@ -31,7 +46,7 @@ class logs():
         
     def get_logger(self):
     
-        LOGGING_LEVEL = logging.DEBUG
+        LOGGING_LEVEL = logging.INFO
         
         logger = logging.getLogger(__name__)
         logger.setLevel(LOGGING_LEVEL)
@@ -621,9 +636,9 @@ class plotter():
         return boldl
     
     @staticmethod
-    def relaxation_time_distributions(datadict,
+    def relaxation_time_distributions(datadict,yscale=None,
                                       size=3.5,fname=None,title=None,
-                                      cmap=None,xlim=(-6,6),pmap=None,
+                                      cmap=None,xlim=(-6,6),pmap=None,ylim=(1e-2,1.0),
                                       units='ns',mode='tau'):
         
         if cmap is None:
@@ -642,6 +657,9 @@ class plotter():
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
         plt.xscale('log')
+        if yscale is not None:
+            plt.yscale(yscale)
+            plt.ylim(ylim)
         if title is not None: 
             plt.title(title)
         xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
@@ -744,7 +762,8 @@ class plotter():
              fname =None,title=None,size=3.5,xlim=None,ylim=None,pmap=None,
              cmap = None,ylabel=None,units='ns',midtime=None,labmap=None,
              num=100,cutf=None,lstmap=None,write_plot_data=False,yscale=None,
-             xscale='log',edgewidth=0.3,legfont=2.0,markersize=1.5,legend=True):
+             xscale='log',edgewidth=0.3,legfont=2.0,markersize=1.5,legend=True,
+             legkwargs=dict()):
 
         if labmap is None:
             labmap  = {k:k for k in datadict}
@@ -829,7 +848,7 @@ class plotter():
                 raise NotImplementedError('Implement here you own plotting style. Use elif statement')
         if legend:
             plt.legend(frameon=False,fontsize=legfont*size,
-                   loc=locleg,ncol=ncolleg)
+                   ncol=ncolleg,**legkwargs)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
@@ -1024,7 +1043,7 @@ class fitData():
             self.init_method = options['init_method']
 
         else:
-            self.init_method = 'ones'
+            self.init_method = 'zeros'
         if 'p0' in options:
             self.p0 = options['p0']    
         if 'opt_method' in options:
@@ -1136,7 +1155,10 @@ class fitData():
                 pars =  np.ones(self.nw)/self.nw
         elif self.init_method =='ones':
             pars = np.ones(self.nw)
+        elif self.init_method=='zeros':
+            pars = np.zeros(self.nw)
         return pars
+    
     
     def exactFit(self,a,b,n,regs=1):
         
@@ -1146,7 +1168,9 @@ class fitData():
         y = self.ydata.copy()
         ya = y.copy()
         
+        
         A = self.kernel(x,tau)
+        
         Da = A.copy()
         
         regd = self.regd
@@ -1160,17 +1184,20 @@ class fitData():
             c1[1][-1] = regd
             A = np.concatenate((A,c1))
             y = np.concatenate((y,np.zeros(2)))
-        
+        cfun = lambda w:  constraint(w,A,y)
         constraints = [ {'type':'eq',
-                         'fun':lambda w:np.sum((np.dot(A,w)-y)**2)/y.shape[0]
+                         'fun': cfun
                         } 
                       ]
         bounds = [(0,1) for i in range(n)]
         regcost = regs/dlogtau**4
         
         costf = lambda w: regcost*np.sum( (w[2:]-2*w[1:-1]+w[0:-2])**2)
+        #costf = lambda w: smoothness
         p0 = self.initial_params()   
-        opt_res = minimize(costf,p0,bounds=bounds,method = self.opt_method,
+        #print(bounds)
+        opt_res = minimize(smoothness,p0,
+                          args=(regcost,),bounds=bounds,method = self.opt_method,
                           constraints=constraints,
                           options = {'maxiter':self.maxiter,'disp':self.show_report})
         
@@ -1180,10 +1207,24 @@ class fitData():
         self.opt_res = opt_res
         self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
         self.relaxation_modes = tau
-        self.smoothness = np.sqrt (costf(opt_res.x)/regs)
+        self.smoothness = np.sqrt (smoothness(opt_res.x,1))
         self.data_res = np.sqrt(np.sum((np.dot(Da,opt_res.x)-ya)**2)/ya.shape[0] )
         return opt_res
-    
+    @property
+    def trelax(self):
+        try:
+            w=self.params
+        except err:
+            raise err
+        try:
+            rm = self.relaxation_modes
+        except err:
+            raise err
+        rm = 1/rm if self.mode =='freq' else rm
+        return np.sum(w*rm)
+    @property
+    def print_trelax(self):
+        print('For bounds {}: --> trelax = {:.4e} ns'.format(self.bounds,self.trelax))
     def report(self):
         for k in ['prob_distr','con_res','data_res','smoothness',
                   'current_reg','nsearches']:
@@ -1195,16 +1236,16 @@ class fitData():
     def bestreg(self):
         regs = np.array(self.regs)
         d = np.array(self.drv)
-        print(regs.shape,d.shape)
+       #print(regs.shape,d.shape)
         filt = d<self.minimum_res
         regs = regs[filt]
         crit = np.array(self.crit)[filt]
-        print(regs.shape,crit.shape)
+        #print(regs.shape,crit.shape)
         try:
             regbest =  regs[np.argmin(crit)]
         except Exception as err:
             logger.debug('Something strange happend --> {}'.format(err))
-            raise Exception(err)
+            raise Exception(str(err)+ '. There is now best regulirization parameter that satisfies the residual. \nThis could be one of the following:\n (1) The bounds for the distribution are too narrow \n (2) The regulizing parameter bounds are too narrow \n (3) The residual is too small to be satisfied')
         return regbest
       
     def print_reg(self):
@@ -1246,8 +1287,8 @@ class fitData():
         sp = s[p] ; dp =d[p]
         ser = sp.argsort()
         sp = sp[ser] ; dp = dp[ser]
-        plt.ylim([0,dp.max()*1.05])
-        plt.xlim([0,sp.max()*1.05])
+        plt.ylim([dp.min()/3,dp.max()*3.0])
+        plt.xlim([dp.min()/3,sp.max()*3.0])
         plt.plot(sp,dp,ls='--',color='k',lw=size/5)
         plt.plot([self.smoothness],[self.data_res],marker='o',color='red',markersize=1.7*size)
         
@@ -1257,7 +1298,7 @@ class fitData():
         plt.show()
         return
     
-    def show_relaxation_modes(self,size=3.5,units='ns',
+    def show_relaxation_modes(self,size=3.5,units='ns',yscale=None,
                               title=None,color='red',fname=None):
         
         figsize = (size,size)
@@ -1267,7 +1308,12 @@ class fitData():
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
         plt.xscale('log')
-        
+        if yscale is not None:
+            plt.yscale(yscale)
+        if yscale =='log':
+            
+            plt.yticks([10**y for y in range(-5,1) ])
+            plt.ylim(1e-5,1)
         plt.yticks(fontsize=2.5*size)
         locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
         ax.xaxis.set_minor_locator(locmin)
@@ -2026,7 +2072,7 @@ class Analysis:
         memory_demanding: If True each time we loop over frames, these are readen from the disk and are not stored in memory
         types_from_itp: if different types excist in itp and gro then the itp ones are kept
         '''
-        
+        self.kwargs = kwargs
         
         if '.gro' == trajectory_file[-4:]:
             self.traj_file_type = 'gro'
