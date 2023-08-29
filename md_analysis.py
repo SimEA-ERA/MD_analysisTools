@@ -32,6 +32,25 @@ def smoothness(w,regcost):
     x[0] = w[2]-2*w[1]+w[0]
     x[1] = w[-1]-2*w[-2]+w[-3]
     return regcost*(np.sum(x**2))
+@jit(nopython=True,fastmath=True)
+def smoothnessTrelax(w,regcost,ti):
+    sm = np.empty_like(w)
+    sm[1:-1] = w[2:]-2*w[1:-1]+w[0:-2]
+    sm[0] = w[2]-2*w[1]+w[0]
+    sm[1] = w[-1]-2*w[-2]+w[-3]
+    return regcost*np.sum(sm**2)*np.sum(w*ti)
+
+@jit(nopython=True,fastmath=True)
+def smoothnessFrelax(w,regcost,fi):
+    sm = np.empty_like(w)
+    sm[1:-1] = w[2:]-2*w[1:-1]+w[0:-2]
+    sm[0] = w[2]-2*w[1]+w[0]
+    sm[1] = w[-1]-2*w[-2]+w[-3]
+    return regcost*(np.sum(w/fi))*np.sum(np.abs(sm)**2)
+
+
+
+
 '''
 @jit(nopython=True,fastmath=True)
 def smoothness(w,regcost):
@@ -566,7 +585,7 @@ class XPCS_Reader():
         dlogtau = self.relaxation_modes[1]-self.relaxation_modes[0]
         w = self.params
         
-        self.smoothness = np.sqrt (np.sum( (w[2:]-2*w[1:-1]+w[0:-2])**2)/dlogtau**4)
+        self.smoothness = np.sqrt (smoothness(w,1/dlogtau**4))
         self.relaxation_modes = 10**np.array(self.relaxation_modes)
         f = self.relaxation_modes
         self.bounds=(f[0],f[-1])
@@ -1001,7 +1020,7 @@ class fitData():
         
         if method == 'distribution':
             self.kernel = getattr(fitKernels,func)
-        
+        self.costf = smoothnessFrelax if self.mode=='freq' else smoothnessTrelax
         if bounds is not None:
             self.bounds = bounds
         else:
@@ -1090,10 +1109,13 @@ class fitData():
     
     def search_best(self):
         self.crit = []
-        self.smv = []
+        self.lmv = []
         self.drv = []
         self.regs = []
-        
+        for st in ['relaxation_modes','con_res','data_res',
+                   'params','prob_distr','loss','smoothness']:
+            setattr(self,'best_'+st,None)
+            
         irs = self.reg_bounds
         a = self.bounds[0]
         b = self.bounds[1]
@@ -1101,9 +1123,12 @@ class fitData():
             self.search_reg(a,b,numreg,irs)
             irs = self.last_regs[np.argsort(self.last_crit)[0:2]]
             irs.sort()
-        rgbest = self.bestreg
-        #self.maxiter = 10000
-        self.exactFit(a,b,self.nw,rgbest)
+            for st in ['relaxation_modes','con_res','data_res',
+                   'params','prob_distr','loss','smoothness']:
+                setattr(self,st,getattr(self,'best_'+st))
+        #rgbest = self.bestreg
+
+
         return
     
     def search_reg(self,a,b,numreg,irs=(1e0,1e8)):
@@ -1123,17 +1148,33 @@ class fitData():
         b = self.bounds[1]
         
         for reg in lreg:
+            if len(self.crit)>0:
+                bestsofarcrit = self.crit[self.bestcrit()]
+            else:
+                bestsofarcrit= float('inf')
+            
             self.current_reg = reg
             self.exactFit(a,b,n,reg)
             #print('lr = {:.3e}'.format(lr))
-            s = self.smoothness ; d = self.data_res
-            crit = np.sqrt(s**2 + d**2)
+            l = self.loss ; d = self.data_res
             
-            self.smv.append(s) ; self.drv.append(d)
+            crit =np.sqrt(l**2 + d**2)
+            
+            self.lmv.append(l) ; self.drv.append(d)
             self.regs.append(reg) ;
             self.crit.append( crit)
             self.last_crit.append(crit)
             self.nsearches = len(self.regs)
+            
+            if d<=self.minimum_res and crit < bestsofarcrit :
+                
+                for st in ['relaxation_modes','con_res','data_res',
+                   'params','prob_distr','loss','smoothness']:
+                    attr = getattr(self,st)
+                    if type(attr) is type(np.ones(3)): 
+                        attr = attr.copy()
+                    setattr(self,'best_'+st,attr)
+                
             if self.show_report:
                 self.report()
             #self.show_relaxation_modes(title='lr = {:.3e}'.format(lr))
@@ -1166,12 +1207,12 @@ class fitData():
         dlogtau = np.log10(tau[1]/tau[0]) 
         x = self.xdata.copy()
         y = self.ydata.copy()
-        ya = y.copy()
+        #ya = y.copy()
         
         
         A = self.kernel(x,tau)
         
-        Da = A.copy()
+        #Da = A.copy()
         
         regd = self.regd
         if self.is_distribution:
@@ -1192,12 +1233,12 @@ class fitData():
         bounds = [(0,1) for i in range(n)]
         regcost = regs/dlogtau**4
         
-        costf = lambda w: regcost*np.sum( (w[2:]-2*w[1:-1]+w[0:-2])**2)
-        #costf = lambda w: smoothness
+        
+        costf = self.costf 
         p0 = self.initial_params()   
         #print(bounds)
-        opt_res = minimize(smoothness,p0,
-                          args=(regcost,),bounds=bounds,method = self.opt_method,
+        opt_res = minimize(costf,p0,
+                          args=(regcost,tau),bounds=bounds,method = self.opt_method,
                           constraints=constraints,
                           options = {'maxiter':self.maxiter,'disp':self.show_report})
         
@@ -1208,44 +1249,54 @@ class fitData():
         self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
         self.relaxation_modes = tau
         self.smoothness = np.sqrt (smoothness(opt_res.x,1))
-        self.data_res = np.sqrt(np.sum((np.dot(Da,opt_res.x)-ya)**2)/ya.shape[0] )
+        self.loss = np.sqrt(costf(opt_res.x,1,tau))
+        self.data_res = np.sqrt(self.con_res )
         return opt_res
+    
     @property
     def trelax(self):
         try:
             w=self.params
-        except err:
-            raise err
+        except AttributeError as err:
+             raise err
         try:
             rm = self.relaxation_modes
-        except err:
-            raise err
+        except AttributeError as e:
+            raise e
         rm = 1/rm if self.mode =='freq' else rm
         return np.sum(w*rm)
+    
     @property
     def print_trelax(self):
         print('For bounds {}: --> trelax = {:.4e} ns'.format(self.bounds,self.trelax))
+   
     def report(self):
-        for k in ['prob_distr','con_res','data_res','smoothness',
+        for k in ['prob_distr','con_res','data_res','smoothness','loss','trelax',
                   'current_reg','nsearches']:
             a = getattr(self,k)
             print('{:s} = {}'.format(k,a))
         return
     
-    @property
-    def bestreg(self):
+    def bestcrit(self):
         regs = np.array(self.regs)
         d = np.array(self.drv)
-       #print(regs.shape,d.shape)
+       
         filt = d<self.minimum_res
-        regs = regs[filt]
-        crit = np.array(self.crit)[filt]
-        #print(regs.shape,crit.shape)
-        try:
-            regbest =  regs[np.argmin(crit)]
-        except Exception as err:
-            logger.debug('Something strange happend --> {}'.format(err))
-            raise Exception(str(err)+ '. There is now best regulirization parameter that satisfies the residual. \nThis could be one of the following:\n (1) The bounds for the distribution are too narrow \n (2) The regulizing parameter bounds are too narrow \n (3) The residual is too small to be satisfied')
+        if filt.any():
+            regs = regs[filt]
+            crit = np.array(self.crit)[filt]
+        else:
+
+            raise Exception(' There are No regulirization parameters that satisfy the residual. \nThis could be one of the following:\n (1) The bounds for the distribution are too narrow \n (2) The regulizing parameter bounds are too narrow \n (3) The residual is too small to be satisfied')
+        return np.argmin(crit)    
+    
+    @property
+    def bestreg(self):
+
+        a = self.bestcrit() 
+
+        regbest =  self.regs[a]
+            
         return regbest
       
     def print_reg(self):
@@ -1262,35 +1313,35 @@ class fitData():
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
         d = np.array(self.drv)
-        s = np.array(self.smv)
+        l = np.array(self.lmv)
         
         plt.xscale('log')
         plt.yscale('log')
         plt.yticks(fontsize=2.5*size)
-        plt.xlabel(r'smoothness',fontsize=3*size)
+        plt.xlabel(r'Loss',fontsize=3*size)
         plt.ylabel(r'data residual',fontsize=3*size)
         if title is None:
             plt.title('Pareto Front')
         else:
             plt.title(title)
-        plt.plot(s,d,
+        plt.plot(l,d,
                  ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
         
         pareto = []
-        for i,(si,di) in enumerate(zip(s,d)):
-            fs = si > s 
+        for i,(li,di) in enumerate(zip(l,d)):
+            fl = li > l 
             fd = di > d
-            f = np.logical_and(fs,fd)
+            f = np.logical_and(fl,fd)
             if f.any(): continue
             pareto.append(i)
         p = np.array(pareto,dtype=int)
-        sp = s[p] ; dp =d[p]
-        ser = sp.argsort()
-        sp = sp[ser] ; dp = dp[ser]
+        lp = l[p] ; dp =d[p]
+        ser = lp.argsort()
+        lp = lp[ser] ; dp = dp[ser]
         plt.ylim([dp.min()/3,dp.max()*3.0])
-        plt.xlim([dp.min()/3,sp.max()*3.0])
-        plt.plot(sp,dp,ls='--',color='k',lw=size/5)
-        plt.plot([self.smoothness],[self.data_res],marker='o',color='red',markersize=1.7*size)
+        plt.xlim([dp.min()/3,lp.max()*3.0])
+        plt.plot(lp,dp,ls='--',color='k',lw=size/5)
+        plt.plot([self.loss],[self.data_res],marker='o',color='red',markersize=1.7*size)
         
         plt.xticks(fontsize=2.5*size)
         if fname is not None:
@@ -1312,8 +1363,8 @@ class fitData():
             plt.yscale(yscale)
         if yscale =='log':
             
-            plt.yticks([10**y for y in range(-5,1) ])
-            plt.ylim(1e-5,1)
+            plt.yticks([10**y for y in range(-9,1) ])
+            plt.ylim(1e-9,1)
         plt.yticks(fontsize=2.5*size)
         locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
         ax.xaxis.set_minor_locator(locmin)
