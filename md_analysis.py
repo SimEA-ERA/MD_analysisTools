@@ -20,21 +20,29 @@ import matplotlib
 import lammpsreader 
 
 import pickle
-
 @jit(nopython=True,fastmath=True)
-def constraint(w,A,y):
+def compute_residual(w,A,y):
     return np.sum((np.dot(A,w)-y)**2)/y.size
 
-
 @jit(nopython=True,fastmath=True)
-def dCdw(w,A,y):
+def dCRdw(w,A,y):
     dw = np.zeros(w.shape)
     n = y.size
     x = (np.dot(A,w)-y)
     for j in range(w.size):
         for i in range(n):
             dw[j] += x[i]*A[i,j]
-    dw *= 2.0/n
+    dw *=2.0/n
+    return dw
+
+@jit(nopython=True,fastmath=True)
+def constraint(w,A,y,residual):
+    return residual**2 - compute_residual(w,A,y)   
+
+
+@jit(nopython=True,fastmath=True)
+def dCdw(w,A,y,residual):
+    dw = - dCRdw(w,A,y)
     return dw
 
 @jit(nopython=True,fastmath=True)
@@ -58,31 +66,35 @@ def dSdw(w,dlogtau):
     return dw/dlogtau**3
 
 @jit(nopython=True,fastmath=True)
+def Trelax(w,fi):
+    return np.sum(w*fi)
+@jit(nopython=True,fastmath=True)
 def Frelax(w,fi):
     return np.sum(w/fi)
 
 @jit(nopython=True,fastmath=True)
 def dFdw(fi):
-    return 1/fi
+    return 1.0/fi
+
 
 
 @jit(nopython=True,fastmath=True)
-def smoothnessFrelax(w,fi,dlogtau,A,y,reg):
+def smoothnessFrelax(w,fi,dlogtau,reg):
 
     sm = smoothness(w,dlogtau)
     tr = Frelax(w,fi)
-    C = constraint(w,A,y)
-    return reg*np.log10(sm*tr*2) + C
-
-@jit(nopython=True,fastmath=True)
-def dSFdw(w,fi,dlogtau,A,y,reg):
-    #return dSdw(w) 
-    sm = smoothness(w,dlogtau)
     
-    tr = Frelax(w,fi)
-    dcdw = dCdw(w,A,y)
-    dL = reg*(2*dFdw(fi) + dSdw(w,dlogtau)*tr/sm)/np.log(10) 
-    return  dL + dcdw
+    return  sm + reg*tr
+
+
+
+@jit(nopython=True,fastmath=True)
+def dSFdw(w,fi,dlogtau,reg):
+    
+    dL = dSdw(w,dlogtau) + reg*dFdw(fi) 
+    return  dL 
+
+
 
 
 class logs():
@@ -1041,8 +1053,9 @@ class fitData():
     
     def __init__(self,xdata,ydata,func,method='distribution',bounds=None,
                  search_grid=None,reg_bounds=None,minimum_res_factor=3,
-                 nw=50,regd=1000,maxiter=200,**options):
+                 nw=50,regd=1000,maxiter=200,show_plots=False,**options):
         
+        self.show_plots = show_plots
         self.method = method
         self.ydata = ydata
         self.xdata = xdata
@@ -1107,15 +1120,20 @@ class fitData():
     
     def fitTheModel(self):
         
-        self.exactFit(self.bounds[0],self.bounds[1],self.nw,0)
+        self.justFit()
         self.estimate_minimum_residual()
         self.search_best()
         return
         
     def estimate_minimum_residual(self):
-        if self.data_res <self.minimum_res:
-            self.minimum_res = max(1e-3,self.minimum_res_factor*self.data_res)
+        
+        mres = self.minimum_res_factor*self.data_res
+        self.minimum_res = mres
+        
+        print('estimated data residual = {:.4e}'.format(mres))
+        print('estimated constraint residual = {:.4e}'.format(mres**2))
         return
+    
     def get_weights(self,wm):
         if wm =='high-y':
             w = np.abs(self.ydata)+0.02
@@ -1178,7 +1196,7 @@ class fitData():
 
         return
     
-    def search_reg(self,a,b,numreg,irs=(1e0,1e8)):
+    def search_reg(self,a,b,numreg,irs=(1e-30,1e30)):
         
         for attr in ['crit','smv','drv','regs']:
             try:
@@ -1200,7 +1218,7 @@ class fitData():
             #print('lr = {:.3e}'.format(lr))
             s = self.smoothness ; t = self.tau_relax ; d = self.data_res
             
-            self.estimate_minimum_residual()
+            
             crit = s*t
             if  d < self.minimum_res and crit < self.bestcr:
                 self.bestcr = crit
@@ -1244,6 +1262,73 @@ class fitData():
             pars = np.zeros(self.nw) +1e-15
         return pars
     
+    def justFit(self):
+        n = self.nw
+        tau = fitData.get_logtimes(self.bounds[0],self.bounds[1],n)
+        dlogtau = np.log10(tau[1]/tau[0]) 
+        x = self.xdata.copy()
+        y = self.ydata.copy()
+       
+        
+        
+        A = self.kernel(x,tau)
+        
+
+        constraints = [ ]
+        
+        if self.is_distribution:
+            cdistr = lambda w: 1 - np.sum(w) 
+            dcddw = lambda w: -np.ones(w.shape) 
+            constraints.append({'type':'eq','fun':cdistr,'jac': dcddw})
+        
+        if self.zeroEdge_distribution:
+            w0 = lambda w:  -w[0] 
+            wn = lambda w:  -w[-1]
+            def dw0dw(w):
+                x = np.zeros(w.shape)
+                x[0] = -1
+                return x
+            def dwndw(w):
+                x = np.zeros(w.shape)
+                x[-1] = -1
+                return x
+            constraints.append({'type':'eq','fun':w0,'jac':dw0dw})
+            constraints.append({'type':'eq','fun':wn,'jac':dwndw})
+
+        bounds = [(0,1) for i in range(n)]
+        
+        
+        costf = compute_residual
+        p0 = self.initial_params()   
+        #print(bounds)
+        opt_res = minimize(costf,p0,
+                          args=(A,y),method = self.opt_method,
+                          constraints=constraints,
+                          bounds=bounds,
+                          jac=dCRdw,
+                          options = {'maxiter':self.maxiter,'disp':self.show_report}, 
+                          tol=1e-16)
+        
+        isd = 1-opt_res.x.sum() ; bl = opt_res.x[0] ; bu = opt_res.x[1]
+        self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
+        self.con_res = compute_residual(opt_res.x,A,y)
+        self.data_res = np.sqrt(self.con_res)
+        
+        self.params = opt_res.x
+        self.opt_res = opt_res
+        
+        
+        self.relaxation_modes = tau
+        
+        self.smoothness = smoothness(opt_res.x,dlogtau)
+        self.loss = opt_res.fun
+        self.tau_relax = self.trelax
+        if self.show_plots:
+            self.report()
+            self.show_relaxation_modes(prefix='',)
+            self.show_relaxation_modes(prefix='',show_contributions=True,yscale='log')
+            self.show_fit()
+        return opt_res
     
     def exactFit(self,a,b,n,regs=1):
         
@@ -1256,26 +1341,33 @@ class fitData():
         
         A = self.kernel(x,tau)
         
-        Da = A.copy()
         
-        regd = self.regd
-        if self.is_distribution:
-            A = np.concatenate( (A, regd*np.ones((1,tau.shape[0])) ) )
-            y = np.concatenate((y,regd*np.ones(1)))
-        
-        if self.zeroEdge_distribution:
-            c1 = np.zeros((2,tau.shape[0]))
-            c1[0][0] = regd
-            c1[1][-1] = regd
-            A = np.concatenate((A,c1))
-            y = np.concatenate((y,np.zeros(2)))
-       
-        constraints =  {'type':'eq',
+        constraints = [   {'type':'ineq',
                          'fun': constraint,
                          'jac': dCdw,
-                         'args':(A,y)
+                         'args':(A,ya,self.minimum_res/np.sqrt(self.minimum_res_factor))
                         } 
-                      
+                      ]
+        #regd = self.regd
+        if self.is_distribution:
+            cdistr = lambda w: 1 - np.sum(w) 
+            dcddw = lambda w: -np.ones(w.shape) 
+            constraints.append({'type':'eq','fun':cdistr,'jac': dcddw})
+        
+        if self.zeroEdge_distribution:
+            w0 = lambda w:  -w[0] 
+            wn = lambda w:  -w[-1]
+            def dw0dw(w):
+                x = np.zeros(w.shape)
+                x[0] = -1
+                return x
+            def dwndw(w):
+                x = np.zeros(w.shape)
+                x[-1] = -1
+                return x
+            constraints.append({'type':'eq','fun':w0,'jac':dw0dw})
+            constraints.append({'type':'eq','fun':wn,'jac':dwndw})
+
         bounds = [(0,1) for i in range(n)]
         
         
@@ -1283,15 +1375,16 @@ class fitData():
         p0 = self.initial_params()   
         #print(bounds)
         opt_res = minimize(costf,p0,
-                          args=(tau,dlogtau,A,y,regs),bounds=bounds,method = self.opt_method,
-                          #constraints=constraints,
-                          jac=dSFdw,
+                          args=(tau,dlogtau,regs),method = self.opt_method,
+                          constraints=constraints,
+                          bounds=bounds,
+                          #jac=dSFdw,
                           options = {'maxiter':self.maxiter,'disp':self.show_report},
                           tol=regs*1e-6)
         
         isd = 1-opt_res.x.sum() ; bl = opt_res.x[0] ; bu = opt_res.x[1]
         self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
-        self.con_res = constraint(opt_res.x,Da,ya)
+        self.con_res = compute_residual(opt_res.x,A,y)
         self.data_res = np.sqrt(self.con_res )
         
         self.params = opt_res.x
@@ -1300,9 +1393,14 @@ class fitData():
         
         self.relaxation_modes = tau
         
-        self.smoothness = np.sqrt (smoothness(opt_res.x,dlogtau))
-        self.loss = costf(opt_res.x,tau,dlogtau,A,y,1.0)
+        self.smoothness = smoothness(opt_res.x,dlogtau)
+        self.loss = opt_res.fun
         self.tau_relax = self.trelax
+        if self.show_plots:
+            self.report()
+            self.show_relaxation_modes(prefix='',)
+            self.show_relaxation_modes(prefix='',show_contributions=True,yscale='log')
+            self.show_fit()
         return opt_res
     
     @property
@@ -1323,10 +1421,15 @@ class fitData():
         print('For bounds {}: --> trelax = {:.4e} ns'.format(self.bounds,self.trelax))
    
     def report(self):
-        for k in ['prob_distr','con_res','data_res','smoothness','loss','trelax',
+        for k in ['prob_distr','con_res','data_res',
+                  'smoothness','loss','trelax',
                   'current_reg','nsearches']:
-            a = getattr(self,k)
-            print('{:s} = {}'.format(k,a))
+            try:
+                a = getattr(self,k)
+            except:
+                pass
+            else:
+                print('{:s} = {}'.format(k,a))
         return
     
 
@@ -1374,8 +1477,8 @@ class fitData():
         sp = s[p] ; tp =t[p]
         ser = sp.argsort()
         sp = sp[ser] ; tp = tp[ser]
-        #plt.ylim([tp.min()/3,tp.max()*3.0])
-        #plt.xlim([sp.min()/3,sp.max()*3.0])
+        plt.ylim([tp.min()/3,tp.max()*3.0])
+        plt.xlim([sp.min()/3,sp.max()*3.0])
         plt.plot(sp,tp,ls='--',color='k',lw=size/5)
         plt.plot([self.best_smoothness],[self.best_tau_relax],marker='o',color='red',markersize=1.7*size)
         
@@ -1385,9 +1488,43 @@ class fitData():
         plt.show()
         return
     
+    def show_fit(self,size=3.5,units='ns',yscale=None,
+                              title=None,color='red',fname=None,
+                              prefix='best_'):
+        
+        xlim = 10
+        xf = np.logspace(-4,xlim,base=10,num=10000)
+        yee = self.fitted_curve(xf)
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.xscale('log')
+        
+        xticks = [10**x for x in range(-4,xlim+1) ]
+        plt.xticks(xticks,fontsize=2.5*size)
+        plt.yticks(fontsize=2.5*size)
+        plt.xlabel(r'$t (ns)$',fontsize=3*size)
+        plt.ylabel(r'$P_1(t)$',fontsize=3*size)
+        locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+        ax.xaxis.set_minor_locator(locmin)
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        
+        plt.plot(xf,yee,ls ='-.',color=color,label ='fit')
+        plt.ylim((-0.05,1))
+        plt.plot(self.xdata,self.ydata,ls='none',marker = 'o',
+            markersize=size*0.8,fillstyle='none',color=color,label='data')
+        plt.legend(frameon=False,bbox_to_anchor=(1,1),fontsize=2.3*size)
+        if fname is not None:
+            plt.savefig(fname,bbox_inches='tight')
+        plt.show()
+        return
+        
     def show_relaxation_modes(self,size=3.5,units='ns',yscale=None,
                               title=None,color='red',fname=None,
-                              show_contributions=False):
+                              show_contributions=False,prefix='best_'):
         
         figsize = (size,size)
         dpi = 300
@@ -1417,11 +1554,14 @@ class fitData():
             plt.title('Relaxation times distribution')
         else:
             plt.title(title)
-        plt.plot(self.best_relaxation_modes,self.best_params,
+        rm = getattr(self,prefix+'relaxation_modes')
+        pars = getattr(self,prefix+'params')
+        
+        plt.plot(rm,pars,
                  ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
         if show_contributions:
-            contr = self.best_params/self.best_relaxation_modes if self.mode == 'freq' else self.best_params*self.best_relaxation_modes
-            plt.plot(self.best_relaxation_modes,contr,label='contribution',color='k',
+            contr = pars/rm if self.mode == 'freq' else pars*rm
+            plt.plot(rm,contr,label='contribution',color='k',
                      ls='none',marker='s',fillstyle='none',markersize=1.5*size,
                      markeredgewidth=size*0.5)
         xticks = [10**x for x in range(-10,20) if self.bounds[0]<=10**x<=self.bounds[1] ]
