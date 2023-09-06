@@ -21,48 +21,61 @@ import lammpsreader
 
 import pickle
 @jit(nopython=True,fastmath=True)
-def compute_residual(w,A,y):
-    return np.sum((np.dot(A,w)-y)**2)/y.size
+def compute_residual(pars,A,y):
+    w = pars[:-1]
+    bias = pars[-1]
+    r = np.dot(A,w) + bias -y
+    return np.sum(r*r)/y.size
 
 @jit(nopython=True,fastmath=True)
-def dCRdw(w,A,y):
-    dw = np.zeros(w.shape)
+def dCRdw(pars,A,y):
+    dw = np.zeros(pars.shape)
+    
     n = y.size
-    x = (np.dot(A,w)-y)
+    w = pars[:-1]
+    bias = pars[-1]
+    
+    r = np.dot(A,w)+ bias-y
     for j in range(w.size):
         for i in range(n):
-            dw[j] += x[i]*A[i,j]
-    dw *=2.0/n
+            dw[j] += r[i]*A[i,j]
+
+    dw[-1] = np.sum(r) 
+    dw *= 2.0/n
+    
     return dw
 
 @jit(nopython=True,fastmath=True)
-def constraint(w,A,y,residual):
-    return residual**2 - compute_residual(w,A,y)   
+def constraint(pars,A,y,residual):
+    return residual**2 - compute_residual(pars,A,y)   
 
 
 @jit(nopython=True,fastmath=True)
-def dCdw(w,A,y,residual):
-    dw = - dCRdw(w,A,y)
+def dCdw(pars,A,y,residual):
+    dw = - dCRdw(pars,A,y)
     return dw
 
 @jit(nopython=True,fastmath=True)
 def smoothness(w,dlogtau):
     x = np.empty_like(w)
-    x[1:-1] = w[2:]-2*w[1:-1]+w[0:-2]
+    x[1:-1] = w[2:]-2.0*w[1:-1] +w[:-2]
     x[0] = w[2]-2*w[1]+w[0]
-    x[w.size] = w[-1]-2*w[-2]+w[-3]
-    return np.sum(x**2)/dlogtau**3
+    x[-1] = w[-1]-2*w[-2]+w[-3]
+    return  np.sum(x*x)/dlogtau**3
 
 @jit(nopython=True,fastmath=True)
 def dSdw(w,dlogtau):
     dw = np.empty_like(w)
-    n = w.size
-    for j in range(2,n-2):
+    
+    for j in range(2,w.size-2):
         dw[j] = 12*w[j]-8*(w[j+1] + w[j-1])+2*(w[j+2]+w[j-2])
     dw[0] = 2*(w[2]-2*w[1]+w[0])
     dw[1] = 18*w[1]-12*w[2]-8*w[0]+2*w[3]
+    
+    n = w.size-1
     dw[n] = 2*(w[n-2]-2*w[n-1]+w[n])
     dw[n-1] = 18*w[n-1]-12*w[n-2]-8*w[n]+2*w[n-3]
+    
     return dw/dlogtau**3
 
 @jit(nopython=True,fastmath=True)
@@ -75,23 +88,29 @@ def Frelax(w,fi):
 @jit(nopython=True,fastmath=True)
 def dFdw(fi):
     return 1.0/fi
-
-
-
+@jit(nopython=True,fastmath=True)
+def L2(w):
+    return np.sum(w*w)/w.size
+@jit(nopython=True,fastmath=True)
+def dL2dw(w):
+    return 2*w/w.size
 @jit(nopython=True,fastmath=True)
 def smoothnessFrelax(w,fi,dlogtau,reg):
 
-    sm = smoothness(w,dlogtau)
-    tr = Frelax(w,fi)
+    sm = smoothness(w[:-1],dlogtau)
+    tr = Frelax(w[:-1],fi)
     
-    return  sm + reg*tr
-
+    return  sm + reg*tr # L2(w[:-1]/fi)
+ 
 
 
 @jit(nopython=True,fastmath=True)
 def dSFdw(w,fi,dlogtau,reg):
-    
-    dL = dSdw(w,dlogtau) + reg*dFdw(fi) 
+    #sm = smoothness(w[:-1],dlogtau)
+    #tr = Frelax(w[:-1],fi)
+    dL = np.empty_like(w) 
+    dL[:-1] = dSdw(w[:-1],dlogtau) + reg*dFdw(fi) #Frelax(w[:-1],fi)/np.log(10)
+    dL[-1] = 0 
     return  dL 
 
 
@@ -698,7 +717,7 @@ class plotter():
     @staticmethod
     def relaxation_time_distributions(datadict,yscale=None,
                                       size=3.5,fname=None,title=None,
-                                      cmap=None,xlim=(-6,6),pmap=None,ylim=(1e-2,1.0),
+                                      cmap=None,xlim=(-6,6),pmap=None,ylim=(1e-6,1.0),
                                       units='ns',mode='tau'):
         
         if cmap is None:
@@ -1052,10 +1071,12 @@ class fitData():
     from scipy.optimize import minimize
     
     def __init__(self,xdata,ydata,func,method='distribution',bounds=None,
-                 search_grid=None,reg_bounds=None,minimum_res_factor=3,
+                 search_grid=None,reg_bounds=None,keep_factor=3,bias_factor=1.0,
                  nw=50,regd=1000,maxiter=200,show_plots=False,**options):
         
         self.show_plots = show_plots
+        
+        
         self.method = method
         self.ydata = ydata
         self.xdata = xdata
@@ -1069,7 +1090,7 @@ class fitData():
             self.bounds = bounds
         else:
             self.bounds = (1e-7,1e7)
-            
+        
         if search_grid is not None:
             self.search_grid= search_grid
         else:
@@ -1078,9 +1099,10 @@ class fitData():
         if reg_bounds is not None:
             self.reg_bounds = reg_bounds
         else:
-            self.reg_bounds = (1e0,1e8)
-        self.minimum_res_factor = minimum_res_factor
-        self.minimum_res=1e-2
+            self.reg_bounds = (1e-20,1e8)
+        self.keep_factor = keep_factor
+        self.bias_factor = bias_factor
+        self.minimum_res=1e-6
         self.nw = nw
         self.maxiter=maxiter
         self.regd = regd
@@ -1118,16 +1140,21 @@ class fitData():
         self.fitTheModel()
         return
     
+    @property
+    def keep_res(self):
+        return self.keep_factor*self.minimum_res
+    
     def fitTheModel(self):
         
         self.justFit()
         self.estimate_minimum_residual()
+        
         self.search_best()
         return
         
     def estimate_minimum_residual(self):
         
-        mres = self.minimum_res_factor*self.data_res
+        mres = 1.01*self.data_res
         self.minimum_res = mres
         
         print('estimated data residual = {:.4e}'.format(mres))
@@ -1145,7 +1172,7 @@ class fitData():
         regs = np.array(self.regs)
         d = np.array(self.drv)
        
-        filt = d<self.minimum_res
+        filt = d<self.keep_res
         if filt.any():
             regs = regs[filt]
             crit = np.array(self.crit)[filt]
@@ -1169,7 +1196,8 @@ class fitData():
         self.tauR = []
         self.regs = []
         self.storing_list=  ['relaxation_modes','con_res','data_res',
-                   'params','prob_distr','loss','smoothness','tau_relax']
+                   'params','prob_distr','loss','smoothness','tau_relax',
+                   'bias']
         
         
         for st in self.storing_list:
@@ -1183,7 +1211,7 @@ class fitData():
         for numreg in self.search_grid:
             self.search_reg(a,b,numreg,irs)
             
-            f = np.array(self.drv) < self.minimum_res
+            f = np.array(self.drv) < self.keep_res
             c = np.array(self.crit)[f]
             re = np.array(self.regs)[f]
             irs = re[c.argsort()[0:2]]
@@ -1220,7 +1248,7 @@ class fitData():
             
             
             crit = s*t
-            if  d < self.minimum_res and crit < self.bestcr:
+            if  d < self.keep_res and crit < self.bestcr:
                 self.bestcr = crit
                 for st in self.storing_list:
                     attr = getattr(self,st)
@@ -1262,45 +1290,86 @@ class fitData():
             pars = np.zeros(self.nw) +1e-15
         return pars
     
-    def justFit(self):
-        n = self.nw
-        tau = fitData.get_logtimes(self.bounds[0],self.bounds[1],n)
-        dlogtau = np.log10(tau[1]/tau[0]) 
-        x = self.xdata.copy()
-        y = self.ydata.copy()
-       
-        
-        
-        A = self.kernel(x,tau)
-        
-
-        constraints = [ ]
+    def distribution_constraints(self):
+        constraints = []
         
         if self.is_distribution:
-            cdistr = lambda w: 1 - np.sum(w) 
-            dcddw = lambda w: -np.ones(w.shape) 
+            cdistr = lambda w: 1 - np.sum(w[:-1])
+            def dcddw(w):
+                dw = np.zeros(w.shape)
+                dw[:-1] = -1.0
+                return dw
             constraints.append({'type':'eq','fun':cdistr,'jac': dcddw})
         
         if self.zeroEdge_distribution:
             w0 = lambda w:  -w[0] 
-            wn = lambda w:  -w[-1]
+            wn = lambda w:  -w[-2]
             def dw0dw(w):
                 x = np.zeros(w.shape)
                 x[0] = -1
                 return x
             def dwndw(w):
                 x = np.zeros(w.shape)
-                x[-1] = -1
+                x[-2] = -1
                 return x
             constraints.append({'type':'eq','fun':w0,'jac':dw0dw})
             constraints.append({'type':'eq','fun':wn,'jac':dwndw})
-
-        bounds = [(0,1) for i in range(n)]
+        return constraints
+    
+    def get_them(self):
+        n = self.nw
+        tau = fitData.get_logtimes(self.bounds[0],self.bounds[1],n)
+        dlogtau = np.log10(tau[1]/tau[0]) 
+        x = self.xdata.copy()
+        y = self.ydata.copy()
+        A = self.kernel(x,tau)
+        return n,tau,dlogtau,  y, A
+    
+    def get_params(self):
+        p0 = self.initial_params()
+        bounds = [(0,1) for i in range(self.nw)]
         
+        p0 = np.concatenate((p0,[0.0]))
+        ms = self.minimum_res
+        
+        bounds.append( ( -1*ms*self.bias_factor,1*ms*self.bias_factor ) )
+        
+        return p0,bounds
+    
+    def evaluateNstore(self,opt_res):
+        n, tau, dlogtau, y, A = self.get_them()
+
+        w = opt_res.x[:-1]
+        self.bias = opt_res.x[-1]
+
+        isd = 1-w.sum() ; bl = w[0] ; bu = w[-1]
+        self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
+        
+        self.con_res = compute_residual(opt_res.x,A,y)
+        self.data_res = np.sqrt(self.con_res)
+        
+        self.params = w
+        self.opt_res = opt_res
+        self.relaxation_modes = tau
+        self.smoothness = smoothness(w,dlogtau)
+        self.loss = opt_res.fun
+        self.tau_relax = self.trelax
+        if self.show_plots:
+            #self.report()
+            #self.show_relaxation_modes(prefix='',)
+            self.show_relaxation_modes(prefix='',show_contributions=True,yscale='log')
+            #self.show_fit()
+            
+    def justFit(self):
+        
+        n, tau, dlogtau, y, A = self.get_them()
+
+        constraints = self.distribution_constraints()
+        
+        p0,bounds = self.get_params()
         
         costf = compute_residual
-        p0 = self.initial_params()   
-        #print(bounds)
+        
         opt_res = minimize(costf,p0,
                           args=(A,y),method = self.opt_method,
                           constraints=constraints,
@@ -1309,102 +1378,57 @@ class fitData():
                           options = {'maxiter':self.maxiter,'disp':self.show_report}, 
                           tol=1e-16)
         
-        isd = 1-opt_res.x.sum() ; bl = opt_res.x[0] ; bu = opt_res.x[1]
-        self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
-        self.con_res = compute_residual(opt_res.x,A,y)
-        self.data_res = np.sqrt(self.con_res)
-        
-        self.params = opt_res.x
-        self.opt_res = opt_res
-        
-        
-        self.relaxation_modes = tau
-        
-        self.smoothness = smoothness(opt_res.x,dlogtau)
-        self.loss = opt_res.fun
-        self.tau_relax = self.trelax
-        if self.show_plots:
-            self.report()
-            self.show_relaxation_modes(prefix='',)
-            self.show_relaxation_modes(prefix='',show_contributions=True,yscale='log')
-            self.show_fit()
+        self.evaluateNstore(opt_res)
         return opt_res
     
     def exactFit(self,a,b,n,regs=1):
-        
-        tau = fitData.get_logtimes(a,b,n)
-        dlogtau = np.log10(tau[1]/tau[0]) 
-        x = self.xdata.copy()
-        y = self.ydata.copy()
-        ya = y.copy()
-        
-        
-        A = self.kernel(x,tau)
-        
-        
+
+        n, tau, dlogtau, y, A = self.get_them()
         constraints = [   {'type':'ineq',
                          'fun': constraint,
                          'jac': dCdw,
-                         'args':(A,ya,self.minimum_res/np.sqrt(self.minimum_res_factor))
+                         'args':(A,y,self.minimum_res)
                         } 
                       ]
-        #regd = self.regd
-        if self.is_distribution:
-            cdistr = lambda w: 1 - np.sum(w) 
-            dcddw = lambda w: -np.ones(w.shape) 
-            constraints.append({'type':'eq','fun':cdistr,'jac': dcddw})
         
-        if self.zeroEdge_distribution:
-            w0 = lambda w:  -w[0] 
-            wn = lambda w:  -w[-1]
-            def dw0dw(w):
-                x = np.zeros(w.shape)
-                x[0] = -1
-                return x
-            def dwndw(w):
-                x = np.zeros(w.shape)
-                x[-1] = -1
-                return x
-            constraints.append({'type':'eq','fun':w0,'jac':dw0dw})
-            constraints.append({'type':'eq','fun':wn,'jac':dwndw})
-
-        bounds = [(0,1) for i in range(n)]
+        constraints.extend(self.distribution_constraints())
         
+        p0,bounds = self.get_params()
         
         costf = self.costf 
-        p0 = self.initial_params()   
-        #print(bounds)
+              
         opt_res = minimize(costf,p0,
                           args=(tau,dlogtau,regs),method = self.opt_method,
                           constraints=constraints,
                           bounds=bounds,
-                          #jac=dSFdw,
+                          jac=dSFdw,
                           options = {'maxiter':self.maxiter,'disp':self.show_report},
-                          tol=regs*1e-6)
+                          tol=1e-6)
         
-        isd = 1-opt_res.x.sum() ; bl = opt_res.x[0] ; bu = opt_res.x[1]
-        self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
-        self.con_res = compute_residual(opt_res.x,A,y)
-        self.data_res = np.sqrt(self.con_res )
-        
-        self.params = opt_res.x
-        self.opt_res = opt_res
-        
-        
-        self.relaxation_modes = tau
-        
-        self.smoothness = smoothness(opt_res.x,dlogtau)
-        self.loss = opt_res.fun
-        self.tau_relax = self.trelax
-        if self.show_plots:
-            self.report()
-            self.show_relaxation_modes(prefix='',)
-            self.show_relaxation_modes(prefix='',show_contributions=True,yscale='log')
-            self.show_fit()
+        self.evaluateNstore(opt_res)
         return opt_res
     
-    @property
-    def trelax(self):
+    def show_tstar(self,tmax,n=1000,size=3.5,title=None):
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        
+        dt = tmax/n
+        t = np.arange(0,tmax,dt)
+        tstar = [ self.tstar(ts) for ts in t]
+        plt.yscale('log')
+        plt.xscale('log')
+        if title is not None:
+            plt.title(title)
+        plt.xlabel(r'$t^*$')
+        plt.ylabel(r"$t^{*}_{relax}$")
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.plot(t,tstar,color='k',marker='.')
+        plt.show()
+        return 
+    def get_wrm(self):
         try:
             w=self.params
         except AttributeError as err:
@@ -1413,6 +1437,38 @@ class fitData():
             rm = self.relaxation_modes
         except AttributeError as e:
             raise e
+        return w,rm
+    def phit(self,ts):
+        w, rm = self.get_wrm()
+        f = lambda w,rm : np.sum(w*np.exp(-ts*rm))
+        t = lambda w,rm : np.sum(w*np.exp(-ts/rm))
+        p = f(w,rm)  if self.mode =='freq' else t(w,rm)
+        
+        return p 
+    
+    def dertstar(self,ts):
+        dts = 1 - self.phit(ts)
+        
+        return dts
+    
+    def tstar(self,ts):
+        w, rm = self.get_wrm()
+        f = lambda w,rm : np.sum((1.0-np.exp(-ts*rm))*w/rm)
+        t = lambda w,rm : np.sum(rm*w*(1.0-np.exp(-ts/rm)))
+        tr = f(w,rm)  if self.mode =='freq' else t(w,rm)
+        
+        return tr
+    
+    @property
+    def tmax(self):
+        w, rm = self.get_wrm()
+        a = w.argmax()
+        tr = 1/rm[a]  if self.mode =='freq' else rm[a]
+        return tr
+    
+    @property
+    def trelax(self):
+        w, rm = self.get_wrm()
         tr = Frelax(w,rm) if self.mode =='freq' else Trelax(w,rm)
         return tr
     
@@ -1423,7 +1479,7 @@ class fitData():
     def report(self):
         for k in ['prob_distr','con_res','data_res',
                   'smoothness','loss','trelax',
-                  'current_reg','nsearches']:
+                  'current_reg','nsearches','bias']:
             try:
                 a = getattr(self,k)
             except:
@@ -1450,7 +1506,7 @@ class fitData():
         d = np.array(self.drv)
         s = np.array(self.smv)
         t = np.array(self.tauR)
-        filt = d <= self.minimum_res
+        filt = d <= self.keep_res
         s = s[filt]
         t = t[filt]
         
@@ -1535,7 +1591,7 @@ class fitData():
         plt.xscale('log')
         if yscale is not None:
             plt.yscale(yscale)
-       # if yscale =='log':
+        #if yscale =='log':
             
             #plt.yticks([10**y for y in range(-9,1) ])
             #plt.ylim(1e-9,1)
@@ -1576,7 +1632,7 @@ class fitData():
     
     def fitted_curve(self,x):
         if self.method =='distribution':
-            return self.func(x,self.bounds[0],self.bounds[1],self.params)
+            return self.func(x,self.bounds[0],self.bounds[1],self.params) + self.bias
         else:
             return self.func(x,*self.params)
         
