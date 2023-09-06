@@ -81,13 +81,33 @@ def dSdw(w,dlogtau):
 @jit(nopython=True,fastmath=True)
 def Trelax(w,fi):
     return np.sum(w*fi)
+
 @jit(nopython=True,fastmath=True)
 def Frelax(w,fi):
     return np.sum(w/fi)
 
 @jit(nopython=True,fastmath=True)
-def dFdw(fi):
-    return 1.0/fi
+def FrelaxCost(w,fi):
+    contr = Frelax(w[:-1],fi)
+    
+    return contr
+
+@jit(nopython=True,fastmath=True)
+def dFdw(w,fi):
+    d  = np.empty_like(w)
+    d[:-1] = 1.0/fi
+    d[-1] = 0
+    return d
+@jit(nopython=True,fastmath=True)
+def FrelaxCon(w,fi,target):
+    return target - np.sum(w[:-1]/fi)
+@jit(nopython=True,fastmath=True)
+def dFCdw(w,fi,target):
+    d  = np.empty_like(w)
+    d[:-1] = -1.0/fi
+    d[-1] = 0
+    return d
+
 @jit(nopython=True,fastmath=True)
 def L2(w):
     return np.sum(w*w)/w.size
@@ -98,18 +118,14 @@ def dL2dw(w):
 def smoothnessFrelax(w,fi,dlogtau,reg):
 
     sm = smoothness(w[:-1],dlogtau)
-    tr = Frelax(w[:-1],fi)
-    
-    return  sm + reg*tr # L2(w[:-1]/fi)
+    return  sm 
  
 
 
 @jit(nopython=True,fastmath=True)
 def dSFdw(w,fi,dlogtau,reg):
-    #sm = smoothness(w[:-1],dlogtau)
-    #tr = Frelax(w[:-1],fi)
     dL = np.empty_like(w) 
-    dL[:-1] = dSdw(w[:-1],dlogtau) + reg*dFdw(fi) #Frelax(w[:-1],fi)/np.log(10)
+    dL[:-1] = dSdw(w[:-1],dlogtau)
     dL[-1] = 0 
     return  dL 
 
@@ -1072,7 +1088,7 @@ class fitData():
     
     def __init__(self,xdata,ydata,func,method='distribution',bounds=None,
                  search_grid=None,reg_bounds=None,keep_factor=3,bias_factor=1.0,
-                 nw=50,regd=1000,maxiter=200,show_plots=False,**options):
+                 nw=50,bound_res=1e-3,maxiter=200,show_plots=False,**options):
         
         self.show_plots = show_plots
         
@@ -1102,10 +1118,10 @@ class fitData():
             self.reg_bounds = (1e-20,1e8)
         self.keep_factor = keep_factor
         self.bias_factor = bias_factor
-        self.minimum_res=1e-6
+        self.minimum_res=bound_res
         self.nw = nw
         self.maxiter=maxiter
-        self.regd = regd
+        
         
         if 'weights' in options:
             self.weights = options['weights']
@@ -1153,33 +1169,27 @@ class fitData():
         return
         
     def estimate_minimum_residual(self):
-        
-        mres = 1.01*self.data_res
+        mres = max(self.minimum_res,1.5*self.data_res)
         self.minimum_res = mres
         
         print('estimated data residual = {:.4e}'.format(mres))
         print('estimated constraint residual = {:.4e}'.format(mres**2))
         return
-    
+    def refine_bounds(self):
+        if self.mode =='freq':
+            bh = self.bounds[1]
+            bl = 1/(self.tau_relax*1e3)
+        else:
+            bl = self.bounds[0]
+            bh = self.tau_relax*1e3
+        self.bounds = (bl,bh)
+        return 
     def get_weights(self,wm):
         if wm =='high-y':
             w = np.abs(self.ydata)+0.02
         else:
             w = np.ones(self.ydata.shape[0])
-        return w
-    
-    def bestcrit(self):
-        regs = np.array(self.regs)
-        d = np.array(self.drv)
-       
-        filt = d<self.keep_res
-        if filt.any():
-            regs = regs[filt]
-            crit = np.array(self.crit)[filt]
-        else:
-
-            raise Exception(' There are No regulirization parameters that satisfy the residual. \nThis could be one of the following:\n (1) The bounds for the distribution are too narrow \n (2) The regulizing parameter bounds are too narrow \n (3) The residual is too small to be satisfied')
-        return np.argmin(crit)    
+        return w  
     
     @property
     def bestreg(self):
@@ -1191,31 +1201,35 @@ class fitData():
         return regbest
     def search_best(self):
         self.crit = []
-        self.smv = []
-        self.drv = []
-        self.tauR = []
-        self.regs = []
         self.storing_list=  ['relaxation_modes','con_res','data_res',
                    'params','prob_distr','loss','smoothness','tau_relax',
                    'bias']
-        
+        self.storing_dict = {k:[] for k in self.storing_list}
         
         for st in self.storing_list:
             setattr(self,'best_'+st,None)
             
-        irs = self.reg_bounds
-        a = self.bounds[0]
-        b = self.bounds[1]
+        self.taulow = min(self.xdata[-1]*self.ydata[-1],self.smallerTauRelaxFit())
+        self.tauhigh = 1e2*self.smootherFit()
+        self.refine_bounds()
+        tl = self.taulow
+        th = self.tauhigh
+        print('trelax bounds: [{:.3e} , {:.3e}]'.format(tl,th))        
+        if tl > th:
+            raise Exception('Minimizing the relaxation time gives higher tau than minimizing the smoothness')
+        
+
         self.bestcr = float('inf')
         
+        tau_bounds = (tl,th)
         for numreg in self.search_grid:
-            self.search_reg(a,b,numreg,irs)
+            self.search_reg(numreg,tau_bounds)
             
-            f = np.array(self.drv) < self.keep_res
+            f = np.array(self.storing_dict['data_res']) < self.keep_res
             c = np.array(self.crit)[f]
-            re = np.array(self.regs)[f]
-            irs = re[c.argsort()[0:2]]
-            irs.sort()
+            re = np.array(self.storing_dict['tau_relax'])[f]
+            tau_bounds = re[c.argsort()[0:2]]
+            tau_bounds.sort()
 
         for st in self.storing_list:
             setattr(self,st,getattr(self,'best_'+st))
@@ -1224,7 +1238,7 @@ class fitData():
 
         return
     
-    def search_reg(self,a,b,numreg,irs=(1e-30,1e30)):
+    def search_reg(self,numreg,taub):
         
         for attr in ['crit','smv','drv','regs']:
             try:
@@ -1232,44 +1246,52 @@ class fitData():
             except AttributeError:
                 setattr(self,attr,[])
                 
-        lreg = np.logspace(np.log10(irs[0]),np.log10(irs[1]),base=10,num=numreg)
-        #lreg = np.linspace(irs[0],irs[1],num=numreg)
-
-        n = self.nw
-        a = self.bounds[0]
-        b = self.bounds[1]
+        lreg = np.logspace(np.log10(taub[0]),np.log10(taub[1]),base=10,num=numreg)       
         
         for reg in lreg:
             
             self.current_reg = reg
-            self.exactFit(a,b,n,reg)
+            self.exactFit(reg)
             #print('lr = {:.3e}'.format(lr))
-            s = self.smoothness ; t = self.tau_relax ; d = self.data_res
-            
-            
+            s = self.smoothness ; t = self.tau_relax 
+            for k in self.storing_list:
+                self.storing_dict[k].append(getattr(self,k))
+                
+
             crit = s*t
-            if  d < self.keep_res and crit < self.bestcr:
-                self.bestcr = crit
-                for st in self.storing_list:
-                    attr = getattr(self,st)
-                    if type(attr) is type(np.ones(3)): 
-                        attr = attr.copy()
-                    setattr(self,'best_'+st,attr)
-            self.smv.append(s)  
-            self.tauR.append(t)  
-            self.drv.append(d)
-            self.regs.append(reg) ;
+
             self.crit.append( crit)
     
-            self.nsearches = len(self.regs)
+            self.nsearches = len(self.crit)
             
-
-                
-            if self.show_report:
-                self.report()
             #self.show_relaxation_modes(title='lr = {:.3e}'.format(lr))
+        dres = np.array(self.storing_dict['data_res'])
+        fd = dres < self.keep_res
+        i=0
+        
+        perc = lambda f : np.count_nonzero(f)/f.size
+        if  perc(fd)<0.2:
+            while perc(fd) <0.2:
+                self.keep_factor=self.keep_factor*2
+                i+=1
+                fd =  dres < self.keep_res
+                
+                if i>5: 
+                    raise Exception('Increased keep_res too much and still no solution satysfies it')
+        print('Increased keep_res by {:4.3f} times'.format(2**i))
+        self.select_best_solution()
+        
         return
-    
+
+    def select_best_solution(self):
+        f = np.array(self.storing_dict['data_res']) < self.keep_res
+        a = np.array(self.crit)[f].argmin()
+        for st in self.storing_list:
+            attr = np.array(self.storing_dict[st])[f][a]
+            if type(attr) is type(np.ones(3)): 
+                attr = attr.copy()
+            setattr(self,'best_'+st,attr)
+        return 
     
     @staticmethod
     def get_logtimes(a,b,n):
@@ -1355,11 +1377,13 @@ class fitData():
         self.loss = opt_res.fun
         self.tau_relax = self.trelax
         if self.show_plots:
-            #self.report()
-            #self.show_relaxation_modes(prefix='',)
+            self.show_relaxation_modes(prefix='',)
             self.show_relaxation_modes(prefix='',show_contributions=True,yscale='log')
-            #self.show_fit()
-            
+            self.show_fit()
+
+        if self.show_report:
+            self.report()
+        return
     def justFit(self):
         
         n, tau, dlogtau, y, A = self.get_them()
@@ -1381,8 +1405,7 @@ class fitData():
         self.evaluateNstore(opt_res)
         return opt_res
     
-    def exactFit(self,a,b,n,regs=1):
-
+    def smallerTauRelaxFit(self):
         n, tau, dlogtau, y, A = self.get_them()
         constraints = [   {'type':'ineq',
                          'fun': constraint,
@@ -1391,6 +1414,64 @@ class fitData():
                         } 
                       ]
         
+        constraints.extend(self.distribution_constraints())
+        
+        p0,bounds = self.get_params()
+        
+        costf = FrelaxCost
+              
+        opt_res = minimize(costf,p0,
+                          args=(tau,),method = self.opt_method,
+                          constraints=constraints,
+                          bounds=bounds,
+                          #jac=dFdw,
+                          options = {'maxiter':self.maxiter,'disp':self.show_report},
+                          tol=1e-6)
+        
+        self.evaluateNstore(opt_res)
+        return self.trelax
+    
+    def smootherFit(self):
+        n, tau, dlogtau, y, A = self.get_them()
+        constraints = [   {'type':'ineq',
+                         'fun': constraint,
+                         'jac': dCdw,
+                         'args':(A,y,self.minimum_res)
+                        } 
+                      ]
+        
+        constraints.extend(self.distribution_constraints())
+        
+        p0,bounds = self.get_params()
+        
+        costf = smoothness
+              
+        opt_res = minimize(costf,p0,
+                          args=(dlogtau,),method = self.opt_method,
+                          constraints=constraints,
+                          bounds=bounds,
+                          jac=dSdw,
+                          options = {'maxiter':self.maxiter,'disp':self.show_report},
+                          tol=1e-6)
+        
+        self.evaluateNstore(opt_res)
+        return self.trelax
+    def exactFit(self,regs=1):
+
+        n, tau, dlogtau, y, A = self.get_them()
+        
+        constraints = [   {'type':'ineq',
+                         'fun': constraint,
+                         'jac': dCdw,
+                         'args':(A,y,self.minimum_res)
+                        } ,
+                       {'type':'eq',
+                         'fun': FrelaxCon,
+                         'jac': dFCdw,
+                         'args':(tau,regs)
+                        }
+                      ]
+        #self.refine_bounds()
         constraints.extend(self.distribution_constraints())
         
         p0,bounds = self.get_params()
@@ -1503,13 +1584,17 @@ class fitData():
         plt.minorticks_on()
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
-        d = np.array(self.drv)
-        s = np.array(self.smv)
-        t = np.array(self.tauR)
-        filt = d <= self.keep_res
-        s = s[filt]
-        t = t[filt]
+        d = np.array(self.storing_dict['data_res'])
+        si = np.array(self.storing_dict['smoothness'])
+        ti = np.array(self.storing_dict['tau_relax'])
         
+        filt = d <= self.keep_res
+        s = si[filt]
+        t = ti[filt]
+        
+        nf = np.logical_not(filt)
+        ns = si[nf]
+        ts = ti[nf]
         plt.xscale('log')
         plt.yscale('log')
         plt.yticks(fontsize=2.5*size)
@@ -1519,8 +1604,8 @@ class fitData():
             plt.title('Pareto Front')
         else:
             plt.title(title)
-        plt.plot(s,t,
-                 ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
+        plt.plot(s,t,label='accepted',
+                 ls='none',marker='o',color='green',markersize=1.7*size,fillstyle='none')
         
         pareto = []
         for i,(si,ti) in enumerate(zip(s,t)):
@@ -1533,12 +1618,15 @@ class fitData():
         sp = s[p] ; tp =t[p]
         ser = sp.argsort()
         sp = sp[ser] ; tp = tp[ser]
-        plt.ylim([tp.min()/3,tp.max()*3.0])
-        plt.xlim([sp.min()/3,sp.max()*3.0])
-        plt.plot(sp,tp,ls='--',color='k',lw=size/5)
-        plt.plot([self.best_smoothness],[self.best_tau_relax],marker='o',color='red',markersize=1.7*size)
-        
+        #plt.ylim([tp.min()/3,tp.max()*3.0])
+        #plt.xlim([sp.min()/3,sp.max()*3.0])
+        plt.plot(sp,tp,ls='--',color='blue',lw=size/5,label='P. front')
+        plt.plot([self.best_smoothness],[self.best_tau_relax],marker='o',
+                 color='blue',markersize=1.7*size,label='selected')
+        plt.plot(ns,ts,color = 'red',label='rejected',ls='none',
+                 marker='o',fillstyle='none',markersize=1.7*size)
         plt.xticks(fontsize=2.5*size)
+        plt.legend(frameon=False,fontsize=1.5*size)
         if fname is not None:
             plt.savefig(fname,bbox_inches='tight')
         plt.show()
