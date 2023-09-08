@@ -24,8 +24,8 @@ import pickle
 def compute_residual(pars,A,y):
     w = pars[:-1]
     bias = pars[-1]
-    r = np.dot(A,w) + bias -y
-    return np.sum(r*r)/y.size
+    r = np.dot(A,w) + bias - y
+    return np.sqrt(np.sum(r*r)/y.size)
 
 @jit(nopython=True,fastmath=True)
 def dCRdw(pars,A,y):
@@ -34,20 +34,22 @@ def dCRdw(pars,A,y):
     n = y.size
     w = pars[:-1]
     bias = pars[-1]
-    
-    r = np.dot(A,w)+ bias-y
+  
+    r = np.dot(A,w)+ bias - y
+    c = np.sqrt(np.sum(r*r)/y.size)
+
     for j in range(w.size):
         for i in range(n):
             dw[j] += r[i]*A[i,j]
 
     dw[-1] = np.sum(r) 
-    dw *= 2.0/n
+    dw *= 1.0/n/c
     
     return dw
 
 @jit(nopython=True,fastmath=True)
 def constraint(pars,A,y,residual):
-    return residual**2 - compute_residual(pars,A,y)   
+    return residual - compute_residual(pars,A,y)   
 
 
 @jit(nopython=True,fastmath=True)
@@ -1101,7 +1103,7 @@ class fitData():
         
         if method == 'distribution':
             self.kernel = getattr(fitKernels,func)
-        self.costf = smoothnessFrelax if self.mode=='freq' else smoothnessTrelax
+        
         if bounds is not None:
             self.bounds = bounds
         else:
@@ -1153,7 +1155,7 @@ class fitData():
         else:
             self.opt_method = 'SLSQP'
             
-        self.fitTheModel()
+        
         return
     
     @property
@@ -1164,24 +1166,62 @@ class fitData():
         
         self.justFit()
         self.estimate_minimum_residual()
-        
+
+        self.taulow = self.estimate_taulow()
+        self.tauhigh = self.estimate_tauhigh()
+        if True:
+            izero = self.get_arg_t0()
+            if  izero != self.ydata.size:
+                self.ydata = self.ydata[:izero]
+                self.xdata = self.xdata[:izero]
+        self.refine_bounds()
         self.search_best()
         return
+    def estimate_tauhigh(self):
+        smfittau = self.smootherFit()
+        if self.get_arg_t0() == self.ydata.size:
+            # Need to extrapolate
+            tau = smfittau
+        else:
+            tau = self.estimate_taudata()
+        return 1e1*tau
+    
+    def estimate_taulow(self):
+        smtau = self.smallerTauRelaxFit()
+        taudata = self.estimate_taudata()
+        return 1e-1*min(smtau,taudata)
+    
+    def estimate_taudata(self):
+        x = self.xdata
+        y = self.ydata
+        izero = self.get_arg_t0()
+        dt = x[1:izero] - x[:izero-1]
+        yi = y[:izero-1]
+        return np.sum(yi*dt)
+        
         
     def estimate_minimum_residual(self):
-        mres = max(self.minimum_res,1.5*self.data_res)
+        mres = max(self.minimum_res,1.0*self.data_res)
         self.minimum_res = mres
         
         print('estimated data residual = {:.4e}'.format(mres))
-        print('estimated constraint residual = {:.4e}'.format(mres**2))
         return
+    def get_arg_t0(self):
+        f = self.ydata <= 0.01
+        smallys = np.where(f)[0]
+        
+        if len(smallys) ==0:
+            return self.ydata.size
+        izero = smallys[0]
+        return izero
+    
     def refine_bounds(self):
         if self.mode =='freq':
             bh = self.bounds[1]
-            bl = 1/(self.tau_relax*1e3)
+            bl = 1/(self.tauhigh*1e3)
         else:
             bl = self.bounds[0]
-            bh = self.tau_relax*1e3
+            bh = self.tauhigh*1e3
         self.bounds = (bl,bh)
         return 
     def get_weights(self,wm):
@@ -1209,9 +1249,7 @@ class fitData():
         for st in self.storing_list:
             setattr(self,'best_'+st,None)
             
-        self.taulow = min(self.xdata[-1]*self.ydata[-1],self.smallerTauRelaxFit())
-        self.tauhigh = 1e2*self.smootherFit()
-        self.refine_bounds()
+
         tl = self.taulow
         th = self.tauhigh
         print('trelax bounds: [{:.3e} , {:.3e}]'.format(tl,th))        
@@ -1246,43 +1284,44 @@ class fitData():
             except AttributeError:
                 setattr(self,attr,[])
                 
-        lreg = np.logspace(np.log10(taub[0]),np.log10(taub[1]),base=10,num=numreg)       
+        target_taus = np.logspace(np.log10(taub[0]),np.log10(taub[1]),base=10,num=numreg)       
         
-        for reg in lreg:
+        for tartau in target_taus:
             
-            self.current_reg = reg
-            self.exactFit(reg)
+            self.target_tau = tartau
+            self.exactFit(tartau)
             #print('lr = {:.3e}'.format(lr))
-            s = self.smoothness ; t = self.tau_relax 
+            s = self.smoothness ; t = self.tau_relax ; d = self.data_res 
             for k in self.storing_list:
                 self.storing_dict[k].append(getattr(self,k))
                 
 
-            crit = s*t
+            crit = d*s*t**(1-self.ydata[-1])
 
             self.crit.append( crit)
     
             self.nsearches = len(self.crit)
             
             #self.show_relaxation_modes(title='lr = {:.3e}'.format(lr))
-        dres = np.array(self.storing_dict['data_res'])
-        fd = dres < self.keep_res
-        i=0
+        self.refine_keep_res()
         
-        perc = lambda f : np.count_nonzero(f)/f.size
-        if  perc(fd)<0.2:
-            while perc(fd) <0.2:
-                self.keep_factor=self.keep_factor*2
-                i+=1
-                fd =  dres < self.keep_res
-                
-                if i>5: 
-                    raise Exception('Increased keep_res too much and still no solution satysfies it')
-        print('Increased keep_res by {:4.3f} times'.format(2**i))
         self.select_best_solution()
         
         return
-
+    def refine_keep_res(self):
+        dres = np.array(self.storing_dict['data_res'])
+        fd = dres < self.keep_res
+        i=0
+        factor =1.1
+        #add = lambda f : np.count_nonzero(f)
+        while fd.any()==False:
+            self.keep_factor=self.keep_factor*factor
+            i+=1
+            fd =  dres < self.keep_res            
+            if self.keep_res>0.1: 
+                raise Exception('Increased keep_res too much and still no solution satysfies it')
+        print('Increased keep_res by {:4.3f} times'.format(factor**i)) 
+        return   
     def select_best_solution(self):
         f = np.array(self.storing_dict['data_res']) < self.keep_res
         a = np.array(self.crit)[f].argmin()
@@ -1368,7 +1407,7 @@ class fitData():
         self.prob_distr = {'isd':isd,'blow':bl,'bup':bu}
         
         self.con_res = compute_residual(opt_res.x,A,y)
-        self.data_res = np.sqrt(self.con_res)
+        self.data_res = self.con_res
         
         self.params = w
         self.opt_res = opt_res
@@ -1456,7 +1495,7 @@ class fitData():
         
         self.evaluateNstore(opt_res)
         return self.trelax
-    def exactFit(self,regs=1):
+    def exactFit(self,target_tau):
 
         n, tau, dlogtau, y, A = self.get_them()
         
@@ -1468,7 +1507,7 @@ class fitData():
                        {'type':'eq',
                          'fun': FrelaxCon,
                          'jac': dFCdw,
-                         'args':(tau,regs)
+                         'args':(tau,target_tau)
                         }
                       ]
         #self.refine_bounds()
@@ -1476,19 +1515,33 @@ class fitData():
         
         p0,bounds = self.get_params()
         
-        costf = self.costf 
+        costf = smoothness
               
         opt_res = minimize(costf,p0,
-                          args=(tau,dlogtau,regs),method = self.opt_method,
+                          args=(dlogtau,),method = self.opt_method,
                           constraints=constraints,
                           bounds=bounds,
-                          jac=dSFdw,
+                          jac=dSdw,
                           options = {'maxiter':self.maxiter,'disp':self.show_report},
                           tol=1e-6)
         
         self.evaluateNstore(opt_res)
         return opt_res
-    
+    def show_residual_distribution(self,fname=None,size=3.5,title=None):
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        plt.xscale('log')
+        if title is not None:
+            plt.title(title)
+        plt.ylabel(r'number of occurances')
+        plt.xlabel(r"$residual$")
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.hist(self.storing_dict['data_res'],bins=100,color='k')
+        plt.show()
+        return 
     def show_tstar(self,tmax,n=1000,size=3.5,title=None):
         figsize = (size,size)
         dpi = 300
@@ -1560,7 +1613,7 @@ class fitData():
     def report(self):
         for k in ['prob_distr','con_res','data_res',
                   'smoothness','loss','trelax',
-                  'current_reg','nsearches','bias']:
+                  'target_tau','nsearches','bias']:
             try:
                 a = getattr(self,k)
             except:
@@ -1670,6 +1723,9 @@ class fitData():
                               title=None,color='red',fname=None,
                               show_contributions=False,prefix='best_'):
         
+        rm = getattr(self,prefix+'relaxation_modes')
+        pars = getattr(self,prefix+'params')
+        
         figsize = (size,size)
         dpi = 300
         fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
@@ -1679,10 +1735,13 @@ class fitData():
         plt.xscale('log')
         if yscale is not None:
             plt.yscale(yscale)
-        #if yscale =='log':
-            
-            #plt.yticks([10**y for y in range(-9,1) ])
-            #plt.ylim(1e-9,1)
+        if yscale =='log':
+            y0 = -5
+            if show_contributions:
+                contr = pars/rm if self.mode == 'freq' else pars*rm
+                ym = int(np.log10(max(contr))+1)    
+            plt.yticks([10**y for y in range(y0,ym )])
+            plt.ylim(10**y0,10**ym)
         plt.yticks(fontsize=2.5*size)
         locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
         ax.xaxis.set_minor_locator(locmin)
@@ -1698,8 +1757,6 @@ class fitData():
             plt.title('Relaxation times distribution')
         else:
             plt.title(title)
-        rm = getattr(self,prefix+'relaxation_modes')
-        pars = getattr(self,prefix+'params')
         
         plt.plot(rm,pars,
                  ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
