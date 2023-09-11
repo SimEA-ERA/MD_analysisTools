@@ -58,16 +58,24 @@ def dCdw(pars,A,y,residual):
     return dw
 
 @jit(nopython=True,fastmath=True)
-def smoothness(w,dlogtau):
+def smoothness(pars,dlogtau):
+    w = pars[:-1]
     x = np.empty_like(w)
-    x[1:-1] = w[2:]-2.0*w[1:-1] +w[:-2]
+    n = w.size-1
+    for j in range(1,n):
+        x[j] = w[j+1]-2.0*w[j] +w[j-1]
     x[0] = w[2]-2*w[1]+w[0]
-    x[-1] = w[-1]-2*w[-2]+w[-3]
-    return  np.sum(x*x)/dlogtau**3
+    
+    x[n] = w[n]-2*w[n-1]+w[n-2]
+    
+    return  np.sum(x*x)/dlogtau**3 
 
 @jit(nopython=True,fastmath=True)
-def dSdw(w,dlogtau):
-    dw = np.empty_like(w)
+def dSdw(pars,dlogtau):
+    
+    w = pars[:-1]
+    #print(pars.size,w.size)
+    dw = np.empty_like(pars)
     
     for j in range(2,w.size-2):
         dw[j] = 12*w[j]-8*(w[j+1] + w[j-1])+2*(w[j+2]+w[j-2])
@@ -78,7 +86,9 @@ def dSdw(w,dlogtau):
     dw[n] = 2*(w[n-2]-2*w[n-1]+w[n])
     dw[n-1] = 18*w[n-1]-12*w[n-2]-8*w[n]+2*w[n-3]
     
-    return dw/dlogtau**3
+    dw[:-1] = dw[:-1]/dlogtau**3 
+    dw[-1] = 0
+    return dw
 
 @jit(nopython=True,fastmath=True)
 def Trelax(w,fi):
@@ -117,18 +127,15 @@ def L2(w):
 def dL2dw(w):
     return 2*w/w.size
 @jit(nopython=True,fastmath=True)
-def smoothnessFrelax(w,fi,dlogtau,reg):
-
-    sm = smoothness(w[:-1],dlogtau)
-    return  sm 
+def FitCost(pars,dlogtau):
+    sm = smoothness(pars,dlogtau)
+    return  sm
  
 
 
 @jit(nopython=True,fastmath=True)
-def dSFdw(w,fi,dlogtau,reg):
-    dL = np.empty_like(w) 
-    dL[:-1] = dSdw(w[:-1],dlogtau)
-    dL[-1] = 0 
+def dFitCostdw(pars,dlogtau):
+    dL = dSdw(pars,dlogtau)   
     return  dL 
 
 
@@ -1174,7 +1181,7 @@ class fitData():
             if  izero != self.ydata.size:
                 self.ydata = self.ydata[:izero]
                 self.xdata = self.xdata[:izero]
-        self.refine_bounds()
+        self.refine_bounds(self.tauhigh)
         self.search_best()
         return
     def estimate_tauhigh(self):
@@ -1184,12 +1191,13 @@ class fitData():
             tau = smfittau
         else:
             tau = self.estimate_taudata()
-        return 1e1*tau
+        return 1e2*tau
     
     def estimate_taulow(self):
-        smtau = self.smallerTauRelaxFit()
+        smalltau = self.smallerTauRelaxFit()
         taudata = self.estimate_taudata()
-        return 1e-1*min(smtau,taudata)
+        tau = min(smalltau,taudata) if smalltau !=0 else taudata
+        return 1e-1*tau
     
     def estimate_taudata(self):
         x = self.xdata
@@ -1215,13 +1223,13 @@ class fitData():
         izero = smallys[0]
         return izero
     
-    def refine_bounds(self):
+    def refine_bounds(self,th):
         if self.mode =='freq':
             bh = self.bounds[1]
-            bl = 1/(self.tauhigh*1e3)
+            bl = 1/(th*1e3)
         else:
             bl = self.bounds[0]
-            bh = self.tauhigh*1e3
+            bh = th*1e3
         self.bounds = (bl,bh)
         return 
     def get_weights(self,wm):
@@ -1261,14 +1269,19 @@ class fitData():
         
         tau_bounds = (tl,th)
         for numreg in self.search_grid:
+            dilog = (np.log10(tau_bounds[1])-np.log10(tau_bounds[0]))/numreg
+            print(numreg,dilog,tau_bounds)
             self.search_reg(numreg,tau_bounds)
             
             f = np.array(self.storing_dict['data_res']) < self.keep_res
             c = np.array(self.crit)[f]
             re = np.array(self.storing_dict['tau_relax'])[f]
-            tau_bounds = re[c.argsort()[0:2]]
-            tau_bounds.sort()
-
+            rem = re[c.argmin()]
+            th = rem*10**dilog
+            tl = rem*10**(-dilog)
+            tau_bounds = (tl,th)
+            
+            
         for st in self.storing_list:
             setattr(self,st,getattr(self,'best_'+st))
         #rgbest = self.bestreg
@@ -1289,32 +1302,36 @@ class fitData():
         for tartau in target_taus:
             
             self.target_tau = tartau
+            self.refine_bounds(tartau)
             self.exactFit(tartau)
-            #print('lr = {:.3e}'.format(lr))
+            
             s = self.smoothness ; t = self.tau_relax ; d = self.data_res 
             for k in self.storing_list:
                 self.storing_dict[k].append(getattr(self,k))
                 
 
-            crit = d*s*t**(1-self.ydata[-1])
+            crt = self.criterium(d,s,t)
 
-            self.crit.append( crit)
+            self.crit.append(crt)
     
             self.nsearches = len(self.crit)
-            
-            #self.show_relaxation_modes(title='lr = {:.3e}'.format(lr))
+
         self.refine_keep_res()
         
         self.select_best_solution()
         
         return
+    
+    def criterium(self,d,s,t):
+        return d*s*t**(1-self.ydata[-1])
+    
     def refine_keep_res(self):
         dres = np.array(self.storing_dict['data_res'])
         fd = dres < self.keep_res
         i=0
         factor =1.1
-        #add = lambda f : np.count_nonzero(f)
-        while fd.any()==False:
+        add = lambda f : np.count_nonzero(f)
+        while add(fd)<2:
             self.keep_factor=self.keep_factor*factor
             i+=1
             fd =  dres < self.keep_res            
@@ -1412,7 +1429,7 @@ class fitData():
         self.params = w
         self.opt_res = opt_res
         self.relaxation_modes = tau
-        self.smoothness = smoothness(w,dlogtau)
+        self.smoothness = smoothness(opt_res.x,dlogtau)
         self.loss = opt_res.fun
         self.tau_relax = self.trelax
         if self.show_plots:
@@ -1481,6 +1498,7 @@ class fitData():
         
         constraints.extend(self.distribution_constraints())
         
+        
         p0,bounds = self.get_params()
         
         costf = smoothness
@@ -1495,6 +1513,8 @@ class fitData():
         
         self.evaluateNstore(opt_res)
         return self.trelax
+    
+    
     def exactFit(self,target_tau):
 
         n, tau, dlogtau, y, A = self.get_them()
@@ -1510,23 +1530,56 @@ class fitData():
                          'args':(tau,target_tau)
                         }
                       ]
-        #self.refine_bounds()
-        constraints.extend(self.distribution_constraints())
         
+        
+        constraints.extend(self.distribution_constraints())
+        constraints.extend(self.contribution_constraints(target_tau,tau))    
         p0,bounds = self.get_params()
         
-        costf = smoothness
+        costf = FitCost
               
         opt_res = minimize(costf,p0,
                           args=(dlogtau,),method = self.opt_method,
                           constraints=constraints,
                           bounds=bounds,
-                          jac=dSdw,
+                          jac=dFitCostdw,
                           options = {'maxiter':self.maxiter,'disp':self.show_report},
                           tol=1e-6)
         
         self.evaluateNstore(opt_res)
         return opt_res
+    
+    def contribution_constraints(self,target_tau,tau):
+        constraints = []
+        #target_tau = 1e05
+        N = np.argmin(np.abs(target_tau*1e3 - 1/tau))+1
+        
+        if False:
+            for i in range(N):
+                constraints.append({'type':'ineq','fun':lambda w,i,tau,N: np.sum(w[:i+1]/tau[:i+1]) - np.sum(w[:i]*tau[:i]) ,
+                                    'args':(i,tau,N)
+                                  })
+        if False:
+            constraints.append(
+                {'type':'eq',
+                 'fun':lambda w,tau: smoothness(w,1) - 
+                 smoothness(np.log10(w[:-1]/tau),np.sum(w[:-1]/tau)**(2/3)) ,
+                                    'args':(tau,)
+                    })
+        def smooth(w,reg):
+            x = np.empty_like(w)
+            x[1:-1] = w[2:]-2.0*w[1:-1] +w[:-2]
+            x[0] = w[2]-2*w[1]+w[0]
+    
+            x[-1] = w[-1]-2*w[-2]+w[-3]
+            return np.sum(x)/reg
+        if False:
+            constraints.append(
+                {'type':'eq',
+                 'fun':lambda w,tau,target_tau: smooth(w[:-1],1) - smooth(w[:-1]/tau,target_tau) ,
+                                    'args':(tau,target_tau)
+                    })
+        return constraints
     def show_residual_distribution(self,fname=None,size=3.5,title=None):
         figsize = (size,size)
         dpi = 300
@@ -1673,11 +1726,13 @@ class fitData():
         sp = sp[ser] ; tp = tp[ser]
         #plt.ylim([tp.min()/3,tp.max()*3.0])
         #plt.xlim([sp.min()/3,sp.max()*3.0])
-        plt.plot(sp,tp,ls='--',color='blue',lw=size/5,label='P. front')
-        plt.plot([self.best_smoothness],[self.best_tau_relax],marker='o',
-                 color='blue',markersize=1.7*size,label='selected')
         plt.plot(ns,ts,color = 'red',label='rejected',ls='none',
                  marker='o',fillstyle='none',markersize=1.7*size)
+        plt.plot(sp,tp,ls='--',color='blue',lw=size/5,label='Opt. front')
+        
+        plt.plot([self.best_smoothness],[self.best_tau_relax],marker='o',
+                 color='blue',markersize=1.7*size,label='selected')
+
         plt.xticks(fontsize=2.5*size)
         plt.legend(frameon=False,fontsize=1.5*size)
         if fname is not None:
@@ -1759,11 +1814,11 @@ class fitData():
             plt.title(title)
         
         plt.plot(rm,pars,
-                 ls='none',marker='o',color=color,markersize=1.7*size,fillstyle='none')
+                 ls='-',marker='o',color=color,markersize=1.3*size,lw=0.2*size,fillstyle='none')
         if show_contributions:
             contr = pars/rm if self.mode == 'freq' else pars*rm
             plt.plot(rm,contr,label='contribution',color='k',
-                     ls='none',marker='s',fillstyle='none',markersize=1.5*size,
+                     ls='-',lw=0.1*size,marker='.',fillstyle='none',markersize=1.5*size,
                      markeredgewidth=size*0.5)
         xticks = [10**x for x in range(-10,20) if self.bounds[0]<=10**x<=self.bounds[1] ]
         plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
