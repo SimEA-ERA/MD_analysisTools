@@ -740,7 +740,7 @@ class plotter():
         return boldl
     
     @staticmethod
-    def relaxation_time_distributions(datadict,yscale=None,
+    def relaxation_time_distributions(datadict,fitobject='params',yscale=None,
                                       size=3.5,fname=None,title=None,
                                       cmap=None,xlim=(-6,6),pmap=None,ylim=(1e-6,1.0),
                                       units='ns',mode='tau'):
@@ -780,8 +780,14 @@ class plotter():
         ax.xaxis.set_minor_locator(locmin)
         ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         for i,(k,f) in enumerate(datadict.items()):
-
-            plt.plot(f.relaxation_modes,f.params,ls='--',lw=0.25*size,marker = pmap[k],
+            if fitobject=='params':
+                x = f.relaxation_modes
+                y = f.params
+            elif fitobject=='eps_imag':
+                x = f.omega
+                y = f.eps_imag
+                
+            plt.plot(x,y,ls='--',lw=0.25*size,marker = pmap[k],
                 markersize=size*1.2,markeredgewidth=0.15*size,fillstyle='none',color=cmap[k],label=k)
             #plt.plot(f.relaxation_modes,f.params,ls='--',label=k,color=cmap[k])
         plt.legend(frameon=False,fontsize=2.3*size)
@@ -1096,8 +1102,9 @@ class fitData():
     from scipy.optimize import minimize
     
     def __init__(self,xdata,ydata,func,method='distribution',bounds=None,
-                 search_grid=None,reg_bounds=None,keep_factor=3,bias_factor=1.0,
-                 nw=50,bound_res=1e-3,maxiter=200,show_plots=False,**options):
+                 search_grid=None,reg_bounds=None,keep_factor=2,bias_factor=1.0,
+                 nw=50,bound_res=1e-9,maxiter=200,sigmF=[10,20,30,40,50,60],
+                 show_plots=False,**options):
         
         self.show_plots = show_plots
         
@@ -1130,12 +1137,14 @@ class fitData():
         self.minimum_res=bound_res
         self.nw = nw
         self.maxiter=maxiter
-        
-        
+        self.sigmF = sigmF
+        self.sigma_factor = 30
         if 'weights' in options:
             self.weights = options['weights']
         if 'weighting_method' in options:
-            self.weights = self.get_weights(options['weighting_method'])
+            self.weighting_method = options['weighting_method']
+        else:
+            self.weighting_method = 'xy'
         if 'is_distribution' in options:
             self.is_distribution = options['is_distribution']
         else:
@@ -1154,7 +1163,7 @@ class fitData():
             self.init_method = options['init_method']
 
         else:
-            self.init_method = 'uniform'
+            self.init_method = 'normal'
         if 'p0' in options:
             self.p0 = options['p0']    
         if 'opt_method' in options:
@@ -1197,7 +1206,7 @@ class fitData():
         smalltau = self.smallerTauRelaxFit()
         taudata = self.estimate_taudata()
         tau = min(smalltau,taudata) if smalltau !=0 else taudata
-        return 1e-1*tau
+        return 10**(-2*(1-self.lasty))*tau
     
     def estimate_taudata(self):
         x = self.xdata
@@ -1209,13 +1218,13 @@ class fitData():
         
         
     def estimate_minimum_residual(self):
-        mres = max(self.minimum_res,1.0*self.data_res)
+        mres = max(self.minimum_res,1*self.data_res)
         self.minimum_res = mres
         
         print('estimated data residual = {:.4e}'.format(mres))
         return
     def get_arg_t0(self):
-        f = self.ydata <= 0.01
+        f = self.ydata <= 1e-3
         smallys = np.where(f)[0]
         
         if len(smallys) ==0:
@@ -1226,15 +1235,18 @@ class fitData():
     def refine_bounds(self,th):
         if self.mode =='freq':
             bh = self.bounds[1]
-            bl = 1/(th*1e3)
+            bl = 1/(th*1e5)
         else:
             bl = self.bounds[0]
-            bh = th*1e3
+            bh = th*1e5
         self.bounds = (bl,bh)
         return 
-    def get_weights(self,wm):
-        if wm =='high-y':
-            w = np.abs(self.ydata)+0.02
+    def get_weights(self):
+        if self.weighting_method == 'high-y':
+            w = np.abs(self.ydata)+0.3
+        elif self.weighting_method=='xy':
+            w=self.xdata**0.1  + self.ydata
+            w = w
         else:
             w = np.ones(self.ydata.shape[0])
         return w  
@@ -1251,7 +1263,7 @@ class fitData():
         self.crit = []
         self.storing_list=  ['relaxation_modes','con_res','data_res',
                    'params','prob_distr','loss','smoothness','tau_relax',
-                   'bias']
+                   'bias','sigma_factor']
         self.storing_dict = {k:[] for k in self.storing_list}
         
         for st in self.storing_list:
@@ -1269,8 +1281,9 @@ class fitData():
         
         tau_bounds = (tl,th)
         for numreg in self.search_grid:
+            #print(tau_bounds)
             dilog = (np.log10(tau_bounds[1])-np.log10(tau_bounds[0]))/numreg
-            print(numreg,dilog,tau_bounds)
+            
             self.search_reg(numreg,tau_bounds)
             
             f = np.array(self.storing_dict['data_res']) < self.keep_res
@@ -1298,55 +1311,63 @@ class fitData():
                 setattr(self,attr,[])
                 
         target_taus = np.logspace(np.log10(taub[0]),np.log10(taub[1]),base=10,num=numreg)       
-        
+        #print(target_taus)
         for tartau in target_taus:
             
             self.target_tau = tartau
             self.refine_bounds(tartau)
-            self.exactFit(tartau)
+            for sigmF in self.sigmF:
+                self.sigma_factor = sigmF
+                self.exactFit(tartau)
             
-            s = self.smoothness ; t = self.tau_relax ; d = self.data_res 
-            for k in self.storing_list:
-                self.storing_dict[k].append(getattr(self,k))
+                s = self.smoothness ; t = self.tau_relax ; d = self.data_res 
+                for k in self.storing_list:
+                    self.storing_dict[k].append(getattr(self,k))
                 
 
-            crt = self.criterium(d,s,t)
+                crt = self.criterium(d,s,t)
 
-            self.crit.append(crt)
+                self.crit.append(crt)
     
-            self.nsearches = len(self.crit)
+                self.nsearches = len(self.crit)
 
         self.refine_keep_res()
         
         self.select_best_solution()
         
         return
+    @property
+    def lasty(self):
+        return self.ydata[-1]
     
     def criterium(self,d,s,t):
-        return d*s*t**(1-self.ydata[-1])
+        return d**2*s*t**(1-self.lasty)
     
     def refine_keep_res(self):
         dres = np.array(self.storing_dict['data_res'])
         fd = dres < self.keep_res
         i=0
-        factor =1.1
+        factor = 1.1
         add = lambda f : np.count_nonzero(f)
-        while add(fd)<2:
+        while fd.any() == False:
             self.keep_factor=self.keep_factor*factor
             i+=1
             fd =  dres < self.keep_res            
             if self.keep_res>0.1: 
                 raise Exception('Increased keep_res too much and still no solution satysfies it')
-        print('Increased keep_res by {:4.3f} times'.format(factor**i)) 
+        #print('Increased keep_res by {:4.3f} times'.format(factor**i)) 
         return   
     def select_best_solution(self):
         f = np.array(self.storing_dict['data_res']) < self.keep_res
         a = np.array(self.crit)[f].argmin()
+        best = dict()
         for st in self.storing_list:
             attr = np.array(self.storing_dict[st])[f][a]
             if type(attr) is type(np.ones(3)): 
                 attr = attr.copy()
+            best[st] = attr
             setattr(self,'best_'+st,attr)
+        self.best_sol = best
         return 
     
     @staticmethod
@@ -1366,6 +1387,12 @@ class fitData():
             pars = np.ones(self.nw)
         elif self.init_method=='zeros':
             pars = np.zeros(self.nw) +1e-15
+        elif self.init_method=='normal':
+            x = np.arange(0,self.nw,1)
+            mu = self.nw/2
+            sigma = mu/self.sigma_factor
+            pars = np.exp(-(x-mu)**2/(sigma)**2)
+            pars /=pars.sum()
         return pars
     
     def distribution_constraints(self):
@@ -1401,7 +1428,10 @@ class fitData():
         x = self.xdata.copy()
         y = self.ydata.copy()
         A = self.kernel(x,tau)
-        return n,tau,dlogtau,  y, A
+        whs = self.get_weights()
+        for i in range(A.shape[1]):
+            A[:,i] = A[:,i]*whs
+        return n,tau,dlogtau,  whs*y, A
     
     def get_params(self):
         p0 = self.initial_params()
@@ -1455,7 +1485,7 @@ class fitData():
                           constraints=constraints,
                           bounds=bounds,
                           jac=dCRdw,
-                          options = {'maxiter':self.maxiter,'disp':self.show_report}, 
+                          options = {'maxiter':int(self.maxiter/2),'disp':self.show_report}, 
                           tol=1e-16)
         
         self.evaluateNstore(opt_res)
@@ -1551,34 +1581,6 @@ class fitData():
     
     def contribution_constraints(self,target_tau,tau):
         constraints = []
-        #target_tau = 1e05
-        N = np.argmin(np.abs(target_tau*1e3 - 1/tau))+1
-        
-        if False:
-            for i in range(N):
-                constraints.append({'type':'ineq','fun':lambda w,i,tau,N: np.sum(w[:i+1]/tau[:i+1]) - np.sum(w[:i]*tau[:i]) ,
-                                    'args':(i,tau,N)
-                                  })
-        if False:
-            constraints.append(
-                {'type':'eq',
-                 'fun':lambda w,tau: smoothness(w,1) - 
-                 smoothness(np.log10(w[:-1]/tau),np.sum(w[:-1]/tau)**(2/3)) ,
-                                    'args':(tau,)
-                    })
-        def smooth(w,reg):
-            x = np.empty_like(w)
-            x[1:-1] = w[2:]-2.0*w[1:-1] +w[:-2]
-            x[0] = w[2]-2*w[1]+w[0]
-    
-            x[-1] = w[-1]-2*w[-2]+w[-3]
-            return np.sum(x)/reg
-        if False:
-            constraints.append(
-                {'type':'eq',
-                 'fun':lambda w,tau,target_tau: smooth(w[:-1],1) - smooth(w[:-1]/tau,target_tau) ,
-                                    'args':(tau,target_tau)
-                    })
         return constraints
     def show_residual_distribution(self,fname=None,size=3.5,title=None):
         figsize = (size,size)
@@ -1637,7 +1639,13 @@ class fitData():
         dts = 1 - self.phit(ts)
         
         return dts
-    
+    def dtstar(self,ts):
+        w, rm = self.get_wrm()
+        f = lambda w,rm : np.sum((1.0-np.exp(-ts*rm))*w)
+        t = lambda w,rm : np.sum(w*(1.0-np.exp(-ts/rm)))
+        tr = f(w,rm)  if self.mode =='freq' else t(w,rm)
+        
+        return tr
     def tstar(self,ts):
         w, rm = self.get_wrm()
         f = lambda w,rm : np.sum((1.0-np.exp(-ts*rm))*w/rm)
@@ -1739,7 +1747,80 @@ class fitData():
             plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
-    
+    def eps_omega(self,omega=[]):
+        n = len(omega)
+        eps_real = np.empty(len(omega),dtype=float)
+        eps_imag = np.empty(len(omega),dtype=float)
+        w,f = self.get_wrm()
+        if self.mode != 'freq':
+            f =1/f
+        for i in range(n):
+            eps_real[i] = np.sum(w*f/(omega[i]**2+f**2))
+            eps_imag[i] = -np.sum(-w*omega[i]/(omega[i]**2+f**2))
+        tr = self.trelax
+        eps_real /= tr
+        eps_imag /= tr
+        self.omega = omega
+        self.eps_real = eps_real
+        self.eps_imag = eps_imag
+        return eps_real,eps_imag
+    def omega_peak(self,omega):
+        eps_real, eps_imag = self.eps_omega(omega)
+        return omega[np.argmax(eps_imag)]
+    def show_eps_omega(self,omega,e='imag',size=3.5,units='ns',yscale=None,
+                              title=None,color='red',fname=None,
+                              prefix='best_'):
+        
+
+        eps_real,eps_imag = self.eps_omega(omega)
+        if e=='imag':
+            eps = eps_imag
+        elif e=='real':
+            eps = eps_real
+            yscale=None
+        else:
+            raise ValueError('option e = "{:s}" not known'.format(e))
+        
+        figsize = (size,size)
+        dpi = 300
+        fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.xscale('log')
+        if yscale is not None:
+            plt.yscale(yscale)
+        if yscale =='log':
+            y0 = -5
+            ym = int(np.log10(max(eps))+1)    
+            plt.yticks([10**y for y in range(y0,ym )])
+            plt.ylim(10**y0,10**ym)
+        plt.yticks(fontsize=2.5*size)
+        locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+        ax.xaxis.set_minor_locator(locmin)
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        if e=='imag':
+            ylabel=r'$e^{\prime\prime}(\omega)$'
+        elif e =='real':
+            ylabel = r"$e^{\prime}(\omega)$"
+        plt.ylabel(ylabel,fontsize=3*size)
+        if self.mode=='freq':
+            units = r'${:s}^{:s}$'.format(units,'{-1}')
+            lab = r'$f$ / {:s}'.format(units)
+        elif self.mode =='tau':
+            lab = r'$\tau$ / {:s}'.format(units)
+        plt.xlabel(lab,fontsize=3*size)
+        if title is not None:
+            plt.title(title)
+        
+        plt.plot(omega,eps,
+                 ls='-',marker='o',color=color,markersize=1.3*size,lw=0.2*size,fillstyle='none')
+        xticks = [10**x for x in range(-10,20) if omega[0]<=10**x<=omega[-1] ]
+        plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
+        if fname is not None:
+            plt.savefig(fname,bbox_inches='tight')
+        plt.show()
+        return
     def show_fit(self,size=3.5,units='ns',yscale=None,
                               title=None,color='red',fname=None,
                               prefix='best_'):
