@@ -1095,8 +1095,67 @@ class fitLinear():
         xd = np.arange(x.min(),x.max(),0.01)
         self.xyline =  (xd,my_pwlf.predict(xd))
         return self.xyline
+    
+class Arrheniusfit():
+    
+    
+    def __init__(self,temp,tau):
+        self.tau = tau
+        self.temp =  temp
         
+        self.fit()
+        t = np.arange(temp.min()*0.95,temp.max()*1.05,0.01)
+        self.t = t
+        self.curve = self.exp(t,*self.opt_res.x)
+        return       
+    @staticmethod
+    def exp(temp,A,Ea):
+        tau = A*np.exp(-Ea/temp)
+        return tau
+    @staticmethod
+    def costf(pars,temp,tau):
+        tau_pred = Arrheniusfit.exp(temp,*pars)
+        return np.sum((np.log10(tau_pred)-np.log10(tau))**2)/tau.size
+    
+    def fit(self):
+        pars = np.array([100,-1000])
+        bounds = [(0,1e4),(-10e4,0)]
+        maxiter = 1000
+        from scipy.optimize import dual_annealing, differential_evolution
+        opt_res = differential_evolution(self.costf, bounds,
+                    args = (self.temp,self.tau) ,
+                    maxiter = 1000)
+        self.opt_res = opt_res
+        return 
+
+class VFTfit():
+    def __init__(self,temp,tau):
+        self.tau = tau
+        self.temp =  temp
         
+        self.fitVFT()
+        t = np.arange(temp.min()*0.95,temp.max()*1.05,0.01)
+        self.t =t
+        self.curve = self.vft(t,*self.opt_res.x)
+        return       
+    @staticmethod
+    def vft(temp,A,D,t0):
+        tau = np.exp(D/(temp-t0))*A
+        return tau
+    @staticmethod
+    def costf(pars,temp,tau):
+        tau_pred = VFTfit.vft(temp,*pars)
+        return np.sum((np.log10(tau_pred)-np.log10(tau))**2)/tau.size
+    
+    def fitVFT(self):
+        from scipy.optimize import dual_annealing, differential_evolution
+        pars = np.array([1,1,50])
+        bounds = [(1,2e2),(1e2,1e5),(0,900)]
+        opt_res = differential_evolution(self.costf, bounds,
+                    args = (self.temp,self.tau) ,
+                    maxiter = 1000)
+        self.opt_res = opt_res
+        return 
 class fitData():
     
     from scipy.optimize import minimize
@@ -1178,8 +1237,17 @@ class fitData():
     def keep_res(self):
         return self.keep_factor*self.minimum_res
     
+    def clean_positive_derivative_data(self):
+        der = np.empty_like(self.ydata)
+        der[1:] = (self.ydata[1:]-self.ydata[:-1])/(self.xdata[1:]-self.xdata[:-1])
+        der[0]=der[1]
+        f = der< 0
+        self.xdata= self.xdata[f]
+        self.ydata = self.ydata[f]
+        return
     def fitTheModel(self):
-        
+        if True:
+            self.clean_positive_derivative_data()
         self.justFit()
         self.estimate_minimum_residual()
 
@@ -1190,9 +1258,11 @@ class fitData():
             if  izero != self.ydata.size:
                 self.ydata = self.ydata[:izero]
                 self.xdata = self.xdata[:izero]
+
         self.refine_bounds(self.tauhigh)
         self.search_best()
         return
+    
     def estimate_tauhigh(self):
         smfittau = self.smootherFit()
         if self.get_arg_t0() == self.ydata.size:
@@ -1766,7 +1836,20 @@ class fitData():
         return eps_real,eps_imag
     def omega_peak(self,omega):
         eps_real, eps_imag = self.eps_omega(omega)
-        return omega[np.argmax(eps_imag)]
+        der = np.empty_like(eps_imag)
+        der[0] = eps_imag[1]-eps_imag[0]
+        der[-1] = eps_imag[-2] - eps_imag[-1]
+        der[1:]= eps_imag[1:]-eps_imag[:-1]
+        sign_change = []
+        for i in range(1,der.size):
+            if der[i-1]*der[i]<0:
+                sign_change.append(i)
+        if self.mode =='freq': arg = 0
+        else: arg = -1
+        if len(sign_change)==0:
+            return omega[0]
+        
+        return 1/omega[sign_change[arg]]
     def show_eps_omega(self,omega,e='imag',size=3.5,units='ns',yscale=None,
                               title=None,color='red',fname=None,
                               prefix='best_'):
