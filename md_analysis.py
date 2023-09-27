@@ -698,6 +698,7 @@ class plotter():
         semisafe = ['#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e','#e6ab02','#a6761d','#666666']
         safe2 = ['#a6cee3','#1f78b4','#b2df8a']
         qual6 = ['#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e','#e6ab02']
+        
     class linestyles():
         lst_map = {
             'loosely dotted':      (0, (1, 3)),
@@ -866,9 +867,11 @@ class plotter():
             i=np.log10(mid)
   
         return np.unique(args[args<x.shape[0]])
-
+    
+    def colormaps():
+        return sorted(m for m in plt.cm.datad)     
     @staticmethod
-    def plotDynamics(datadict,style='points',locleg='best',ncolleg=1,
+    def plotDynamics(datadict,compare=None,style='points',locleg='best',ncolleg=1,
              fname =None,title=None,size=3.5,xlim=None,ylim=None,pmap=None,
              cmap = None,ylabel=None,units='ns',midtime=None,labmap=None,
              num=100,cutf=None,lstmap=None,write_plot_data=False,yscale=None,
@@ -884,6 +887,11 @@ class plotter():
             except:
                 c = plotter.colors.qualitative*3
                 cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
+        elif cmap in self.colormaps():
+            cm = matplotlib.cm.get_cmap(cmap)
+            n = len(datadict)
+            cmap = {k: cm((i+0.5)/n) for i,k in enumerate(datadict.keys())}
+            
         if lstmap is None:
             lst = plotter.linestyles.lst7*10
             lstmap = {k:lst[i] for i,k in enumerate(datadict.keys())}
@@ -897,20 +905,23 @@ class plotter():
             pmap = {k:'o' for k in datadict}
         if cutf is None:
             cutf ={k:10**10 for k in datadict}
-
+        
+       
+        
         figsize = (size,size)
         dpi = 300
         fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
         plt.minorticks_on()
         plt.tick_params(direction='in', which='minor',length=size*1.5)
         plt.tick_params(direction='in', which='major',length=size*3)
+        plt.xticks(fontsize=2.5*size) 
+        plt.yticks(fontsize=2.5*size) 
+        
         if xscale =='log':
             plt.xscale('log')
         if yscale is not None:
             plt.yscale(yscale)
-        if xlim is None:
-            plt.xticks(fontsize=2.5*size) 
-        else:
+        if xlim is not None:
             if xscale =='log':
                 xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
                 plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
@@ -918,6 +929,8 @@ class plotter():
                 ax.xaxis.set_minor_locator(locmin)
                 ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                 plt.xlim([min(xticks),max(xticks)])
+            else:
+                plt.xlim(xlim[0],xlim[1])
         if ylim is None:
             plt.yticks(fontsize=2.5*size)
         else:
@@ -928,8 +941,8 @@ class plotter():
                 ax.yaxis.set_minor_locator(locmin)
                 ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
             else:
-                plt.yticks(fontsize=2.5*size)
                 plt.ylim(ylim)
+                
         if title is not None:
             plt.title(r'{:s}'.format(title))
         plt.xlabel(r'$t ({})$'.format(units),fontsize=3*size)
@@ -1118,10 +1131,10 @@ class Arrheniusfit():
         return np.sum((np.log10(tau_pred)-np.log10(tau))**2)/tau.size
     
     def fit(self):
-        pars = np.array([100,-1000])
+      #  pars = np.array([100,-1000])
         bounds = [(0,1e4),(-10e4,0)]
-        maxiter = 1000
-        from scipy.optimize import dual_annealing, differential_evolution
+        
+        from scipy.optimize import  differential_evolution
         opt_res = differential_evolution(self.costf, bounds,
                     args = (self.temp,self.tau) ,
                     maxiter = 1000)
@@ -1148,8 +1161,8 @@ class VFTfit():
         return np.sum((np.log10(tau_pred)-np.log10(tau))**2)/tau.size
     
     def fitVFT(self):
-        from scipy.optimize import dual_annealing, differential_evolution
-        pars = np.array([1,1,50])
+        from scipy.optimize import differential_evolution
+     #   pars = np.array([1,1,50])
         bounds = [(1,2e2),(1e2,1e5),(0,900)]
         opt_res = differential_evolution(self.costf, bounds,
                     args = (self.temp,self.tau) ,
@@ -1418,7 +1431,7 @@ class fitData():
         fd = dres < self.keep_res
         i=0
         factor = 1.1
-        add = lambda f : np.count_nonzero(f)
+        
         while fd.any() == False:
             self.keep_factor=self.keep_factor*factor
             i+=1
@@ -2786,6 +2799,7 @@ class Analysis:
         self.mass_map = {types_map[k]:v for k,v in self.mass_map.items()}
         self.charge_map = {types_map[k]:v for k,v in self.charge_map.items()}
         return
+    
     def analysis_initialization(self,reinit=False):
         '''
         Finds some essential information for the system and stores it in self
@@ -2878,9 +2892,11 @@ class Analysis:
         ids = {v : np.array(temp_ids[v]) for v in types}
         setattr(self,attr_name+'_per_type',ids)
         return 
+    
     def find_topology_from_mol2(self):
         
         return
+    
     def find_topology_from_itp(self):
         #t0 = perf_counter()
 
@@ -3442,6 +3458,14 @@ class Analysis:
         self.timeframes[frame] = header
         self.timeframes[frame]['boxsize'] = np.diag(data['box'])
         self.timeframes[frame]['coords'] = data['x']
+        try:
+            self.timeframes[frame]['velocities'] = data['v']
+        except:
+            pass
+        try:
+            self.timeframes[frame]['forces'] = data['f']
+        except:
+            pass
         return True
    
     def read_lammpstrj_by_frame(self,reader,frame):
@@ -3641,6 +3665,7 @@ class Analysis:
         filt = np.logical_not(filt)
         self.filter_system(filt,reinit)
         return
+    
     def remove_residues(self,crit,frame=0,reinit=True):
         coords = self.get_coords(frame)
         filt = crit(coords)
@@ -3765,6 +3790,7 @@ class Analysis:
                 self.timeframes[frame]['boxsize'][d]*=mult+1
         self.analysis_initialization()
         return
+    
     def unwrap_coords(self,coords,box):   
         '''
         Do not trust this function. Works only for linear polymers
@@ -4137,6 +4163,12 @@ class Analysis:
     def get_coords(self,frame):
         return self.timeframes[frame]['coords']
     
+    def get_velocities(self,frame):
+        return self.timeframes[frame]['velocities']
+    
+    def get_forces(self,frame):
+        return self.timeframes[frame]['forces']
+    
     def get_box(self,frame):
         return self.timeframes[frame]['boxsize']
     
@@ -4287,6 +4319,9 @@ class Analysis:
         nframes = self.loop_trajectory('minmax_size',args)
         return size/nframes
     
+    
+    
+    
     def init_xt(self,xt,dtype=float):
         '''
         takes a dictionary of keys times and values some array
@@ -4365,7 +4400,8 @@ class Analysis:
         '''
         mapper = {'p1':'costh_kernel',
                   'p2':'cos2th_kernel',
-                  'msd':'norm_square_kernel'
+                  'msd':'norm_square_kernel',
+                  'corr':'mult_kernel',
                   }
         if prop in mapper or prop.lower() in mapper:
             inner_func_name = mapper[prop.lower()] 
@@ -4393,6 +4429,8 @@ class Analysis:
                  globals()[inner_func_name])
         
         return funcs
+  
+        
   
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
                  filt_option='simple', block_average=False,
@@ -4767,7 +4805,7 @@ class Analysis_Confined(Analysis):
         return
         
     ############## General Supportive functions Section #####################
-
+    
     def find_connectivity_per_chain(self):
         cargs =dict()
         x = self.sorted_connectivity_keys
@@ -4849,7 +4887,7 @@ class Analysis_Confined(Analysis):
         on the confinment type from a number of classes. 
         This is done in initialization to increase speed and modularity
         at the same time        
-
+        
         '''
         t0 = perf_counter()
         self.find_particle_filt()
@@ -5636,6 +5674,39 @@ class Analysis_Confined(Analysis):
     
     ###### End of Main calculation Functions for structural properties ########
     
+    def stress_per_t(self,filters={}):
+        '''
+        Takes two int arrays  of atom ids and finds 
+        the vectors per time between them
+
+        Parameters
+        ----------
+        ids1 : int array of atom ids 1
+        ids2 : int array of atom ids 2
+        filters : dictionary of filters. See filter documentation
+
+        Returns
+        -------
+        vec_t : dictionary of keys the time and values the vectors in numpy array of shape (n,3)
+        filt_per_t : dictionary of keys the filt name and values
+            dictionary of keys the times and boolian arrays
+
+        '''
+        t0 = perf_counter()
+        atomstress_t = dict()
+        filt_per_t = dict()
+        
+        args = (filters,atomstress_t,filt_per_t)
+        
+        nframes = self.loop_trajectory('stress_per_atom_t', args)
+        
+        filt_per_t = ass.rearrange_dict_keys(filt_per_t)
+        
+        tf = perf_counter()-t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return atomstress_t,filt_per_t
+    
+    
     def vects_per_t(self,ids1,ids2,
                          filters={}):
         '''
@@ -6413,7 +6484,28 @@ class coreFunctions():
     def __init__():
         pass
     
-
+    @staticmethod
+    def stress_per_atom_t(self,filters,atomstress,filt_per_t):
+       
+        frame = self.current_frame
+       
+        coords = self.get_coords(frame)
+        ids = np.arange(0,coords.shape[0],1,dtype=int)
+        
+        v = self.get_velocities(frame)
+        f = self.get_forces(frame)
+        m = self.atom_mass
+       
+        vel_contr = np.array( [v[:,i]*v[:,j]/m for i in range(3) for j in range(3)] ) 
+        virial = np.array([coords[:,i]*f[:,j] for i in range(3) for j in range(3)])
+        stress = vel_contr + virial
+        stress = stress.reshape(stress.shape[-1::-1])
+        
+        key = self.get_key()
+        atomstress[key] = stress
+        filt_per_t[key] = Filters.calc_filters(self,filters,
+                                    ids,ids,coords)
+        return
     @staticmethod
     def minmax_size(self,size):
         frame = self.current_frame
@@ -7660,7 +7752,9 @@ def sinCorrelation_kernel(x1,x2):
     s2 = np.sin(x2)
     return s1*s2
 
-
+@jit(nopython=True,fastmath=True)
+def mult_kernel(r1,r2):
+    return r1*r2
 
 @jit(nopython=True,fastmath=True)
 def cos2th_kernel(r1,r2):
