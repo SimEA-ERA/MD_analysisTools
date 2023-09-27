@@ -369,6 +369,7 @@ class ass():
     def wrap_multiple_trajectory(files,function,*fargs,**fkwargs):
         
         data_old = dict()
+        mult_data = dict()
         for file in files:
             data = function(file,*fargs,**fkwargs)
             
