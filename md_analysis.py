@@ -288,6 +288,139 @@ class gromacsTop():
         for i in range(natoms):
             file.write('{:d}  {:d}  {:d}  {:8.5f}  {:8.5f} \n'.format(i+1,2,1,r,k))
         return
+class multy_traj():
+    def __init__(self):
+        return
+    
+
+    
+    @staticmethod
+    def average_data(files,function,*fargs, **fkwargs):
+       
+        def ave1():
+            ave_data = dict()
+            ldata = {k:[data[k]] for k in data}
+            for i in range(1,len(files)): 
+                file = files[i]
+                di = function(file,*fargs,**fkwargs)
+                for k in ldata:
+                    ldata[k].append( di[k])
+            for k in ldata:
+                print(len(ldata[k]))
+                ave_data[k] = np.mean( ldata[k], axis=0 )
+                ave_data[k+'(std)'] =  np.std( ldata[k], axis=0 )
+            return ave_data
+        def ave2():
+            ave_data = {k1:dict() for k1 in data}
+            ldata = {k1:{k2: [data[k1][k2] ] for k2 in data[k1]} for k1 in data}
+            for i in range(1,len(files)): 
+                file = files[i]
+                di = function(file,*fargs,**fkwargs)
+                for k1 in ldata:
+                    for k2 in ldata[k1]:
+                        ldata[k1][k2].append(di[k1][k2])
+            for k1 in ldata:
+                for k2 in ldata[k1]:
+                    ave_data[k1][k2] = np.mean( ldata[k1][k2], axis=0 )
+                    ave_data[k1][k2+'(std)'] =  np.std( ldata[k1][k2], axis=0 )
+            return ave_data
+        
+        files = list(files)
+        
+        data = function(files[0],*fargs,**fkwargs)
+
+        if ass.is_dict_of_dicts(data):
+            ave_method =  ave2
+        elif type(data) is dict:
+            ave_method = ave1
+        else:
+            raise Exception('Type of data and arreangement not regognised')
+        
+        averaged_data = ave_method()        
+
+        return averaged_data
+    
+    @staticmethod
+    def wrap_the_data(data_to_wrap,wrapon):
+        wraped_data = dict()
+        print(data_to_wrap.keys())
+        for i,(file,data) in enumerate(data_to_wrap.items()):
+            if i==0:
+                wraped_data = data
+                continue
+            if ass.is_dict_of_dicts(data):
+                print(data.keys())
+                varw_old =  {k: wraped_data[k][wrapon] for k in wraped_data}
+                for k,d  in data.items():
+                    jp0 = d[wrapon][0]
+                    jp1 = d[wrapon][1]
+                    joint_point = jp0 if jp0 !=0 else jp1
+                    fk = varw_old[k]<joint_point
+                    for ik in d: 
+                        try:
+                            wraped_data[k][ik] = wraped_data[k][ik][fk] # cutting edge points of the old
+                        except KeyError:
+                            pass
+                    fnk = d[wrapon]>=joint_point
+                    for ik in d:
+                        if  ik in wraped_data[k]:
+                            ctupl = (wraped_data[k][ik], d[ik][fnk])
+                        else:
+                            ctupl =(d[ik][fnk],)
+                        wraped_data[k][ik] = np.concatenate(ctupl)
+            elif type(data) is dict:
+                varw_old = wraped_data[wrapon]
+                jp0 = data[wrapon][0]
+                jp1 = data[wrapon][1]
+                joint_point = jp0 if jp0 !=0 else jp1
+                fk = varw_old<joint_point
+                for ik in data:
+                    try:
+                        wraped_data[ik] = wraped_data[ik][fk]
+                    except KeyError:
+                        pass
+                fnk = data[wrapon]>=joint_point
+                for ik in data:
+                    if ik in wraped_data:
+                        ctupl = (wraped_data[ik], data[ik][fnk])
+                    else:
+                        ctupl = (data[ik][fnk],)
+                    wraped_data[ik] = np.concatenate(ctupl)
+            else: 
+                raise Exception('Unregognized type of data for wrapping')
+        return wraped_data
+    
+    @staticmethod
+    def multiple_trajectory(files,function,wrapon='time',*fargs,**fkwargs,):
+        
+        type_files = type(files)
+        
+        if type_files is set:
+            mult_data = multy_traj.average_data(files,function,*fargs,**fkwargs)
+        elif type_files is list or type_files is tuple:
+            data_to_wrap = dict()
+            for file in files:
+                type_file  =type(file)
+                if type_file is set:
+                    data = multy_traj.average_data(file,function,*fargs,**fkwargs)
+                elif type_file is str:
+                    data  =  function(file,*fargs,**fkwargs)
+                if type_file is set:
+                    key = '-'.join(file)
+                else:
+                    key = file
+                data_to_wrap[key] = data
+                
+            mult_data = multy_traj.wrap_the_data(data_to_wrap,wrapon)
+        elif type_files is str:
+             # single file
+            mult_data = function(file,*fargs,**fkwargs)
+        else:
+            raise Exception('type {} is not Regognized as file or files to read'.format(type_files))
+        return mult_data
+    
+    
+    
 class ass():
     '''
     The ASSISTANT class
@@ -365,30 +498,7 @@ class ass():
         except IndexError:
             return False
         
-    @staticmethod
-    def wrap_multiple_trajectory(files,function,*fargs,**fkwargs):
-        
-        data_old = dict()
-        mult_data = dict()
-        for file in files:
-            data = function(file,*fargs,**fkwargs)
-            
 
-            if ass.is_dict_of_dicts(data):
-                data = ass.rearrange_dict_keys(data)
-            
-            trunc_at = ass.trunc_at(data_old,data)
-            trunc_data_old = ass.dict_slice(data_old,0,trunc_at)
-            
-            mult_data.update(trunc_data_old)
-            data_old = data
-            logger.info('wrapped file {:s}'.format(file))
-        mult_data.update(data)
-        if ass.is_dict_of_dicts(mult_data):
-            mult_data = ass.rearrange_dict_keys(mult_data)
-        
-        return mult_data
-    
     @staticmethod
     def print_time(tf,name,nf=None):
         s1 = ass.readable_time(tf)
@@ -870,7 +980,7 @@ class plotter():
     def colormaps():
         return sorted(m for m in plt.cm.datad)     
     @staticmethod
-    def plotDynamics(datadict,compare=None,
+    def plotDynamics(datadict,xaxis='time',yaxis='P1',compare=None,
                      style='points',comp_style='lines',
              fname =None,title=None,size=3.5,
              ylabel=None,xlabel=None,
@@ -879,7 +989,9 @@ class plotter():
              midtime=None,num=100,write_plot_data=False,
              edgewidth=0.3,markersize=1.5,legend=True,
              legkwargs=dict(),legfont=2.0):
-
+        if not ass.is_dict_of_dicts(datadict):
+            datadict = {'key':datadict}
+            legend=False
         if labmap is None:
             labmap  = {k:k for k in datadict}
         if cmap is None:
@@ -951,8 +1063,8 @@ class plotter():
         plt.ylabel(ylabel,fontsize=3*size)
 
         for i,(k,dy) in enumerate(datadict.items()):
-            x = dy[0]
-            y = dy[1]
+            x = dy[xaxis]
+            y = dy[yaxis]
             t = x<=cutf[k]
             x = x[t]
             y = y[t]
@@ -4402,7 +4514,7 @@ class Analysis:
         mapper = {'p1':'costh_kernel',
                   'p2':'cos2th_kernel',
                   'msd':'norm_square_kernel',
-                  'corr':'mult_kernel',
+                  'gt':'mult_kernel',
                   }
         if prop in mapper or prop.lower() in mapper:
             inner_func_name = mapper[prop.lower()] 
@@ -4523,7 +4635,7 @@ class Analysis:
         if prop.lower() =='p2':
             Prop_nump = 0.5*(3*Pro_nump-1.0)
         t = ass.numpy_keys(xt)
-        dynamical_property = (t-t.min() , Prop_nump )
+        dynamical_property = {'time':t-t.min(), prop : Prop_nump }
         #tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
