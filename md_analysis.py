@@ -369,8 +369,6 @@ class ass():
     def wrap_multiple_trajectory(files,function,*fargs,**fkwargs):
         
         data_old = dict()
-        mult_data = dict()
-        
         for file in files:
             data = function(file,*fargs,**fkwargs)
             
@@ -871,12 +869,15 @@ class plotter():
     def colormaps():
         return sorted(m for m in plt.cm.datad)     
     @staticmethod
-    def plotDynamics(datadict,compare=None,style='points',locleg='best',ncolleg=1,
-             fname =None,title=None,size=3.5,xlim=None,ylim=None,pmap=None,
-             cmap = None,ylabel=None,units='ns',midtime=None,labmap=None,
-             num=100,cutf=None,lstmap=None,write_plot_data=False,yscale=None,
-             xscale='log',edgewidth=0.3,legfont=2.0,markersize=1.5,legend=True,
-             legkwargs=dict()):
+    def plotDynamics(datadict,compare=None,
+                     style='points',comp_style='lines',
+             fname =None,title=None,size=3.5,
+             ylabel=None,xlabel=None,
+             xlim=None,ylim=None, xscale='log',yscale=None,
+             pmap=None, cmap = None, labmap=None,lstmap=None,cutf=None,
+             midtime=None,num=100,write_plot_data=False,
+             edgewidth=0.3,markersize=1.5,legend=True,
+             legkwargs=dict(),legfont=2.0):
 
         if labmap is None:
             labmap  = {k:k for k in datadict}
@@ -945,15 +946,15 @@ class plotter():
                 
         if title is not None:
             plt.title(r'{:s}'.format(title))
-        plt.xlabel(r'$t ({})$'.format(units),fontsize=3*size)
+        plt.xlabel(xlabel,fontsize=3*size)
         plt.ylabel(ylabel,fontsize=3*size)
 
         for i,(k,dy) in enumerate(datadict.items()):
-            x = ass.numpy_keys(dy)/1000
-            y = ass.numpy_values(dy)
+            x = dy[0]
+            y = dy[1]
             t = x<=cutf[k]
-            x = x[t][1:]
-            y = y[t][1:]
+            x = x[t]
+            y = y[t]
             if num == 'all':
                 args = np.arange(0,x.shape[0],dtype='i')
             else:
@@ -970,8 +971,7 @@ class plotter():
             else:
                 raise NotImplementedError('Implement here you own plotting style. Use elif statement')
         if legend:
-            plt.legend(frameon=False,fontsize=legfont*size,
-                   ncol=ncolleg,**legkwargs)
+            plt.legend(frameon=False,fontsize=legfont*size,**legkwargs)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
         plt.show()
         return
@@ -4517,12 +4517,12 @@ class Analysis:
             logger.error('Dynamics Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
             return None
         
-       
+        
         #tf2 = perf_counter()
-        if prop.lower() !='p2':
-            dynamical_property = {round(t,8):p for t,p in zip(xt,args[3])}
-        else:
-            dynamical_property = {round(t,8):0.5*(3*p-1) for t,p in zip(xt,args[3])}
+        if prop.lower() =='p2':
+            Prop_nump = 0.5*(3*Pro_nump-1.0)
+        t = ass.numpy_keys(xt)
+        dynamical_property = (t-t.min() , Prop_nump )
         #tf3 = perf_counter() - tf2
         
         tf = perf_counter()-tinit
