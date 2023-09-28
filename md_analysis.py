@@ -289,9 +289,54 @@ class gromacsTop():
             file.write('{:d}  {:d}  {:d}  {:8.5f}  {:8.5f} \n'.format(i+1,2,1,r,k))
         return
 class superClass():
-    def __init__(self):
+    def __init__(self,topol_file,connectivity_info,
+                 memory_demanding=False,**kwargs):
+        if 'conftype' not in kwargs:
+            systemClass = Analysis
+        else:
+            systemClass = Analysis_Confined
+        self.mdobj = systemClass(topol_file,connectivity_info,memory_demanding,**kwargs)
         return
-    def 
+    
+    def get_property(self,trajf,funcname,*func_args,**func_kwargs):
+        
+        self.traj_files = trajf
+        
+        func = getattr(self,funcname)
+        
+        data = multy_traj.multiple_trajectory(trajf,func,*func_args,**func_kwargs)
+        
+        return data
+    
+    def dealloc_timeframes(self):
+        if type(self.traj_files) is not str:
+            del self.mdobj.timeframes
+            self.mdobj.timeframes = dict()
+        return
+    
+    def read_timeframes(self,trajf):
+        if not self.mdobj.memory_demanding:
+            self.mdobj.read_file(trajf)
+        else:
+            self.mdobj.setup_reading(trajf)
+                
+    def segmental_dynamics(self,trajf,topol_vec=4,filters=dict(),
+                           prop='P1',dynOptions=dict()):
+        
+        self.read_timeframes(trajf)
+        
+        seg_t,fseg = self.mdobj.calc_segmental_vectors_t( topol_vec , filters = filters )
+        if len(fseg) >0:    
+            dyn = {k : self.mdobj.Dynamics(prop,seg_t,fs,**dynOptions) 
+                   for k,fs in fseg.items()
+                   }
+            dyn['system'] = self.mdobj.Dynamics(prop,seg_t)
+        else:
+            dyn = self.mdobj.Dynamics(prop,seg_t)  
+        
+        self.dealloc_timeframes()
+        
+        return dyn
     
 class multy_traj():
     def __init__(self):
@@ -394,8 +439,13 @@ class multy_traj():
         return wraped_data
     
     @staticmethod
-    def multiple_trajectory(files,function,wrapon='time',*fargs,**fkwargs,):
-        
+    def multiple_trajectory(files,function,*fargs,**fkwargs,):
+       
+        if 'wrapon' not in fkwargs:
+            wrapon = 'time'
+        else:
+            wrapon = fkwargs['wrapon']
+            
         type_files = type(files)
         
         if type_files is set:
@@ -2836,59 +2886,28 @@ class Analysis:
     The mother class. It's for simple polymer systems not confined ones
     '''
     def __init__(self,
-                 trajectory_file, # gro/trr for now
+                 topol_file, # gro/trr/ltop for now
                  connectivity_info, #itp #ltop
-                 topol_file = None,
                  memory_demanding=False,
-                 types_from_itp=True,
                  **kwargs):
-        #t0 = perf_counter()
-        self.trajectory_file = trajectory_file
-        self.connectivity_info = connectivity_info
-        self.connectivity_file = connectivity_info
-        
-        self.memory_demanding = memory_demanding
-        self.types_from_itp = types_from_itp
         '''
-        trajectory_file: the file to analyze
         'connectivity_file': itp or list of itps. From the bonds it finds angles and dihedrals
         'gro_file': one frame gro file to read the topology (can be extended to other formats). It reads molecule name,molecule id, atom type
         memory_demanding: If True each time we loop over frames, these are readen from the disk and are not stored in memory
         types_from_itp: if different types excist in itp and gro then the itp ones are kept
         '''
+        #t0 = perf_counter()
+        self.topol_file = topol_file
+        self.connectivity_info = connectivity_info
+        self.connectivity_file = connectivity_info
         self.kwargs = kwargs
+        self.memory_demanding = memory_demanding
         
-        if '.gro' == trajectory_file[-4:]:
-            self.traj_file_type = 'gro'
-            self.topol_file = trajectory_file
-            self.read_by_frame = self.read_gro_by_frame # function
-            self.traj_opener = open
-            self.traj_opener_args = (self.trajectory_file,)
-        elif '.trr' == trajectory_file[-4:]:
-            self.traj_file_type ='trr'
-            self.read_by_frame =  self.read_trr_by_frame # function
-            self.traj_opener = GroTrrReader
-            self.traj_opener_args = (self.trajectory_file,)
-            if '.gro' == topol_file[-4:]: 
-                self.topol_file = topol_file
-            else:
-                s = 'Your  trajectory file is {:s} while your topol file is {:s}.\n \
-                Give the right format for the topol_file. i.e. ".gro"\n \
-                Only One frame is needed to get the \
-                topology'.format(trajectory_file,topol_file)
-                raise Exception(s)
-        elif '.lammpstrj' == self.trajectory_file[-10:]:
-            self.traj_file_type ='lammpstrj'
-            self.read_by_frame = self.read_lammpstrj_by_frame
-            self.traj_opener = lammpsreader.LammpsTrajReader
-            self.traj_opener_args = (self.trajectory_file,)
-            if topol_file is None:
-               topol_file = self.connectivity_file
-            self.topol_file = topol_file
-        elif '.mol2' == self.trajectory_file[-5:]:
-            raise Exception('mol2 only for topology')
+        if 'types_from_itp' in kwargs:
+            self.types_from_itp = kwargs['types_from_itp']
         else:
-            raise NotImplementedError('Trajectory file format ".{:s}" is not yet Implemented'.format(trajectory_file.split('.')[-1]))
+            self.types_from_itp = True
+
         self.read_topology()
         
         if 'types_map' in kwargs:
@@ -2907,8 +2926,10 @@ class Analysis:
         self.analysis_initialization()
  
         self.timeframes = dict() # we will store the coordinates,box,step and time here
+        
         #tf = perf_counter()-t0
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        
         return 
     
     def map_types(self,types_map):
@@ -3011,9 +3032,6 @@ class Analysis:
         setattr(self,attr_name+'_per_type',ids)
         return 
     
-    def find_topology_from_mol2(self):
-        
-        return
     
     def find_topology_from_itp(self):
         #t0 = perf_counter()
@@ -3328,10 +3346,9 @@ class Analysis:
             except:
                 raise NotImplementedError('connectivity_info = {} is not implemented yet'.format(self.connectivity_file))
             else:
-                #if self.connectivity_file[-4:] =='.itp':
+                
                 self.find_topology_from_itp() # reads your itp files to get the connectivity
-                #elif self.connectivity_file[-5:] =='mol2':
-                    #self.find_topology_from_mol2() 
+
         elif '.ltop' == self.topol_file[-5:]:
             self.read_lammps_topol()
         else:
@@ -3681,7 +3698,21 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return 
     
-    def read_file(self):    
+    def read_file(self,trajectory_file=None):    
+       
+        if trajectory_file is None:
+            try:
+                # just checking if these attributes excist 
+                self.trajectory_file
+                self.trajectory_file_type
+                self.read_by_frame
+                self.traj_opener
+                self.traj_opener_args
+            except AttributeError:
+                raise Exception('You need to provide a trajectory file to read. The reading is not set')
+        else:
+            self.setup_reading(trajectory_file)
+        
         if   self.traj_file_type == 'gro':
             self.read_gro_file()
         elif self.traj_file_type == 'trr': 
@@ -3690,6 +3721,26 @@ class Analysis:
             self.read_lammpstrj_file()
         return 
     
+    def setup_reading(self,trajectory_file):
+        self.trajectory_file = trajectory_file
+        if '.gro' == self.trajectory_file[-4:]:
+            self.traj_file_type = 'gro'
+            self.read_by_frame = self.read_gro_by_frame # function
+            self.traj_opener = open
+            self.traj_opener_args = (self.trajectory_file,)
+        elif '.trr' == self.trajectory_file[-4:]:
+            self.traj_file_type ='trr'
+            self.read_by_frame =  self.read_trr_by_frame # function
+            self.traj_opener = GroTrrReader
+            self.traj_opener_args = (self.trajectory_file,)
+        elif '.lammpstrj' == self.trajectory_file[-10:]:
+            self.traj_file_type ='lammpstrj'
+            self.read_by_frame = self.read_lammpstrj_by_frame
+            self.traj_opener = lammpsreader.LammpsTrajReader
+            self.traj_opener_args = (self.trajectory_file,)
+        else:
+            raise NotImplementedError('Trajectory file format ".{:s}" is not yet Implemented'.format(trajectory_file.split('.')[-1]))
+        
     def write_gro_file(self,fname=None,whole=False,
                        option='',frames=None,step=None,**kwargs):
         t0 = perf_counter()
@@ -4552,7 +4603,7 @@ class Analysis:
   
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
                  filt_option='simple', block_average=False,
-                 multy_orgins=True,every=1):
+                 multy_origin=True,every=1):
         '''
         
 
@@ -4582,7 +4633,7 @@ class Analysis:
             Ways of averaginf
             True  <  < >|population  >|time origins
             False < >|population,time origins
-        multy_orgins: bool
+        multy_origin: bool
             if True use multiple origins in averaging (assumes that all origins are equivalent)
         Returns
         -------
@@ -4622,7 +4673,7 @@ class Analysis:
                 Prop_nump,nv,
                 x_nump,f_nump,w_nump,
                 block_average,
-                multy_orgins,
+                multy_origin,
                 every)
         
         #prop_kernel = DynamicProperty_kernel
@@ -4677,7 +4728,7 @@ class Analysis:
         return globals()[func_name],globals()[func_args]
     
     def Kinetics(self,xt,wt=None,stayed=False,block_average=False,
-                 multy_origins=True,):
+                 multy_origin=True,):
         '''
 
         Parameters
@@ -4719,7 +4770,7 @@ class Analysis:
                 Prop_nump,nv,
                 x_nump,w_nump,
                 block_average,
-                multy_origins)
+                multy_origin)
         Kinetics_kernel(*args)
         
         kinetic_property = {t:p for t,p in zip(xt,Prop_nump)}
@@ -4887,41 +4938,64 @@ class Analysis_Confined(Analysis):
     Includes functions for Structure and Dynamics
     '''
     
-    def __init__(self, trajectory_file,   
+    def __init__(self,    topol_file,
                  connectivity_info,       
-                 conftype,
-                 topol_file = None,
                  memory_demanding=False,
-                 adsorption_interval=None,
-                 particle_method = 'molname',
-                 polymer_method = 'molname',
                  **kwargs):
-        super().__init__(trajectory_file,
+        super().__init__(topol_file,
                          connectivity_info,
-                         topol_file,
                          memory_demanding,**kwargs)
-        self.conftype = conftype
-        self.particle_method = particle_method
-        self.polymer_method = polymer_method
-        self.kwargs = kwargs
+        known_kwargs = ['conftype','adsorption_interval','particle_method','polymer_method',
+                        'lambda_train','polymer','particle']
+        defaults = {'particle_method':'molname',
+                    'polymer_method':'molname'
+                    }
+        #Obligatory keywords
+        if 'conftype' in kwargs:
+            self.conftype = kwargs['conftype']
+        else:
+            raise Exception('"conftype" has no default value. Available options are:\nzdir\nydir\nxdir\nzcylindrical\nsherical_particle')
         
-        if adsorption_interval is not None:
-            if not ass.iterable(adsorption_interval[0]):
-                self.adsorption_interval = (tuple(adsorption_interval),)
-            else:
-                self.adsorption_interval = tuple(tuple(ai) for ai in adsorption_interval)
-            for ai in self.adsorption_interval:
-                if len(ai) != 2:
-                    raise ValueError('Wrong value of Adsorption interval = {} --> must be of up and low value'.format(ai))
+        for k in ['particle','polymer']:
+            if k not in kwargs:
+                raise Exception('You need to pass the keyword "{:s}" since it does not have a default value'.format(k))
+        
+        #Unkown keywords
+        for k in kwargs:
+            if k not in known_kwargs:
+                raise Exception('You have  passed the variable {:s} but I dont know what to do with it.\n Check also for typos'.format(k))
+        
+        #Special keywords/might have default
+        if 'adsorption_interval' in kwargs:
+           self.setup_adsorption(kwargs['adsorption_interval'])
         else:
             self.adsorption_interval = ((0,0),)
-              
+          
+        #Keywords with default values
+        for k,d in defaults.items():
+            if k not in kwargs:
+                setattr(self,k,d)
+            else:
+                setattr(self,k,kwargs[k])
+            
+
+        self.kwargs = kwargs
+        
+
         self.confined_system_initialization()
         
         self.polymer_ids = np.where(self.polymer_filt)[0]
         self.particle_ids = np.where(self.particle_filt)[0]
         return
-        
+    
+    def setup_adsorption(self,adsorption_interval):
+        if not ass.iterable(adsorption_interval[0]):
+                self.adsorption_interval = (tuple(adsorption_interval),)
+        else:
+            self.adsorption_interval = tuple(tuple(ai) for ai in adsorption_interval)
+        for ai in self.adsorption_interval:
+            if len(ai) != 2:
+                raise ValueError('Wrong value of Adsorption interval = {} --> must be of up and low value'.format(ai))
     ############## General Supportive functions Section #####################
     
     def find_connectivity_per_chain(self):
@@ -6361,7 +6435,7 @@ class Analysis_Confined(Analysis):
         Returns
         -------
         segvec_t : dictionary
-            keys: times
+            keysf times
             values: float array (nsegments,3)
         filt_per_t : dictionary
             see filter documentation
@@ -7476,11 +7550,11 @@ def fill_property(prop,nv,i,j,value,mi,block_average):
 def Kinetics_kernel(func,func_args,
                     Prop,nv,xt,wt=None,
                     block_average=False,
-                    multy_origins=True):
+                    multy_origin=True):
     
     n = xt.shape[0]
     
-    if multy_origins: mo = n
+    if multy_origin: mo = n
     else: mo = 1
     
     for i in range(mo):
@@ -7667,12 +7741,12 @@ def TACF_kernel(func, func_args, inner_func,
 @jit(nopython=True,fastmath=True,parallel=True)
 def DynamicProperty_kernel(func,func_args,inner_func,
               Prop,nv,xt,ft=None,wt=None,
-              block_average=False,multy_origins=True,
+              block_average=False,multy_origin=True,
               every=1):
         
     n = xt.shape[0]
     
-    if multy_origins: mo = n
+    if multy_origin: mo = n
     else: mo = 1
     
     for i in range(0,mo,every):
