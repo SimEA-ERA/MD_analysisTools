@@ -419,13 +419,54 @@ class superClass():
         
         return dyn
     
-    def segmental_desorption(self,trajf):
-        self.read_timeframes(trajf)
+    def segmental_desorption(self,trajf,topol_vec,kin='des',method='space'):
         
-        kin = self.Kinetics('prop')
+        self.read_timeframes(trajf)
+      
+        if method =='space':
+            filt = {'space': self.mdobj.adsorption_interval}
+        elif method == 'conf':
+            filt = {'conformations':['train']}
+        
+        seg_t,fseg = self.mdobj.calc_segmental_vectors_t( topol_vec , filters = filt )
+        
+        keys = list(fseg.keys())
+        ft = {t: v for t,v in fseg[keys[0]].items()}
+        for key in keys[1:]:
+            for t in ft:
+                ft[t] = np.logical_or(ft[t],fseg[key][t])
+                 
+        if kin =='ads':
+            ft = {t:np.logical_not(v) for t,v in ft.items()}
+        kinet = self.mdobj.Kinetics(ft)
+        
         self.dealloc_timeframes()
-        return
+        return kinet
 
+    def chain_desorption(self,trajf,kin='des',w=True):
+        
+        self.read_timeframes(trajf)
+      
+        filt = {'adsorption':None}
+        
+        
+        chain_cm_t,ft = self.mdobj.calc_chainCM_t( filters = filt)
+        
+        del chain_cm_t
+        
+        wt = ft['degree']
+        ft = ft['ads']
+                 
+        if kin =='ads':
+            ft = {t:np.logical_not(v) for t,v in ft.items()}
+        
+        if w:
+            kinet = self.mdobj.Kinetics(ft,wt)
+        else:
+            kinet = self.mdobj.Kinetics(ft)
+        
+        self.dealloc_timeframes()
+        return kinet
 class multy_traj():
     def __init__(self):
         return
@@ -6504,8 +6545,8 @@ class Analysis_Confined(Analysis):
         
         return globals()[func_name],globals()[func_args]
     
-    def Kinetics(self,xt,wt=None,stayed=False,block_average=False,
-                 multy_origin=True,):
+    def Kinetics(self,xt,wt=None,block_average=False,
+                 multy_origin=True):
         '''
 
         Parameters
@@ -6516,8 +6557,7 @@ class Analysis_Confined(Analysis):
         wt : dictionary
             keys: time
             values: float array (total population,)
-        stayed: bool
-         if True gives one only if from t0 to t it was True
+        
         block_average : bool
             Ways of averaging
             True  <  < >|population  >|time origins
@@ -6530,8 +6570,6 @@ class Analysis_Confined(Analysis):
             values: float (it represents the percentage of state change)
         '''
         tinit = perf_counter()
-        if stayed:
-            xt = ass.stay_True(xt)
         
         Prop_nump,nv = self.init_prop(xt)
         x_nump = self.init_xt(xt,dtype=bool)
