@@ -288,12 +288,15 @@ class gromacsTop():
         for i in range(natoms):
             file.write('{:d}  {:d}  {:d}  {:8.5f}  {:8.5f} \n'.format(i+1,2,1,r,k))
         return
+class superClass():
+    def __init__(self):
+        return
+    def 
+    
 class multy_traj():
     def __init__(self):
         return
-    
 
-    
     @staticmethod
     def average_data(files,function,*fargs, **fkwargs):
        
@@ -414,7 +417,7 @@ class multy_traj():
             mult_data = multy_traj.wrap_the_data(data_to_wrap,wrapon)
         elif type_files is str:
              # single file
-            mult_data = function(file,*fargs,**fkwargs)
+            mult_data = function(files,*fargs,**fkwargs)
         else:
             raise Exception('type {} is not Regognized as file or files to read'.format(type_files))
         return mult_data
@@ -977,8 +980,10 @@ class plotter():
   
         return np.unique(args[args<x.shape[0]])
     
+    @staticmethod
     def colormaps():
         return sorted(m for m in plt.cm.datad)     
+    
     @staticmethod
     def plotDynamics(datadict,xaxis='time',yaxis='P1',compare=None,
                      style='points',comp_style='lines',
@@ -1001,7 +1006,7 @@ class plotter():
             except:
                 c = plotter.colors.qualitative*3
                 cmap = { k : c[i] for i,k in enumerate(datadict.keys()) }
-        elif cmap in self.colormaps():
+        elif cmap in plotter.colormaps():
             cm = matplotlib.cm.get_cmap(cmap)
             n = len(datadict)
             cmap = {k: cm((i+0.5)/n) for i,k in enumerate(datadict.keys())}
@@ -4633,7 +4638,7 @@ class Analysis:
         
         #tf2 = perf_counter()
         if prop.lower() =='p2':
-            Prop_nump = 0.5*(3*Pro_nump-1.0)
+            Prop_nump = 0.5*(3*Prop_nump-1.0)
         t = ass.numpy_keys(xt)
         dynamical_property = {'time':t-t.min(), prop : Prop_nump }
         #tf3 = perf_counter() - tf2
@@ -4902,14 +4907,14 @@ class Analysis_Confined(Analysis):
         
         if adsorption_interval is not None:
             if not ass.iterable(adsorption_interval[0]):
-                self.adsorption_distance_intervals = (tuple(adsorption_interval),)
+                self.adsorption_interval = (tuple(adsorption_interval),)
             else:
-                self.adsorption_distance_intervals = tuple(tuple(ai) for ai in adsorption_interval)
-            for ai in self.adsorption_distance_intervals:
+                self.adsorption_interval = tuple(tuple(ai) for ai in adsorption_interval)
+            for ai in self.adsorption_interval:
                 if len(ai) != 2:
                     raise ValueError('Wrong value of Adsorption interval = {} --> must be of up and low value'.format(ai))
         else:
-            self.adsorption_distance_intervals = ((0,0),)
+            self.adsorption_interval = ((0,0),)
               
         self.confined_system_initialization()
         
@@ -5235,7 +5240,7 @@ class Analysis_Confined(Analysis):
         cmp = self.get_particle_cm(coords)
         d_nonp = self.dfun(self,coords, cmp) #absolut distance not minimum image
         
-        for interval in self.adsorption_distance_intervals:
+        for interval in self.adsorption_interval:
             dlow = interval[0]
             dup = interval[1]
             fin = filt_uplow(d, dlow, dup)
