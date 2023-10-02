@@ -627,11 +627,18 @@ class supraClass():
         if method =='inverse':
             if dr is None: dr =dq
             if dmax is None: dmax = qmax/10.0
-            sq = self.mdobj.calc_Sq_byInverseGr(dr,dmax,dq,qmax,qmin,ids,direction)
+            dat = self.mdobj.calc_Sq_byInverseGr(dr,dmax,dq,qmax,qmin,ids,direction)
         else:
-            sq = self.mdobj.calc_Sq(qmin,dq,qmax,direction=None,ids=None)
+            dat = self.mdobj.calc_Sq(qmin,dq,qmax,direction=None,ids=None)
+        
+        q = dat['q'] ; Sq = dat['Sq'] 
+        
+        dat.update({'qmax':q[q>1][Sq[q>1].argmax()],'Sqmax':Sq.max()})
+        
         self.dealloc_timeframes()
-        return sq
+        
+        return dat
+    
 class multy_traj():
     def __init__(self):
         return
@@ -4440,7 +4447,7 @@ class Analysis:
         Sq/=nframes
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return {'q':q,'Sq':1+Sq,'qmax':q[q>1][Sq[q>1].argmax()],'Sqmax':Sq.max()}
+        return {'q':q,'Sq':1+Sq}
     
     def calc_Sq_byInverseGr(self,dr,dmax,dq,qmax,
                             qmin=0,
@@ -5820,7 +5827,7 @@ class Analysis_Confined(Analysis):
                          connectivity_info,
                          memory_demanding,**kwargs)
         known_kwargs = ['conftype','adsorption_interval','particle_method','polymer_method',
-                        'lambda_train','polymer','particle']
+                        'train_custom_method','polymer','particle']
         defaults = {'particle_method':'molname',
                     'polymer_method':'molname'
                     }
@@ -6117,7 +6124,7 @@ class Analysis_Confined(Analysis):
             fin_nonp = filt_uplow(d_nonp,dlow,dup)
             nonp_ftrain = np.logical_or(nonp_ftrain,fin_nonp)
         try:
-            func = self.kwargs['lambda_train']
+            func = self.kwargs['train_custom_method']
         except KeyError:
             pass
         else:
