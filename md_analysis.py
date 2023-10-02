@@ -299,6 +299,10 @@ class superClass():
         self.mdobj = systemClass(topol_file,connectivity_info,memory_demanding,**kwargs)
         return
     
+    def cut_timeframes(self,num_start=None,num_end=None):
+        self.read_timeframes(self.trajf)
+        self.mdobj.cut_timeframes(num_start,num_end)
+        return 
     def get_property(self,trajf,funcname,*func_args,**func_kwargs):
         
         self.traj_files = trajf
@@ -316,11 +320,26 @@ class superClass():
         return
     
     def read_timeframes(self,trajf):
-        if not self.mdobj.memory_demanding:
-            self.mdobj.read_file(trajf)
+        try:
+            self.already_read
+        except:
+            if not self.mdobj.memory_demanding:
+                self.mdobj.read_file(trajf)
+                self.already_read = True
+            else:
+                self.mdobj.setup_reading(trajf)
         else:
-            self.mdobj.setup_reading(trajf)
+            if not self.already_read and not self.mdobj.memory_demanding:
+                del self.already_read
+                self.read_timeframes(trajf)
+            
         return
+    def handleCharge(self,appendhydro=[]):
+        if len(appendhydro)>0:
+            add_atoms.add_ghost_hydrogens(self.mdobj,appendhydro)
+            add_atoms.append_atoms(self.mdobj,'ghost')
+        self.mdobj.charge_from_maps()
+        return 
     
     def handleWeights(self,ft,dynOptions):
         if 'degree' in ft:
@@ -328,10 +347,36 @@ class superClass():
             ft = { t:v for t,v in ft.items() if t != 'degree' }
         
         if 'w' in dynOptions:
-            dynOptions['weights_t'] = weights     
+            if 'degree' in ft:
+                dynOptions['weights_t'] = weights      
             del dynOptions['w']
         
         return ft, dynOptions
+    
+    @staticmethod
+    def check_direction(direction):
+    
+        if len(direction)!=3:
+            raise Exception('direction must be a 3D vector (list) or np.array')
+        td = type(direction)
+        if not (td is list or td is type(np.ones(3)) or td is tuple):
+            raise Exception('direction is not the prober type')
+        direction = np.array(direction)
+        return direction
+    
+    def computeTACF(self,prop,xt,ft,dynOptions):
+        
+        ft,  dynOptions = self.handleWeights(ft,dynOptions)
+        
+        if len(ft) >0:    
+            dyn = {k : self.mdobj.TACF(prop,xt,fs,**dynOptions) 
+                   for k,fs in ft.items()
+                   }
+            dyn['system'] = self.mdobj.TACF(prop,xt)
+        else:
+            dyn = self.mdobj.TACF(prop,xt)
+        return dyn  
+          
     
     def computeDynamics(self,prop,xt,ft,dynOptions):
         
@@ -381,12 +426,8 @@ class superClass():
         seg_t,fseg = self.mdobj.calc_segmental_vectors_t(topol_vec,filters = filters)
         del seg_t
     
-        self.mdobj.charge_from_maps()
-        if len(appendhydro)>0:
-            add_atoms.add_ghost_hydrogens(self.mdobj,appendhydro)
-            add_atoms.append_atoms(self.mdobj,'ghost')
-        
-        
+        self.handleCharge(appendhydro)
+
         dm_t,fdm = self.mdobj.calc_segmental_dipole_moment_t(topol_vec,segbond=segbond)
 
         dyn = self.computeDynamics(prop,dm_t,fseg,dynOptions)        
@@ -404,12 +445,8 @@ class superClass():
         chain_cm_t,ft = self.mdobj.calc_chainCM_t( filters = filters )
         
         del chain_cm_t
-        self.mdobj.charge_from_maps()
         
-        if len(appendhydro)>0:
-            add_atoms.add_ghost_hydrogens(self.mdobj,appendhydro)
-            add_atoms.append_atoms(self.mdobj,'ghost')
-        
+        self.handleCharge(appendhydro)
         
         dm_t,fdm = self.mdobj.calc_chain_dipole_moment_t(**options)
 
@@ -467,6 +504,137 @@ class superClass():
         
         self.dealloc_timeframes()
         return kinet
+    
+    def segmental_msd(self,trajf,seg_vec,segbond,direction=[1,1,1],
+                      filters=dict(),dynOptions=dict()):
+        
+        direction = self.check_direction(direction)
+        
+        self.read_timeframes(trajf)
+ 
+        cmt, ft = self.mdobj.calc_segCM_t(seg_vec,segbond,filters = filters)
+        
+        if not (direction == np.ones(3)).all():
+            cmt = {t:c*direction for t,c in cmt.items()}
+        
+        dyn = self.computeDynamics('MSD',cmt,ft,dynOptions)
+ 
+        self.dealloc_timeframes()
+        return dyn
+    
+    def chain_msd(self,trajf,direction=[1,1,1],
+                      filters=dict(),dynOptions=dict()):
+        
+        direction = self.check_direction(direction)
+        
+        self.read_timeframes(trajf)
+ 
+        cmt, ft = self.mdobj.calc_chainCM_t(filters = filters)
+        
+        if not (direction == np.ones(3)).all():
+            cmt = {t:c*direction for t,c in cmt.items()}
+        
+        dyn = self.computeDynamics('MSD',cmt,ft,dynOptions)
+ 
+        self.dealloc_timeframes()
+        return dyn
+    
+    def dihedral_dynamics(self,trajf,phi,prop='sin',filters=dict(),dynOptions=dict()):
+        
+        
+        if phi not in self.mdobj.dihedral_types:
+            raise ValueError('{} is not in dihedrals'.format(phi))
+        
+        self.read_timeframes(trajf)
+ 
+        phit, ft = self.mdobj.calc_dihedrals_t(phi,filters = filters)
+        
+        dyn = self.computeTACF(prop,phit,ft,dynOptions)
+ 
+        self.dealloc_timeframes()
+        return dyn
+    
+    def dihedral_distribution(self,trajf,phi,filters=dict(),degrees=True):
+    
+        if phi not in self.mdobj.dihedral_types:
+            raise ValueError('{} is not in dihedrals'.format(phi))
+        
+        self.read_timeframes(trajf)
+ 
+        phit, ft = self.mdobj.calc_dihedrals_t(phi,filters = filters)
+        
+        distr = {'system':[]}
+        distr.update({k:[] for k in ft})
+        for t,dih in phit.items():
+            distr['system'].extend(dih)
+            for k in ft.keys():
+                 distr[k].extend( dih[ft[k][t]] )
+        if degrees:
+            scale = 180/np.pi
+            distr = {k:np.array(distr[k])*scale for k in distr}
+        else:
+            distr = {k:np.array(distr[k])*scale for k in distr}
+            
+        self.dealloc_timeframes()
+        
+        if len(distr)==1:
+            distr = distr[ list(distr.keys())[0] ]
+        
+        return distr
+    
+    def conformation_evolution(self,trajf,option=''):
+        
+        self.read_timeframes(trajf)
+        confs = self.mdobj.calc_conformations_t(option)
+        self.dealloc_timeframes()
+        
+        return confs
+    def density_profile(self,trajf,binl,dmax,offset=0,option='',mode='mass',flux=None):
+        self.read_timeframes(trajf)
+        densprof = self.mdobj.calc_density_profile(binl,dmax,offset,option,mode,flux)
+        self.dealloc_timeframes()
+        return densprof
+    
+    def orientation(self,trajf,topol_vec,binl,dmax,offset=0,option=''):
+        self.read_timeframes(trajf)
+        p2 = self.mdobj.calc_P2(topol_vec,binl,dmax,offset,option)
+        self.dealloc_timeframes()
+        return p2
+    
+    def chain_structure(self,trajf,binl,dmax,offset=0,option=''):
+        self.read_timeframes(trajf)
+        cha = self.mdobj.calc_chain_characteristics(binl,dmax,offset)
+        self.dealloc_timeframes()
+        return cha
+    
+    def static_dipole_correlations(self,trajf,topol_vec,segbond,appendhydro=[],filters=dict()):
+        self.read_timeframes(trajf)
+        self.handleCharge(appendhydro)
+        corrs = self.mdobj.calc_segmental_dipole_moment_correlation(topol_vec,segbond,filters)
+        self.dealloc_timeframes()
+        return corrs
+    def pair_distribution(self,trajf,binl,dmax,type1=None,type2=None,
+                               ids=None,direction=None,
+                               density='number',normalize=False,
+                               bulkMaxDiff=0.1,perc_bulk=0.75,
+                               **kwargs):
+        self.read_timeframes(trajf)
+        pd = self.mdobj.calc_pair_distribution(binl,dmax,type1,type2,ids,direction,
+                                               density,normalize,bulkMaxDiff,perc_bulk,
+                                               **kwargs)
+        self.dealloc_timeframes()
+        return pd
+    
+    def Sq(self,trajf,dq,qmax,method='inverse',qmin=2,dmin=0,dr=None,dmax=None,ids=None,direction=None):
+        self.read_timeframes(trajf)
+        if method =='inverse':
+            if dr is None: dr =dq
+            if dmax is None: dmax = qmax/10.0
+            sq = self.mdobj.calc_Sq_byInverseGr(dr,dmax,dq,qmax,qmin,ids,direction)
+        else:
+            sq = self.mdobj.calc_Sq(qmin,dq,qmax,direction=None,ids=None)
+        self.dealloc_timeframes()
+        return sq
 class multy_traj():
     def __init__(self):
         return
@@ -483,7 +651,6 @@ class multy_traj():
                 for k in ldata:
                     ldata[k].append( di[k])
             for k in ldata:
-                print(len(ldata[k]))
                 ave_data[k] = np.mean( ldata[k], axis=0 )
                 ave_data[k+'(std)'] =  np.std( ldata[k], axis=0 )
             return ave_data
@@ -499,7 +666,7 @@ class multy_traj():
             for k1 in ldata:
                 for k2 in ldata[k1]:
                     ave_data[k1][k2] = np.mean( ldata[k1][k2], axis=0 )
-                    ave_data[k1][k2+'(std)'] =  np.std( ldata[k1][k2], axis=0 )
+                    ave_data[k1][k2+'_STD'] =  np.std( ldata[k1][k2], axis=0 )
             return ave_data
         
         files = list(files)
@@ -4260,18 +4427,18 @@ class Analysis:
                     
         return q
     
-    def calc_Sq(self,dmin,dq,dmax,direction=None,ids=None):
+    def calc_Sq(self,qmin,dq,qmax,direction=None,ids=None):
         t0 = perf_counter()
         if isinstance(self,Analysis_Confined):
             ids = self.polymer_ids
-        q = self.find_q(dmin,dq,dmax,direction)
+        q = self.find_q(qmin,dq,qmax,direction)
         Sq = np.zeros(q.shape[0],dtype=float)
         args =(q,Sq,ids)
         nframes = self.loop_trajectory('Sq',args)
         Sq/=nframes
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return 1+Sq
+        return {'q':q,'Sq':1+Sq}
     
     def calc_Sq_byInverseGr(self,dr,dmax,dq,qmax,
                             qmin=0,
@@ -5075,7 +5242,7 @@ class Analysis:
         return dipoles_t,filters_t
     
     def calc_segmental_dipole_moment_correlation(self,topol_vector,
-                                       segbond,filters={'all':None}):
+                                       segbond,filters=dict()):
         '''
         Computes static correlation between segments
         
@@ -5098,9 +5265,10 @@ class Analysis:
 
         '''
         t0 = perf_counter()
+        filters.update({'system':None})
         dipoles_t,filters_t = self.calc_segmental_dipole_moment_t(topol_vector,
                                        segbond,filters)
-        
+                   
         ids1,ids2 = self.find_vector_ids(topol_vector)
         bond_distmatrix = self.find_bond_distance_matrix(ids1)
         
@@ -5112,22 +5280,26 @@ class Analysis:
                 b =  np.nonzero(bond_distmatrix ==k)
                 b0[k] = b[0]
                 b1[k] = b[1]
-        
+
         correlations ={filt:{k:[] for k in unb if k>0} for filt in filters_t}
         
         args = (dipoles_t,filters_t,b0,b1,correlations)
         
         nframes = self.loop_trajectory('vector_correlations', args)
-        
+       
+        corrs = {kf:{'nc':[],'corr':[],'corr(std)':[]} for kf in correlations}
         for kf in filters_t:
             for k in correlations[kf]:
                 c = correlations[kf][k]
-                correlations[kf][k] = {'mean':np.mean(c),'std':np.std(c)}
+                corrs[kf]['nc'].append(k)
+                corrs[kf]['corr'].append(np.mean(c))
+                corrs[kf]['corr(std)'].append(np.std(c))
+            corrs[kf] = {key:np.array(corrs[kf][key]) for key in corrs[kf]}
                 
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
     
-        return correlations   
+        return corrs 
     
     def stress_per_t(self,filters={}):
         '''
@@ -5283,7 +5455,7 @@ class Analysis:
     
 
     
-    def calc_chainCM_t(self,filters={'all':None},option=''):
+    def calc_chainCM_t(self,filters=dict(),option=''):
         '''
         Computes chains center of mass as a function of time
         Parameters
@@ -5619,7 +5791,8 @@ class Analysis:
     
         TACF_kernel(*args)
         #print(Prop_nump)
-        TACF_property = {t:p for t,p in zip(xt,Prop_nump)}
+        t = ass.numpy_keys(xt)
+        TACF_property = {'time':t -t.min(),'tacf':Prop_nump}
         tf = perf_counter()-tinit
         
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
@@ -6192,9 +6365,12 @@ class Analysis_Confined(Analysis):
     
     ######## Main calculation Functions for structural properties ############      
     
-    def calc_density_profile(self,binl,dmax,
-                             mode='mass',option='',flux=None,offset=0,
-                             **kwargs):
+    def get_bins(self,binl,dmax,offset=0):
+        bins =np.arange(offset,offset+dmax+binl, binl)
+        return bins
+    
+    def calc_density_profile(self,binl,dmax,offset=0,
+                             option='',mode='mass',flux=False):
         '''
         Master function to compute the density profile
 
@@ -6241,7 +6417,7 @@ class Analysis_Confined(Analysis):
         
         if dmax is None:
             NotImplemented
-        bins  =   np.arange(offset,offset+dmax+binl, binl)
+        bins  =   self.get_bins(binl,dmax,offset)
         nbins = len(bins)-1
         rho = np.zeros(nbins,dtype=float)
         mass_pol = self.atom_mass[self.polymer_filt] 
@@ -6273,8 +6449,11 @@ class Analysis_Confined(Analysis):
         if mode =='mass': args =(*args,mass_pol)
         
         
-        if flux is not None and flux !=False:
-            density_profile.update(self.calc_density_profile(binl,dmax,mode,option=option,**kwargs))
+        if flux:
+            if mode =='number':
+                raise NotImplementedError('number density fluxations are not implemented.Please use mass density and then rescale to number')
+            density_profile.update(self.calc_density_profile(binl,dmax,
+                                 offset=offset,mode=mode,option=option))
             rho_mean = density_profile['rho'].copy()
             rho_mean/=scale
             args = (nbins,bins,rho,mass_pol,rho_mean**2)
@@ -6321,7 +6500,7 @@ class Analysis_Confined(Analysis):
                 dens['rho'] = dens['mrho']
                 
                 density_profile.update(dens)
-                density_profile.update({'stats':stats})
+                density_profile.update(stats)
                 
         #############
         
@@ -6332,7 +6511,7 @@ class Analysis_Confined(Analysis):
     
 
     
-    def calc_P2(self,binl,dmax,topol_vector,option='',**kwargs):
+    def calc_P2(self,topol_vector,binl,dmax,offset=0,option=''):
         '''
         Calculates P2 bond parameter
         The unit vector is predifined by the type of confinement
@@ -6358,40 +6537,64 @@ class Analysis_Confined(Analysis):
         the distance: 'd'  | float array
         the function: 'P2' | float array
         '''
+
         t0 = perf_counter()
 
-        bins  =   np.arange(0, dmax, binl)
+        bins  =   self.get_bins(binl,dmax,offset)
+        
         dlayers=[]
         for i in range(0,len(bins)-1):
             dlayers.append((bins[i],bins[i+1]))
-        d_center = [0.5*(b[0]+b[1]) for b in dlayers]
+        d_center = np.array([0.5*(b[0]+b[1]) for b in dlayers])
         
         ids1, ids2 = self.find_vector_ids(topol_vector)
         nvectors = ids1.shape[0]
         logger.info('topol {}: {:d} vectors  '.format(topol_vector,nvectors))
         
-        costh_unv = [[] for i in range(len(dlayers))]
-        costh = np.empty(nvectors,dtype=float)
-        if option in ['bridge','loop','train','tail','free']:
-            args = (ids1,ids2,dlayers,option,costh,costh_unv)
+        
+        
+        if option in ['conformation','conformations']:
+            confs = ['train','loop','bridge','tail','free']
+            costh_unv = {k:[[] for i in range(len(dlayers))] for k in confs }
+            args = (ids1,ids2,dlayers,nvectors,costh_unv)
+            
             s = '_conformation'
         elif option=='':
             s =''
+            costh_unv = [[] for i in range(len(dlayers))]
+            costh = np.empty(nvectors,dtype=float)
             args = (ids1,ids2,dlayers,costh,costh_unv)
         else:
             raise NotImplementedError('option "{}" not Implemented.\n Check your spelling when you give strings'.format(option))
+       
+        
         nframes = self.loop_trajectory('P2'+s, args)
 
-       
-        costh2_mean = np.array([ np.array(c).mean() for c in costh_unv ])
-        costh2_std  = np.array([ np.array(c).std()  for c in costh_unv ])
-        s='P2'
-        orientation = {'d':  d_center} 
-        orientation.update({s: 1.5*costh2_mean-0.5, s+'(std)' : 1.5*costh2_std-0.5 })
+        if option =='':
+            
+            costh2_mean = np.array([ np.array(c).mean() for c in costh_unv ])
+            costh2_std  = np.array([ np.array(c).std()  for c in costh_unv ])
+    
+            s='P2'
+            orientation = {'d':  d_center} 
+            orientation.update({s: 1.5*costh2_mean-0.5, s+'(std)' : 1.5*costh2_std-0.5 })
+        
+        elif option in ['conformation','conformations']:
+            
+            orientation = {'d':  d_center} 
+            
+            for j in confs:
+                costh2_mean = np.array([ np.array(c).mean() for c in costh_unv[j] ])
+                costh2_std  = np.array([ np.array(c).std()  for c in costh_unv[j] ])
+                s='P2'+j
+                orientation.update({s: 1.5*costh2_mean-0.5, s+'(std)' : 1.5*costh2_std-0.5 })
+            
+            orientation.update(self.calc_P2(topol_vector,binl,dmax,offset))
         
         tf = perf_counter() - t0
         
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
         return orientation   
         
     def calc_particle_size(self):
@@ -6457,7 +6660,7 @@ class Analysis_Confined(Analysis):
         '''
         t0 = perf_counter()
         
-        bins = np.arange(offset,dmax,binl)
+        bins  =   self.get_bins(binl,dmax,offset)
         dlayers = [(bins[i],bins[i+1]) for i in range(len(bins)-1)]
         d_center = [0.5*(b[0]+b[1]) for b in dlayers]
         nl = len(dlayers)
@@ -6508,14 +6711,16 @@ class Analysis_Confined(Analysis):
         t0 = perf_counter()
         
         confs_t = dict()
-        args = (confs_t)
+        args = (confs_t,)
         nframes = self.loop_trajectory('confs_t'+option, args)
         confs_t = ass.rearrange_dict_keys(confs_t)
         
+        conforms_t = {'time' : ass.numpy_keys( confs_t[ list(confs_t.keys())[0] ] ) }
+        conforms_t.update({k: ass.numpy_values(c) for k,c in confs_t.items()})
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
     
-        return confs_t
+        return conforms_t
     
     def get_Kinetics_inner_kernel_functions(self,wt):
         '''
@@ -6618,11 +6823,11 @@ class Filters():
         return bool_data
     
     @staticmethod
-    def all(self,filt,ids1,*args):
-        return {'all':np.ones(ids1.shape[0],dtype=bool)}
+    def system(self,filt,ids1,*args):
+        return {'system':np.ones(ids1.shape[0],dtype=bool)}
     @staticmethod
-    def chain_all(self,filt,*args):
-        return {'all':np.ones(len(self.chain_args),dtype=bool)}
+    def chain_system(self,filt,*args):
+        return {'system':np.ones(len(self.chain_args),dtype=bool)}
     
     @staticmethod
     def space(self,layers,ids1,ids2,coords,*args):
@@ -6931,8 +7136,8 @@ class coreFunctions():
     @staticmethod
     def vector_correlations(self,vec_t,filt_t,bk0,bk1,correlation):
             
-        frame = self.current_frame
-        timekey = self.get_time(frame) - self.get_time(self.first_frame)
+        
+        timekey = self.get_key()
         vec = vec_t[timekey]
         for kf in correlation:
             f = filt_t[kf][timekey]
@@ -7342,7 +7547,7 @@ class coreFunctions():
         return   
     @staticmethod
     def P2_conformation(self,ids1,ids2,dlayers,
-                        conformation,costh,costh_unv):
+                        nvectors,costh_unv):
         frame = self.current_frame
         #1) coords
         coords = self.get_coords(frame)
@@ -7355,29 +7560,29 @@ class coreFunctions():
         
         args_free = coreFunctions.get_args_free(self,ads_chains)
         
-        #get conformation args
-        args = locals()['args_'+conformation]
-        filt_ids = Filters.filt_bothEndsIn(ids1,ids2,args)
+        for j in costh_unv:
+            args = locals()['args_'+j]
+            filt_ids = Filters.filt_bothEndsIn(ids1,ids2,args)
+            r1 = coords[ids1[filt_ids]]; r2 = coords[ids2[filt_ids]]
+            
+            
+            rm = 0.5*(r1+r2)
         
-        r1 = coords[ids1[filt_ids]]; r2 = coords[ids2[filt_ids]]
-        costh = costh[filt_ids]
-        rm = 0.5*(r1+r2)
+            d = self.get_distance_from_particle(rm)
+            uv = self.unit_vectorFun(self,rm,cs)
+            
+            costh = np.empty(d.shape[0],dtype=float)
+            costhsquare__kernel(costh,r2-r1,uv)
         
-        d = self.get_distance_from_particle(rm)
-        uv = self.unit_vectorFun(self,rm,cs)
-        
-        costhsquare__kernel(costh,r2-r1,uv)
-        
-        for i,dl in enumerate(dlayers):
-            filt = filt_uplow(d, dl[0], dl[1])
-            costh_unv[i].extend(costh[filt])
-        
+            for i,dl in enumerate(dlayers):
+                filt = filt_uplow(d, dl[0], dl[1])
+                costh_unv[j][i].extend(costh[filt])
         return  
     @staticmethod
     def chain_characteristics(self,chain_args,dlayers,chars):
         #1) translate the system
         frame = self.current_frame
-        coords = self.get_whole_coords(frame)
+        coords = self.get_coords(frame)
         box = self.get_box(frame)
         cs = self.get_particle_cm(coords)
         
@@ -7499,7 +7704,7 @@ class coreFunctions():
             std = np.std(lengths)
             x[lab] = m
             x[lab+'(std)'] = std
-            x[lab+'_lenghts'] = lengths 
+           #x[lab+'_lenghts'] = lengths 
 
         key = self.get_key()
         
@@ -7521,7 +7726,7 @@ class coreFunctions():
             size_std = np.std(sizes)
             x[lab] = size_m 
             x[lab+'(std)'] = size_std
-            x[lab+'_sizes'] = sizes
+            #x[lab+'_sizes'] = sizes
 
         key = self.get_key()
         confs_t[key] = x
