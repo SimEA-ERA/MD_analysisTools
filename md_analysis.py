@@ -289,20 +289,22 @@ class gromacsTop():
             file.write('{:d}  {:d}  {:d}  {:8.5f}  {:8.5f} \n'.format(i+1,2,1,r,k))
         return
     
-class superClass():
+class supraClass():
     def __init__(self,topol_file,connectivity_info,
-                 memory_demanding=False,**kwargs):
+                 memory_demanding=False,keep_frames=(None,None),**kwargs):
         if 'conftype' not in kwargs:
             systemClass = Analysis
         else:
             systemClass = Analysis_Confined
+            
         self.mdobj = systemClass(topol_file,connectivity_info,memory_demanding,**kwargs)
+        self.keep_frames = keep_frames
         return
     
-    def cut_timeframes(self,num_start=None,num_end=None):
-        self.read_timeframes(self.trajf)
-        self.mdobj.cut_timeframes(num_start,num_end)
+    def set_keep_frames(self,num_start=None,num_end=None):
+        self.keep_frames = (num_start,num_end)
         return 
+    
     def get_property(self,trajf,funcname,*func_args,**func_kwargs):
         
         self.traj_files = trajf
@@ -320,19 +322,13 @@ class superClass():
         return
     
     def read_timeframes(self,trajf):
-        try:
-            self.already_read
-        except:
-            if not self.mdobj.memory_demanding:
-                self.mdobj.read_file(trajf)
-                self.already_read = True
-            else:
-                self.mdobj.setup_reading(trajf)
+
+        if not self.mdobj.memory_demanding:
+            self.mdobj.read_file(trajf)
         else:
-            if not self.already_read and not self.mdobj.memory_demanding:
-                del self.already_read
-                self.read_timeframes(trajf)
-            
+            self.mdobj.setup_reading(trajf)
+        if not self.keep_frames == (None,None):
+            self.mdobj.cut_timeframes(*self.keep_frames)
         return
     def handleCharge(self,appendhydro=[]):
         if len(appendhydro)>0:
@@ -613,6 +609,7 @@ class superClass():
         corrs = self.mdobj.calc_segmental_dipole_moment_correlation(topol_vec,segbond,filters)
         self.dealloc_timeframes()
         return corrs
+    
     def pair_distribution(self,trajf,binl,dmax,type1=None,type2=None,
                                ids=None,direction=None,
                                density='number',normalize=False,
@@ -743,6 +740,11 @@ class multy_traj():
             wrapon = fkwargs['wrapon']
             
         type_files = type(files)
+        if type_files is dict:
+            return {k:
+                    multy_traj.multiple_trajectory(f, function, *fargs, **fkwargs)
+                    for k,f in files.items()
+                    }
         
         if type_files is set:
             mult_data = multy_traj.average_data(files,function,*fargs,**fkwargs)
@@ -4438,7 +4440,7 @@ class Analysis:
         Sq/=nframes
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-        return {'q':q,'Sq':1+Sq}
+        return {'q':q,'Sq':1+Sq,'qmax':q[q>1][Sq[q>1].argmax()],'Sqmax':Sq.max()}
     
     def calc_Sq_byInverseGr(self,dr,dmax,dq,qmax,
                             qmin=0,
