@@ -8,22 +8,26 @@ import argparse
 import sys
 sys.path.insert(0, '/Users/n.patsalidis/Desktop/PHD/REPOSITORIES/MDanalysis')
 import md_analysis as mda 
+import numpy as np
+
 def main():
-    help_trajf = "trajectory file(s)\n set denotes average (must be of the same frame length)\n list or tuple denote wrapping the trajectories\n dictionary denotes key : value pairs where the value must be a trajectory file or set or tuple or list of trajectory files"
-    help_property = ""
-    help_topol = ""
-    help_memory_demanding= ""
-    help_connectivity=""
-    help_keep_frames = ""
-    help_conftype = ""
-    help_polymer_method = ""
-    help_particle_method = ""
-    help_polymer = ""
-    help_particle = ""
-    help_adsorption_interval = ""
-    help_train_costum_method = ""
-    help_property_args = ""
-    help_property_kwargs = "" 
+    help_trajf = "trajectory file(s). set --> average, list/tuple --> wrapping, dictionary --> key:result pairs"
+    help_property = "The property to be computed, e.g. density_profile, pair_distribution, Sq, segmental_dynamics etc .."
+    help_topol = "Topology file (.gro,.ltop (lammps .dat file))"
+    help_memory_demanding= "If True then each frame is read from the disk, necessary computations are done and then is deleted"
+    help_connectivity=".itp or list of itp(s) / .ltop file"
+    help_keep_frames = "2 integers. First is the frame number to start and second the frame number to end"
+    help_conftype = "Type of confinment. Providing this the algorithm assumes we have a confined system"
+    help_polymer_method = "Method to understand which is polymer. Default is 'molname'"
+    help_particle_method = "Method to understand which is particle. Defauslt is 'molname'"
+    help_polymer = "Polymer name or molecule ids or atom type or atom ids"
+    help_particle = "Particle name or molecule ids or atom type or atom ids"
+    help_adsorption_interval = "tuple or list of tuples. Denotes the distance intervale between particle and polymer in which the polymer is considered adsorbed"
+    help_cylinder_length = "The length of the (finite) cylinder."
+    help_ztrain = "when there is a (finite) cylindrical confinment this denotes the adsorption distance at the zdirection (above and below the cylinder)"
+    help_property_args = "tuple: arguments for the 'property' to be computed"
+    help_property_kwargs = "dictionary: keyword arguments for the property to be computed" 
+    help_result_file = "prefix of the name of the file that the data will be stored"
     adddef = " [  default: %(default)s ]"
     
     argparser = argparse.ArgumentParser(description="analyze your system(s)")
@@ -52,12 +56,17 @@ def main():
             type=str, required=False, help=help_particle)
     argparser.add_argument('-polymer',"--polymer",metavar=None,
             type=str, required=False, help=help_polymer)
-    argparser.add_argument('-train',"--train_costum_method",metavar=None,
-            type=str, required=False, help=help_train_costum_method)
+    argparser.add_argument('-cl',"--cylinder_length",metavar=None,
+            type=float, required=False, help=help_cylinder_length)
+    argparser.add_argument('-ztrain',"--ztrain",metavar=None,
+            type=float, required=False, help=help_ztrain)
     argparser.add_argument('-pargs',"--property_args",metavar=None,
-            type=str, required=False, help=help_property_args)
+            type=str, required=False,default='(,)', help=help_property_args)
     argparser.add_argument('-pkwargs',"--property_kwargs",metavar=None,
-            type=str, required=False, help=help_property_kwargs)
+            type=str, required=False,default='dict()', help=help_property_kwargs)
+    
+    argparser.add_argument('-rf',"--result_file",metavar=None,
+             required=False,default=None, help=help_result_file)
     
     parsed_args = argparser.parse_args()
     
@@ -65,7 +74,7 @@ def main():
                          'adsorption_interval','particle_method','polymer_method',
                         'train_custom_method','polymer','particle']
     
-    evaluated_strings = ['trajf','connectivity',
+    evaluated_strings = ['trajf','connectivity','polymer','particle',
                          'train_costum_method','adsorption_interval',
                          'property_args','property_kwargs']
     margs = dict()
@@ -78,12 +87,20 @@ def main():
         if s in evaluated_strings:
             try:
                 margs[s] = eval(attr)
-            except:
+            except NameError:
                 margs[s] = attr
         else:
             margs[s] = attr
         if s in known_init_kwargs:
-            init_kwargs[s] = attr
+            if s in evaluated_strings:
+                try:
+                    init_kwargs[s] = eval(attr)
+                except NameError:
+                    init_kwargs[s] = attr
+            else:
+                init_kwargs[s] = attr
+        
+    
     for k,m in margs.items():
         print(k,type(m),m)
     
@@ -91,7 +108,13 @@ def main():
     data = supra.get_property(margs['trajf'],margs['property'],
                               *margs['property_args'],
                               **margs['property_kwargs'])
-
+    
+    if parsed_args.result_file is not None:
+        fname = parsed_args.result_file.split('.pickle')[0]
+        fname = '{:s}-{:s}.pickle'.format(fname,margs['property'])
+    else:
+        fname = '{:s}.pickle'.format(margs['property'])
+    mda.ass.save_data(data,fname)
     return
 
 if __name__=='__main__':

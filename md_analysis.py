@@ -789,6 +789,31 @@ class ass():
     
     '''
     beebbeeb = True
+    
+    @staticmethod
+    def write_pickle(data,data_file):
+        with open(data_file,'wb') as handle:
+            pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        return
+    
+    @staticmethod
+    def read_pickle(data_file):
+        with open(data_file, 'rb') as handle:
+            data = pickle.load(handle)
+        return data
+    @staticmethod
+    def save_data(data,fname,method='pickle'):
+        if not ass.iterable(method):
+            methods = [method,]
+        for m in methods:
+            if m =='pickle':
+                ass.write_pickle(data,fname)
+            else:
+                raise NotImplementedError
+                ass.write_txt(data,fname)        
+        return
+    
+    
     @staticmethod
     def try_beebbeeb():
         if ass.beebbeeb:
@@ -3027,14 +3052,14 @@ class Distance_Functions():
     the Distance between coords and a center position (usually particle center of mass is passed)
     '''
     @staticmethod
-    def zdir(self,coords,zc):
-        return np.abs(coords[:,2]-zc)
+    def zdir(self,coords,c):
+        return np.abs(coords[:,2] - c[2])
     @staticmethod
-    def ydir(self,coords,yc):
-        return np.abs(coords[:,1]-yc)
+    def ydir(self,coords,c):
+        return np.abs(coords[:,1] - c[1])
     @staticmethod
-    def xdir(self,coords,xc):
-        return np.abs(coords[:,0]-xc)
+    def xdir(self,coords,c):
+        return np.abs(coords[:,0] - c[0])
     
 
     
@@ -3105,33 +3130,6 @@ class bin_Volume_Functions():
         v = 4*np.pi*(bin_up**3-bin_low**3)/3
         return  v
     
-    
-
-class Center_Functions():
-    '''
-    Depending on the confinemnt type one of these functions
-    will be called.
-    returns the nessary coordinates of the center. 
-    For example for confinement of flat surfaces on the z-direction (zdir)
-    it returns just the z coordinate.
-    For cylindrical on z returns the xy directions
-    This is necessary to broadcast correctly and fast the relevant distances within the algorithm
-    '''
-    @staticmethod
-    def zdir(c):
-        return c[2]
-    @staticmethod
-    def ydir(c):
-        return c[1]
-    @staticmethod
-    def xdir(c):
-        return c[0]
-    @staticmethod
-    def spherical_particle(c):
-        return c
-    @staticmethod
-    def zcylindrical(c):
-        return c
     
 class unit_vector_Functions():
     '''
@@ -5827,7 +5825,7 @@ class Analysis_Confined(Analysis):
                          connectivity_info,
                          memory_demanding,**kwargs)
         known_kwargs = ['conftype','adsorption_interval','particle_method','polymer_method',
-                        'train_custom_method','polymer','particle']
+                        'polymer','particle','cylinder_length']
         defaults = {'particle_method':'molname',
                     'polymer_method':'molname'
                     }
@@ -5859,7 +5857,13 @@ class Analysis_Confined(Analysis):
             else:
                 setattr(self,k,kwargs[k])
             
-
+        if 'cylinder_length' in kwargs:
+            self.cylinder_length = kwargs['cylinder_lenght']
+            try:
+                self.ztrain = self.kwargs['ztrain']
+            except KeyError as e:
+                raise e('when you give a finite length of a cylinder you need to provide also the "ztrain", which corresponds to the adsorbed distance of the polymer above and below the cylinder')
+            self.train_specific_method = self.train_in_finite_cylinder
         self.kwargs = kwargs
         
 
@@ -5979,7 +5983,7 @@ class Analysis_Confined(Analysis):
         self.dfun = self.get_class_function(Distance_Functions,self.conftype)
         self.box_add = self.get_class_function(Box_Additions,self.conftype)
         self.volfun = self.get_class_function(bin_Volume_Functions,self.conftype)
-        self.centerfun = self.get_class_function(Center_Functions,self.conftype)
+        
         self.unit_vectorFun = self.get_class_function(unit_vector_Functions,self.conftype)
         ##########
         
@@ -6032,8 +6036,7 @@ class Analysis_Confined(Analysis):
         cm : center of mass (the number of coordinates depends on the confinment type)
 
         '''
-        cm =self.centerfun(CM( coords[self.particle_filt], 
-                               self.particle_mass))
+        cm =CM ( coords[self.particle_filt], self.particle_mass)
         return cm
     
 
@@ -6094,6 +6097,18 @@ class Analysis_Confined(Analysis):
                 
         return False
     
+    def train_in_finite_cylinder(self,coords,cmp,ftrain):
+        
+        Lc = self.cylinder_length
+        zd_train = self.ztrain
+        
+        zd = Distance_Functions.zdir(None,coords,cmp)
+
+        fz = np.logical_and(zd >=Lc/2,zd<=Lc/2+zd_train)                                 #
+        fud_surf = np.logical_and(fz,ftrain)
+        
+        return np.logical_or(ftrain,fud_surf)       
+        
     
     def get_filt_train(self):
         '''
@@ -6124,11 +6139,11 @@ class Analysis_Confined(Analysis):
             fin_nonp = filt_uplow(d_nonp,dlow,dup)
             nonp_ftrain = np.logical_or(nonp_ftrain,fin_nonp)
         try:
-            func = self.kwargs['train_custom_method']
-        except KeyError:
+            ftrain = self.train_specific_method(coords,cmp,ftrain)
+        except AttributeError:
             pass
-        else:
-            ftrain = func(coords,cmp,ftrain)
+        
+            
             
         ftrain = np.logical_and(ftrain, self.polymer_filt)
         nonp_ftrain = np.logical_and(nonp_ftrain, self.polymer_filt)
@@ -6834,9 +6849,37 @@ class Filters():
     @staticmethod
     def system(self,filt,ids1,*args):
         return {'system':np.ones(ids1.shape[0],dtype=bool)}
+    
     @staticmethod
     def chain_system(self,filt,*args):
         return {'system':np.ones(len(self.chain_args),dtype=bool)}
+   
+    @staticmethod
+    def x(self,layers,ids1,ids2,coords,*args):
+        fd = Distance_Functions.xdir
+        cmp = self.get_particle_cm()
+        d1 =  fd(None,coords[ids1],cmp)
+        d2 =  fd(None,coords[ids2],cmp)
+        f1 = Filters.filtLayers(layers,0.5*(d1+d2))
+        return f1
+    
+    @staticmethod
+    def y(self,layers,ids1,ids2,coords,*args):
+        fd = Distance_Functions.ydir
+        cmp = self.get_particle_cm()
+        d1 =  fd(None,coords[ids1],cmp)
+        d2 =  fd(None,coords[ids2],cmp)
+        f1 = Filters.filtLayers(layers,0.5*(d1+d2))
+        return f1
+    
+    @staticmethod
+    def z(self,layers,ids1,ids2,coords,*args):
+        fd = Distance_Functions.zdir
+        cmp = self.get_particle_cm()
+        d1 =  fd(None,coords[ids1],cmp)
+        d2 =  fd(None,coords[ids2],cmp)
+        f1 = Filters.filtLayers(layers,0.5*(d1+d2))
+        return f1
     
     @staticmethod
     def space(self,layers,ids1,ids2,coords,*args):
@@ -6847,6 +6890,22 @@ class Filters():
         
         f1 = Filters.filtLayers(layers,0.5*(d1+d2))
         return f1
+    
+    @staticmethod
+    def chain_z(self,layers,chain_cm,*args):
+        cmp = self.get_particle_cm()
+        d = Distance_Functions.zdir(None,chain_cm,cmp)
+        return Filters.filtLayers(layers, d)
+    @staticmethod
+    def chain_y(self,layers,chain_cm,*args):
+        cmp = self.get_particle_cm()
+        d = Distance_Functions.ydir(None,chain_cm,cmp)
+        return Filters.filtLayers(layers, d)
+    @staticmethod
+    def chain_x(self,layers,chain_cm,*args):
+        cmp = self.get_particle_cm()
+        d = Distance_Functions.xdir(None,chain_cm,cmp)
+        return Filters.filtLayers(layers, d)
     
     @staticmethod
     def filtLayers(layers,d):
