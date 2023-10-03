@@ -324,7 +324,11 @@ class supraClass():
     def read_timeframes(self,trajf):
 
         if not self.mdobj.memory_demanding:
-            self.mdobj.read_file(trajf)
+            if self.keep_frames[1] is None:
+                num_end = 1e16
+            else:
+                num_end = self.keep_frames[1]
+            self.mdobj.read_file(trajf,num_end)
         else:
             self.mdobj.setup_reading(trajf)
         if not self.keep_frames == (None,None):
@@ -639,6 +643,88 @@ class supraClass():
         
         return dat
     
+    def get_dirs_for_stress_relaxation(self,u):
+    
+        valueErr = 'u (direction of stress) must be one of the following {shear, normal, x, y, z, xy, xz, yz, yx, zx, zy, 0, 1, 2, 3, 4, 5, 6, 7 }'
+        
+        if u == 'shear': dirs = [1,2,3,5,6,7]
+        elif u == 'normal': dirs = [0,4,8]
+        elif u =='z': dirs = [8,]
+        elif u == 'y': dirs = [4,]
+        elif u == 'x': dirs = [0]
+        elif u =='xy' or u =='yx': dirs = [1,3]
+        elif u =='xz' or u =='zx': dirs = [2,6]
+        elif u =='yz'or u =='zy': dirs = [5,8]
+        else:
+            try:
+                dirs = [int(u),]
+            except:
+                raise ValueError(valueErr)
+            else:
+                if dirs[0]<0 or dirs[0]>8:
+                    raise ValueError(valueErr)
+        return dirs
+    
+    def average_the_inner(self,srel,n,key):
+        average_s = dict()
+        for k in srel:
+            average_s[k] = np.zeros(n,dtype=float)
+            for i in srel[k]:
+                average_s[k]+=srel[k][i][key]            
+            average_s[k] /= len(srel[k])
+        
+        for k in srel:
+            i0 = list(srel[k].keys())[0]
+            average_s[k] = {'time':srel[k][i0]['time'],'g':average_s[k]}
+        return average_s
+    
+    def region_stress_relaxation(self,trajf,u='shear',filters=dict()):
+        dirs = self.get_dirs_for_stress_relaxation(u)
+       
+        self.read_timeframes(trajf)
+        stress_t,ft = self.mdobj.stress_per_t(filters=filters)
+        vregion = {'system':{i:{t:np.mean(stress_t[t],axis=0)[i] for t in stress_t} for i in dirs} }
+        if len(ft) != 0:
+            vregion.update( {k: {t:np.mean(stress_t[t][f[t]] ,axis=0) for t in stress_t} for k,f in ft.items() } )    
+       #return vregion
+        srel = {k:{i:self.mdobj.multy_tau_average(v[i])
+                  for i in dirs}
+               for k,v in vregion.items() }
+        average_s = self.average_the_inner(srel,len(stress_t),'corr')
+        
+        
+        self.dealloc_timeframes()
+        
+        return average_s
+         
+    
+    def atom_stress_relaxation(self,trajf,u='shear',filters=dict(),dynOptions=dict()):
+        
+        dirs = self.get_dirs_for_stress_relaxation(u)
+       
+        self.read_timeframes(trajf)
+        
+        stress_t,ft = self.mdobj.stress_per_t(filters=filters)
+        
+        #dynOptions = {'block_average':True,}
+        
+        sti = { i : {t:v[:,i] for t,v in stress_t.items()} for i in dirs }
+        
+        srel = { i: self.computeDynamics('scalar',st,ft,dynOptions) for i,st in sti.items() }
+        
+        if len(ft)==0:
+            srel = {'system':srel}
+        else:
+            srel = ass.rearrange_dict_keys(srel)
+        
+        average_s = self.average_the_inner(srel,len(stress_t),'scalar')
+        if len(ft) == 0:
+            return average_s['system']
+        
+        self.dealloc_timeframes()
+        
+        return average_s
+        
 class multy_traj():
     def __init__(self):
         return
@@ -3958,11 +4044,11 @@ class Analysis:
             except AttributeError:
                return exceptEOF()
 
-    def read_lammpstrj_file(self):
+    def read_lammpstrj_file(self,num_end=int(1e16)):
         t0 = perf_counter()
         with lammpsreader.LammpsTrajReader(self.trajectory_file) as ofile:
             nframes = 0
-            while( self.read_lammpstrj_by_frame(ofile, nframes)):
+            while( self.read_lammpstrj_by_frame(ofile, nframes) and nframes<=num_end):
                 if self.memory_demanding:
                     del self.timeframes[nframes]
                 nframes += 1
@@ -3970,12 +4056,12 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return
     
-    def read_trr_file(self):
+    def read_trr_file(self,num_end=int(1e16)):
         t0 = perf_counter()
         with GroTrrReader(self.trajectory_file) as ofile:
             end = False
             nframes = 0
-            while( end == False):
+            while( end == False and nframes<=num_end):
                 try:
                     self.read_trr_by_frame(ofile, nframes)
                 except EOFError:
@@ -3988,11 +4074,11 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return 
 
-    def read_gro_file(self):
+    def read_gro_file(self,num_end=int(1e16)):
         t0 = perf_counter()
         with open(self.trajectory_file,'r') as ofile:
             nframes =0
-            while(self.read_gro_by_frame(ofile,nframes)):
+            while(self.read_gro_by_frame(ofile,nframes) and nframes<=num_end):
                 
                 if self.memory_demanding:
                     del self.timeframes[nframes]
@@ -4002,7 +4088,7 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return 
     
-    def read_file(self,trajectory_file=None):    
+    def read_file(self,trajectory_file=None,num_end=int(1e16)):    
        
         if trajectory_file is None:
             try:
@@ -4018,11 +4104,11 @@ class Analysis:
             self.setup_reading(trajectory_file)
         
         if   self.traj_file_type == 'gro':
-            self.read_gro_file()
+            self.read_gro_file(num_end)
         elif self.traj_file_type == 'trr': 
-            self.read_trr_file()
+            self.read_trr_file(num_end)
         elif self.traj_file_type =='lammpstrj':
-            self.read_lammpstrj_file()
+            self.read_lammpstrj_file(num_end)
         return 
     
     def setup_reading(self,trajectory_file):
@@ -4903,7 +4989,7 @@ class Analysis:
         x_nump : numpy array of type dtype
 
         '''
-        x0 =xt[0]
+        x0 = xt[list(xt.keys())[0]]
         nfr = len(xt)
         shape = (nfr,*x0.shape)
         x_nump = np.empty(shape,dtype=dtype)
@@ -5025,7 +5111,7 @@ class Analysis:
         mapper = {'p1':'costh_kernel',
                   'p2':'cos2th_kernel',
                   'msd':'norm_square_kernel',
-                  'gt':'mult_kernel',
+                  'scalar':'mult_kernel',
                   }
         if prop in mapper or prop.lower() in mapper:
             inner_func_name = mapper[prop.lower()] 
@@ -5308,7 +5394,7 @@ class Analysis:
     
         return corrs 
     
-    def stress_per_t(self,filters={}):
+    def stress_per_t(self,filters=dict()):
         '''
         Takes two int arrays  of atom ids and finds 
         the vectors per time between them
@@ -5655,7 +5741,41 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name +'" ---> Property: "{}'.format(prop))
         return dynamical_property
     
- 
+    def multy_tau_average(self,xt,every=1):
+        '''
+    
+        Parameters
+        ----------
+        xt : dictionary
+            keys: times
+            values: vector array (total population,nd) where nd =1,2,3
+            It is the input.
+
+        Returns
+        -------
+        dynamical_property : dictionary
+            keys: time
+            values: float
+
+        '''
+        tinit = perf_counter()
+        
+        Prop_nump,nv = self.init_prop(xt)
+        x_nump = self.init_xt(xt)
+        
+        try:
+            scalar_time_origin_average(Prop_nump,nv,x_nump,every)
+        except ZeroDivisionError as err:
+            logger.error('multy tau run Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
+            return None
+        
+        
+        t = ass.numpy_keys(xt)
+        dynamical_property = {'time':t-t.min(), 'corr' : Prop_nump }
+        
+        tf = perf_counter()-tinit
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        return dynamical_property
     
     def get_TACF_inner_kernel_functions(self,prop,filt_option,weights_t):
         '''
@@ -8156,7 +8276,22 @@ def TACF_kernel(func, func_args, inner_func,
             Prop[i] = (Prop[i]/nv[i] - mu_sq)/var
     
         return 
-
+@jit(nopython=True,fastmath=True,parallel=True )
+def scalar_time_origin_average(Prop,nv,xt,every=1):
+    n = xt.shape[0]
+    for i in range(0,n,every):
+        s1 = xt[i]
+        for j in prange(i,n):
+            
+            s2 = xt[j]
+            
+            value = s1*s2
+            
+            fill_property(Prop,nv,i,j,value,1.0,False)
+    for i in prange(n):   
+        Prop[i] /= nv[i]
+    return 
+       
 @jit(nopython=True,fastmath=True,parallel=True)
 def DynamicProperty_kernel(func,func_args,inner_func,
               Prop,nv,xt,ft=None,wt=None,
