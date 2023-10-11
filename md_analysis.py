@@ -386,11 +386,29 @@ class supraClass():
             dyn = {k : self.mdobj.Dynamics(prop,xt,fs,**dynOptions) 
                    for k,fs in ft.items()
                    }
-            dyn['system'] = self.mdobj.Dynamics(prop,xt)
+            dyn['system'] = self.mdobj.Dynamics(prop,xt,**dynOptions)
         else:
-            dyn = self.mdobj.Dynamics(prop,xt)
+            dyn = self.mdobj.Dynamics(prop,xt,**dynOptions)
         return dyn  
-          
+    
+    def dynamic_structure_factor(self,trajf,q,filters=dict(),
+                           dynOptions=dict()):
+        
+        self.read_timeframes(trajf)
+        
+        dynOptions["q"] = q
+        print(dynOptions)
+        try:
+            ids = self.mdobj.polymer_ids
+        except:
+            ids = self.mdobj.at_ids
+        coords_t,ft = self.mdobj.calc_coords_t( ids , filters = filters )
+        
+        dyn = self.computeDynamics('Fs',coords_t,ft,dynOptions)
+        
+        self.dealloc_timeframes()
+        
+        return dyn
     def segmental_dynamics(self,trajf,topol_vec=4,filters=dict(),
                            prop='P1',dynOptions=dict()):
         
@@ -5082,7 +5100,7 @@ class Analysis:
         return segvec_t,filt_per_t
     
     
-    def get_Dynamics_inner_kernel_functions(self,prop,filt_option,weights_t):
+    def get_Dynamics_inner_kernel_functions(self,prop,filt_option,weights_t,**kwargs):
         '''
         gets the options to set up the prober functions for
         the Dynamics kernel
@@ -5112,11 +5130,14 @@ class Analysis:
                   'p2':'cos2th_kernel',
                   'msd':'norm_square_kernel',
                   'scalar':'mult_kernel',
+                  'fs':'Fs_kernel',
                   }
-        if prop in mapper or prop.lower() in mapper:
+        prop = prop.lower()
+        if prop in mapper:
             inner_func_name = mapper[prop.lower()] 
         else:
             inner_func_name = prop
+            
         name = 'dynprop'
         af_name = 'get'
         
@@ -5586,12 +5607,12 @@ class Analysis:
         
         return vec_t,filt_per_t
     
-    def calc_coords_t(self,filters={'all':None}):
+    def calc_coords_t(self,ids,filters=dict()):
         t0 = perf_counter()
-        ids1 = self.polymer_ids
+        
         c_t = dict()
         filt_t = dict()
-        args = (filters,ids1,c_t,filt_t)
+        args = (filters,ids,c_t,filt_t)
         nframes = self.loop_trajectory('coords_t', args)
         filt_t = ass.rearrange_dict_keys(filt_t)
         
@@ -5643,9 +5664,10 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         
         return vec_t,filt_per_t
+    
     def Dynamics(self,prop,xt,filt_t=None,weights_t=None,
                  filt_option='simple', block_average=False,
-                 multy_origin=True,every=1):
+                 multy_origin=True,every=1,q=None):
         '''
         
 
@@ -5690,6 +5712,7 @@ class Analysis:
         x_nump = self.init_xt(xt)
         
         
+
         
         if filt_t is not None:
             f_nump = self.init_xt(filt_t,dtype=bool)
@@ -5711,15 +5734,21 @@ class Analysis:
         func,func_args,func_inner = \
         self.get_Dynamics_inner_kernel_functions(prop,filt_option,weights_t)
         
+        if prop.lower() == 'fs':
+            if q is None:
+                print(q)
+                raise Exception('For {} calculation you must give a "q" value '.format(prop))
+            kernel_args =(q,)
+        else:
+            kernel_args = tuple()
+            
         args = (func,func_args,func_inner,
                 Prop_nump,nv,
                 x_nump,f_nump,w_nump,
                 block_average,
                 multy_origin,
-                every)
+                every,kernel_args)
         
-        #prop_kernel = DynamicProperty_kernel
-        #overheads = perf_counter() - tinit
         
         try:
             #prop_kernel(prop_nump, nv, x_nump, f_nump, nfr)
@@ -5766,7 +5795,7 @@ class Analysis:
         try:
             scalar_time_origin_average(Prop_nump,nv,x_nump,every)
         except ZeroDivisionError as err:
-            logger.error('multy tau run Run {:s} --> There is a {} --> Check your filters or weights'.format(prop,err))
+            logger.error('multy tau run  --> There is a {} --> Check your filters or weights'.format(err))
             return None
         
         
@@ -8294,9 +8323,9 @@ def scalar_time_origin_average(Prop,nv,xt,every=1):
        
 @jit(nopython=True,fastmath=True,parallel=True)
 def DynamicProperty_kernel(func,func_args,inner_func,
-              Prop,nv,xt,ft=None,wt=None,
-              block_average=False,multy_origin=True,
-              every=1):
+              Prop,nv,xt,ft,wt,
+              block_average,multy_origin,
+              every,kernel_args):
         
     n = xt.shape[0]
     
@@ -8307,7 +8336,7 @@ def DynamicProperty_kernel(func,func_args,inner_func,
         for j in prange(i,n):
             
             args = func_args(i,j,xt,ft,wt)
-            
+            args=(*args,kernel_args)
             value,mi = func(inner_func,*args)
             
             fill_property(Prop,nv,i,j,value,mi,block_average)
@@ -8359,108 +8388,108 @@ def get_change_weighted__args(i,j,xt,ft,wt):
     return (xt[i],xt[j],ft[i],ft[j],wt[i])
 
 @jit(nopython=True,fastmath=True)
-def dynprop__kernel(inner_kernel,r1,r2):
+def dynprop__kernel(inner_kernel,r1,r2,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
-        inner = inner_kernel(r1[i],r2[i])
+        inner = inner_kernel(r1[i],r2[i],*kernel_args)
         tot+=inner
         mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def dynprop_simple__kernel(inner_kernel,r1,r2,ft0):
+def dynprop_simple__kernel(inner_kernel,r1,r2,ft0,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i]:
-            inner = inner_kernel(r1[i],r2[i])
+            inner = inner_kernel(r1[i],r2[i],*kernel_args)
             tot+=inner
             mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def dynprop_strict__kernel(inner_kernel,r1,r2,ft0,fte):
+def dynprop_strict__kernel(inner_kernel,r1,r2,ft0,fte,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and fte[i]:
-            inner = inner_kernel(r1[i],r2[i])
+            inner = inner_kernel(r1[i],r2[i],*kernel_args)
             tot+=inner
             mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def dynprop_change__kernel(inner_kernel,r1,r2,ft0,fte):
+def dynprop_change__kernel(inner_kernel,r1,r2,ft0,fte,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and not fte[i]:
-            inner = inner_kernel(r1[i],r2[i])
+            inner = inner_kernel(r1[i],r2[i],*kernel_args)
             tot+=inner
             mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def dynprop_const__kernel(inner_kernel,r1,r2,const):
+def dynprop_const__kernel(inner_kernel,r1,r2,const,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
 
     for i in prange(N):
         if const[i]:
-            inner = inner_kernel(r1[i],r2[i])
+            inner = inner_kernel(r1[i],r2[i],*kernel_args)
             tot+=inner
             mi+=1
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def dynprop_weighted__kernel(inner_kernel,r1,r2,w):
+def dynprop_weighted__kernel(inner_kernel,r1,r2,w,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
-        inner = inner_kernel(r1[i],r2[i])
+        inner = inner_kernel(r1[i],r2[i],*kernel_args)
         tot+=w[i]*inner
         mi+=w[i]
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def dynprop_simple_weighted__kernel(inner_kernel,r1,r2,ft0,w):
+def dynprop_simple_weighted__kernel(inner_kernel,r1,r2,ft0,w,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i]:
-            inner = inner_kernel(r1[i],r2[i])
+            inner = inner_kernel(r1[i],r2[i],*kernel_args)
             tot+=w[i]*inner
             mi+=w[i]
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def dynprop_strict_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w):
+def dynprop_strict_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and fte[i]:
-            inner = inner_kernel(r1[i],r2[i])
+            inner = inner_kernel(r1[i],r2[i],*kernel_args)
             tot+=w[i]*inner
             mi+=w[i]
     return tot,mi
 
 @jit(nopython=True,fastmath=True)
-def dynprop_change_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w):
+def dynprop_change_weighted__kernel(inner_kernel,r1,r2,ft0,fte,w,kernel_args):
     tot = 0
     mi = 0
     N = r1.shape[0]
     for i in prange(N):
         if ft0[i] and not fte[i]:
-            inner = inner_kernel(r1[i],r2[i])
+            inner = inner_kernel(r1[i],r2[i],*kernel_args)
             tot+=w[i]*inner
             mi+=w[i]
     return tot,mi
@@ -8499,16 +8528,16 @@ def sinCorrelation_kernel(x1,x2):
     return s1*s2
 
 @jit(nopython=True,fastmath=True)
-def mult_kernel(r1,r2):
+def mult_kernel(r1,r2,*args):
     return r1*r2
 
 @jit(nopython=True,fastmath=True)
-def cos2th_kernel(r1,r2):
+def cos2th_kernel(r1,r2,*args):
     costh = costh_kernel(r1,r2)
     return costh*costh
 
 @jit(nopython=True,fastmath=True)
-def costh_kernel(r1,r2):
+def costh_kernel(r1,r2,*args):
     costh=0 ; rn1 =0 ;rn2=0
     n = r1.shape[0]
     for j in range(n):
@@ -8521,27 +8550,12 @@ def costh_kernel(r1,r2):
     return costh
 
 @jit(nopython=True,fastmath=True)
-def Fs_xy12(r1,r2):
-    ri =  8.48528137423857*(r2[1] - r1[1] + r2[0] -r1[0])
+def Fs_kernel(r1,r2,q):
+    ri =  q*(r2[0] +r2[1] + r2[2] - r1[0] - r1[1] -r1[2])
     return np.cos(ri)
 
 @jit(nopython=True,fastmath=True)
-def Fs_xy13p45(r1,r2):
-    ri =  9.510586206959063*(r2[1] - r1[1] + r2[0] -r1[0])
-    return np.cos(ri)
-
-@jit(nopython=True,fastmath=True)
-def Fs_z13p45(r1,r2):
-    ri = 13.45*(r2[2] - r1[2])
-    return np.cos(ri)
-
-@jit(nopython=True,fastmath=True)
-def Fs_z12(r1,r2):
-    ri = 12*(r2[2] - r1[2])
-    return np.cos(ri)
-
-@jit(nopython=True,fastmath=True)
-def norm_square_kernel(r1,r2):
+def norm_square_kernel(r1,r2,*args):
     
     nm = 0
     for i in range(r1.shape[0]):
@@ -8550,7 +8564,7 @@ def norm_square_kernel(r1,r2):
     return nm
 
 @jit(nopython=True,fastmath=True,parallel=True)
-def costh__parallelkernel(r1,r2):
+def costh__parallelkernel(r1,r2,*args):
     tot = 0
     for i in prange(r1.shape[0]):
         tot += costh_kernel(r1[i],r2[i])
@@ -8558,12 +8572,12 @@ def costh__parallelkernel(r1,r2):
     return ave
 
 @jit(nopython=True,fastmath=True)
-def costhsquare__kernel(costh,r1,r2):
+def costhsquare__kernel(costh,r1,r2,*args):
     for i in range(r1.shape[0]):
         costh[i] = cos2th_kernel(r1[i],r2[i])
 
 @jit(nopython=True,fastmath=True)
-def costhmean__kernel(r1,r2):
+def costhmean__kernel(r1,r2,*args):
     mean =0
     for i in range(r1.shape[0]):
         costh = costh_kernel(r1[i],r2[i])
