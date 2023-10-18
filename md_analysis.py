@@ -852,17 +852,27 @@ class multy_traj():
             
         type_files = type(files)
         if type_files is dict:
-            return {k:
-                    multy_traj.multiple_trajectory(f, function, *fargs, **fkwargs)
-                    for k,f in files.items()
-                    }
-        
+            
+            changing_args = ass.is_tuple_of_samesized_tuples(fargs)
+                
+            if changing_args:
+                if len(fargs) != len(files):
+                    raise Exception('if you pass tuple of tuples then they should be the same size as your dictionary')
+                return {k:
+                        multy_traj.multiple_trajectory(f, function, *fargs[i], **fkwargs)
+                        for i,(k,f) in enumerate(files.items())
+                        }
+            else:
+                return {k:
+                        multy_traj.multiple_trajectory(f, function, *fargs, **fkwargs)
+                        for k,f in files.items()
+                        }
         if type_files is set:
             mult_data = multy_traj.average_data(files,function,*fargs,**fkwargs)
         elif type_files is list or type_files is tuple:
             data_to_wrap = dict()
             for file in files:
-                type_file  =type(file)
+                type_file  = type(file)
                 if type_file is set:
                     data = multy_traj.average_data(file,function,*fargs,**fkwargs)
                 elif type_file is str:
@@ -892,7 +902,63 @@ class ass():
     3) printing and logger functions e.g. print_time, clear_logs 
     
     '''
+    @staticmethod
+    def make_dir(name):
+        name = name.replace('\\','/')
+        n = name.split('/')
+        lists = ['/'.join(n[:i+1]) for i in range(len(n))]  
+        a = 0 
+        for l in lists:
+            if not os.path.exists(l):
+                a = os.system('mkdir {:s}'.format(l))
+                if a!=0:
+                    s = l.replace('/','\\')
+                    a = os.system('mkdir {:s}'.format(s))
+        
+        return a
+    @staticmethod
+    def numerical_derivative(x,y):
+        d = np.empty_like(x)
+        d[1:-1] = (y[2:] -y[:-2])/(x[2:]-x[:-2])
+        d[0] = (y[1] -y[0])/(x[1]-x[0])
+        d[-1] = (y[-1]-y[-2])/(x[-2]-x[-1])
+        return d
+    
     beebbeeb = True
+    @staticmethod
+    def rename_keys_via_keyvalue(new_names,data_dict):
+        new_dict = dict()
+        for k,v in new_names.items():
+            new_dict[v] = data_dict[k]
+        return new_dict
+    @staticmethod
+    def rename_keys_via_enumeration(new_names,data_dict):
+        new_dict = dict()
+        l = list(data_dict.keys())
+        for i,k in enumerate(new_names):
+            new_dict[k] = data_dict[l[i]]
+        return new_dict
+    @staticmethod
+    def rename_keys(new_names,data_dict):
+        if type(new_names) is dict:
+            data_dict = ass.rename_keys_via_keyvalue(new_names,data_dict)
+        elif type(new_names) is list or type(new_names) is tuple:
+            data_dict = ass.rename_keys_via_enumeration(new_names,data_dict)
+        else:
+            raise ValueError('new_names must be dict,list or tuple ')
+        return data_dict
+    @staticmethod
+    def is_tuple_of_samesized_tuples(x):
+        if type(x) is not tuple:
+            return False
+        for i in x:
+            if type(i) is not tuple:
+                return False
+        l = len(x[0])
+        for i in x:
+            if l != len(i):
+                return False
+        return True
     
     @staticmethod
     def write_pickle(data,data_file):
@@ -1234,6 +1300,7 @@ class XPCS_communicator():
             yw = y[args]
             XPCS_communicator.write_xy_forXPCS(fn, xw,yw+1)
         return
+    
 class XPCS_Reader():
     def __init__(self,fname):
         self.relaxation_modes = []
@@ -1252,6 +1319,8 @@ class XPCS_Reader():
                 self.reg = float(l.split(':')[1])
             if 'log(Upsilon)' in line:
                 linum = i+2
+            if 'Kohlrausch Exponent' in l:
+                self.ke = float(l.split(':')[1])
         
         for i,line in enumerate(lines[linum:]):
             l = line.strip().split()
@@ -1264,13 +1333,57 @@ class XPCS_Reader():
         self.params_std= np.array(self.params_std)
         
         dlogtau = self.relaxation_modes[1]-self.relaxation_modes[0]
-        w = self.params
         
-        self.smoothness = np.sqrt (smoothness(w,1/dlogtau**4))
+        
+        self.smoothness = smoothness(self.params,dlogtau)
         self.relaxation_modes = 10**np.array(self.relaxation_modes)
+        w = self.params
         f = self.relaxation_modes
+        self.taus = self.relax()
         self.bounds=(f[0],f[-1])
+        self.contributions  = w*self.taus
         return
+    
+    def tau_relax(self):
+        return np.sum(self.contributions)
+    def relax(self):
+        if self.ke == 1.0:
+            return 1.0/self.relaxation_modes
+        elif self.ke == 2.0:
+            return 0.5*np.sqrt(np.pi)/np.sqrt(self.relaxation_modes)
+    
+    def plot_distribution(self,size=3.5,xlim=(-6,8),title=None):
+        fig,ax=plt.subplots(figsize=(size,size),dpi=300)
+        plt.minorticks_on()
+        plt.tick_params(direction='in', which='minor',length=size*1.5)
+        plt.tick_params(direction='in', which='major',length=size*3)
+        plt.yscale('log')
+        plt.xscale('log')
+        if title is not None:
+            plt.title(title)
+        xticks = [10**x for x in range(xlim[0],xlim[1]+1) ]
+        plt.xticks(xticks,fontsize=min(2.5*size,2.5*size*8/len(xticks)))
+        plt.yticks(fontsize=2.5*size)
+        plt.xlabel(r'$f$ / $ns^{-1}$',fontsize=2*size)
+        #plt.ylabel(r'$w$',fontsize=3*size)
+        locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
+        ax.xaxis.set_minor_locator(locmin)
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        
+        x = self.relaxation_modes
+        w = self.params
+        c = self.contributions
+        
+        plt.plot(x,w,ls='--',lw=0.25*size,marker = 'o',
+            markersize=size*1.2,markeredgewidth=0.15*size,
+            fillstyle='none',label='w')
+        plt.plot(x,c,ls='--',lw=0.25*size,marker = 's',
+            markersize=size*1.2,markeredgewidth=0.15*size,
+            fillstyle='none',label='c')
+            #plt.plot(f.relaxation_modes,f.params,ls='--',label=k,color=cmap[k])
+        plt.legend(frameon=False,fontsize=2.3*size)
+        plt.show()
+        return 
     
     def fitted_curve(self,x):
         fc = self.func(x,self.bounds[0],self.bounds[1],self.params)
@@ -1469,7 +1582,7 @@ class plotter():
         return sorted(m for m in plt.cm.datad)     
     
     @staticmethod
-    def plotDynamics(datadict,xaxis='time',yaxis='P1',compare=None,
+    def plotDynamics(datadict,xaxis='time',yaxis=None,compare=None,
                      style='points',comp_style='lines',
              fname =None,title=None,size=3.5,
              ylabel=None,xlabel=None,
@@ -1500,9 +1613,7 @@ class plotter():
             lstmap = {k:lst[i] for i,k in enumerate(datadict.keys())}
         elif type(lstmap) is str:
             lstmap = {k:lstmap for k in datadict}
-        if ylabel is None:
-            ylabel =r'$P_1(t)$'
-        else:
+        if ylabel is not  None:
             ylabel=ylabel
         if pmap is None:
             pmap = {k:'o' for k in datadict}
@@ -1691,6 +1802,7 @@ class fitLinear():
         self.xdata = np.array(xdata)
         self.ydata = np.array(ydata)
         self.nlines = nlines
+        self.fitlines()
     @staticmethod
     def piecewise_linear(x, x0, y0, k1, k2):
             return np.piecewise(x, [x < x0], 
@@ -1698,8 +1810,33 @@ class fitLinear():
     @staticmethod
     def costF(p,x,y):
         yp = fitLinear.piecewise_linear(x, *p)
-        return np.sum((y-yp)**2)
-    
+        return np.sum((y-yp)**2/y**2)
+    def find_slopes(self):
+        slopes = [] 
+        intersects = []
+        xf = self.xyline[0]
+        yf = self.xyline[1]
+        a = xf.argsort()
+        xf = xf[a]
+        yf=yf[a]
+        
+        breaks = self.breaks[self.breaks.argsort()]
+        for i,b in enumerate(breaks[1:]):
+            bm = breaks[i]
+            print(bm,b)
+            fb = np.logical_and(bm<xf,xf<b)
+           
+            x = xf[fb]
+            y = yf[fb]
+            
+            slope = (y[-1]-y[0])/(x[-1]-x[0])
+            ise = y[-1] -slope*x[-1]
+            slopes.append(slope)
+            intersects.append(ise)
+        self.slopes = slopes
+        self.intersections = intersects
+        return
+
     def fitlines(self):
         import pwlf
         x = self.xdata
@@ -1709,8 +1846,38 @@ class fitLinear():
         self.breaks = breaks
         xd = np.arange(x.min(),x.max(),0.01)
         self.xyline =  (xd,my_pwlf.predict(xd))
-        return self.xyline
-    
+        self.find_slopes()
+        
+        
+        
+        return 
+class xifit():
+    def __init__(self,tau,d,xirho=0.2):
+        self.lntau = np.log(tau)
+        self.tau = tau
+        self.d = d
+        self.xirho = xirho
+        self.fit()
+    @staticmethod
+    def func(xi,c,lntau0,xirho,d):
+        return c*np.tanh((d-xirho)/xi) + lntau0
+    @staticmethod
+    def costf(pars,d,xirho,lntau):
+        pred = xifit.func(*pars,xirho,d)
+        r = ((lntau-pred)**2)
+        return r.sum()/r.shape[0]
+    def fit(self,):
+        bounds = [(0,3),(-15,15),(-15,15)]
+        
+        from scipy.optimize import  differential_evolution
+        opt_res = differential_evolution(self.costf, bounds,
+                    args = (self.d,self.xirho,self.lntau) ,
+                    maxiter = 10000)
+        self.opt_res = opt_res
+        self.p = opt_res.x
+        self.d = np.arange(self.d.min(),self.d.max()+0.01,0.01)
+        self.curve = np.exp(self.func(*self.p,self.xirho,self.d))
+        return 
 class Arrheniusfit():
     
     
@@ -1719,7 +1886,7 @@ class Arrheniusfit():
         self.temp =  temp
         
         self.fit()
-        t = np.arange(temp.min()*0.95,temp.max()*1.05,0.01)
+        t = np.arange(temp.min(),temp.max()+0.01,0.01)
         self.t = t
         self.curve = self.exp(t,*self.opt_res.x)
         return       
@@ -1741,35 +1908,45 @@ class Arrheniusfit():
                     args = (self.temp,self.tau) ,
                     maxiter = 1000)
         self.opt_res = opt_res
+        self.p = opt_res.x
+        self.t = np.arange(self.temp.min(),self.temp.max()+0.01,0.01)
+        self.curve = self.exp(self.t,*self.p)
         return 
 
 class VFTfit():
-    def __init__(self,temp,tau):
+    def __init__(self,temp,tau,pars=[],pmin=None,pmax=None):
         self.tau = tau
         self.temp =  temp
-        
-        self.fitVFT()
-        t = np.arange(temp.min()*0.95,temp.max()*1.05,0.01)
+        if len(pars)==0:    
+            self.fitVFT()
+        elif len(pars)==3:
+            self.p = np.array(pars)
+        if pmin is None:
+            pmin = temp.min()
+        if pmax is None:
+            pmax = temp.max()
+        t = np.arange(pmin,pmax+0.01,0.01)
         self.t =t
-        self.curve = self.vft(t,*self.opt_res.x)
+        self.curve = self.vft(t,*self.p)
         return       
     @staticmethod
     def vft(temp,A,D,t0):
-        tau = np.exp(D/(temp-t0))*A
+        tau = A*np.exp(D/(temp-t0))
         return tau
     @staticmethod
     def costf(pars,temp,tau):
         tau_pred = VFTfit.vft(temp,*pars)
-        return np.sum((np.log10(tau_pred)-np.log10(tau))**2)/tau.size
+        return np.sum((np.log10(tau_pred)/np.log10(tau)-1)**2/tau**0.5)/tau.size
     
     def fitVFT(self):
-        from scipy.optimize import differential_evolution
+        from scipy.optimize import differential_evolution,dual_annealing
      #   pars = np.array([1,1,50])
-        bounds = [(1,2e2),(1e2,1e5),(0,900)]
+        bounds = [(0,1e-3),(1e2,1e4),(0,180)]
         opt_res = differential_evolution(self.costf, bounds,
                     args = (self.temp,self.tau) ,
-                    maxiter = 1000)
+                    maxiter = 10000)
         self.opt_res = opt_res
+        self.p = opt_res.x
         return 
 class fitData():
     
@@ -1860,24 +2037,52 @@ class fitData():
         self.xdata= self.xdata[f]
         self.ydata = self.ydata[f]
         return
-    def fitTheModel(self):
+    def clean_non_monotonic_data(self):
+        x = self.xdata
+        y = self.ydata
+        f = np.ones(x.size,dtype=bool)
+        for i in range(x.size):
+            d = y[i]<y[i+1:]
+            if d.any():
+                f[i] = False
+        self.xdata= self.xdata[f]
+        self.ydata = self.ydata[f]
+        return
+    
+    def clean_data(self):
         if True:
             self.clean_positive_derivative_data()
-        self.justFit()
-        self.estimate_minimum_residual()
-
-        self.taulow = self.estimate_taulow()
-        self.tauhigh = self.estimate_tauhigh()
+        if True:
+            self.clean_non_monotonic_data()
         if True:
             izero = self.get_arg_t0()
             if  izero != self.ydata.size:
                 self.ydata = self.ydata[:izero]
                 self.xdata = self.xdata[:izero]
+        return
+    def fitTheModel(self):
+        self.clean_data()
+            
+        self.justFit()
+        self.estimate_minimum_residual()
+
+        self.taulow = self.estimate_taulow()
+        self.tauhigh = self.estimate_tauhigh()
+
 
         self.refine_bounds(self.tauhigh)
         self.search_best()
         return
     
+    def save_for_XPCS(self,fname):
+        x = self.xdata
+        y = self.ydata
+        data = np.zeros((x.shape[0],3),dtype=float)
+        data[:,0] = x
+        data[:,1] = y +1
+        data[:,2]+= np.random.uniform(0,1e-9,x.shape[0])
+        np.savetxt(fname,data)
+        return
     def estimate_tauhigh(self):
         smfittau = self.smootherFit()
         if self.get_arg_t0() == self.ydata.size:
@@ -1909,7 +2114,7 @@ class fitData():
         print('estimated data residual = {:.4e}'.format(mres))
         return
     def get_arg_t0(self):
-        f = self.ydata <= 1e-3
+        f = self.ydata <= 1e-2
         smallys = np.where(f)[0]
         
         if len(smallys) ==0:
@@ -1930,7 +2135,7 @@ class fitData():
         if self.weighting_method == 'high-y':
             w = np.abs(self.ydata)+0.3
         elif self.weighting_method=='xy':
-            w=self.xdata**0.1  + self.ydata
+            w=1#self.xdata**0.1 +self.ydata
             w = w
         else:
             w = np.ones(self.ydata.shape[0])

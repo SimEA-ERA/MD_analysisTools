@@ -61,7 +61,7 @@ def main():
     argparser.add_argument('-ztrain',"--ztrain",metavar=None,
             type=float, required=False, help=help_ztrain)
     argparser.add_argument('-pargs',"--property_args",metavar=None,
-            type=str, required=False,default='(,)', help=help_property_args)
+            type=str, required=False,default='tuple()', help=help_property_args)
     argparser.add_argument('-pkwargs',"--property_kwargs",metavar=None,
             type=str, required=False,default='dict()', help=help_property_kwargs)
     
