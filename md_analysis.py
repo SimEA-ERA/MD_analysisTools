@@ -902,6 +902,7 @@ class ass():
     3) printing and logger functions e.g. print_time, clear_logs 
     
     '''
+
     @staticmethod
     def make_dir(name):
         name = name.replace('\\','/')
@@ -925,6 +926,25 @@ class ass():
         return d
     
     beebbeeb = True
+
+    @staticmethod
+    def is_tuple_of_samesized_tuples(x):
+        if type(x) is not tuple:
+            return False
+        for i in x:
+            if type(i) is not tuple:
+                return False
+        try:
+            x[0]
+        except IndexError:
+            return False
+        else:
+            l = len(x[0])
+            for i in x:
+                if l != len(i):
+                    return False
+        return True
+
     @staticmethod
     def rename_keys_via_keyvalue(new_names,data_dict):
         new_dict = dict()
@@ -947,18 +967,6 @@ class ass():
         else:
             raise ValueError('new_names must be dict,list or tuple ')
         return data_dict
-    @staticmethod
-    def is_tuple_of_samesized_tuples(x):
-        if type(x) is not tuple:
-            return False
-        for i in x:
-            if type(i) is not tuple:
-                return False
-        l = len(x[0])
-        for i in x:
-            if l != len(i):
-                return False
-        return True
     
     @staticmethod
     def write_pickle(data,data_file):
