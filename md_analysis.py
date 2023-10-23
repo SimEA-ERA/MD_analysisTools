@@ -1925,6 +1925,8 @@ class Arrheniusfit():
         self.curve = self.exp(self.t,*self.p)
         return 
 
+# lalala 
+
 class VFTfit():
     def __init__(self,temp,tau,pars=[],pmin=None,pmax=None):
         self.tau = tau
