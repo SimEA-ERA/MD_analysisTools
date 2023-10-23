@@ -1153,12 +1153,12 @@ def distance_kernel(d,coords,c):
     return 
 
 
-@jit(nopython=True,fastmath=True)
+@jit(nopython=True,fastmath=True,parallel=True)
 def smaller_distance_kernel(d1,d2,c1,c2):
     #Kernel for finding the minimum distance between two coords
-    for i in range(c1.shape[0]):
+    for i in prange(c1.shape[0]):
         distance_kernel(d2,c2,c1[i])
-        d1[i] = 10000000000
+        d1[i] = 1e16
         for j in range(d2.shape[0]):
             if d2[j]<d1[i]: 
                 d1[i] = d2[j]
@@ -1870,12 +1870,15 @@ class xifit():
     def func(xi,c,lntau0,xirho,d):
         return c*np.tanh((d-xirho)/xi) + lntau0
     @staticmethod
+    def dfunc(xi,c,lntau0,xirho,d):
+        return c/np.cosh((d-xirho)/xi)**2/xi
+    @staticmethod
     def costf(pars,d,xirho,lntau):
         pred = xifit.func(*pars,xirho,d)
-        r = ((lntau-pred)**2)
+        r = (((lntau-pred)/lntau)**2)
         return r.sum()/r.shape[0]
     def fit(self,):
-        bounds = [(0,3),(-15,15),(-15,15)]
+        bounds = [(0,3),(-5,5),(-15,15)]
         
         from scipy.optimize import  differential_evolution
         opt_res = differential_evolution(self.costf, bounds,
@@ -1885,6 +1888,7 @@ class xifit():
         self.p = opt_res.x
         self.d = np.arange(self.d.min(),self.d.max()+0.01,0.01)
         self.curve = np.exp(self.func(*self.p,self.xirho,self.d))
+        self.dcurve = self.curve*self.dfunc(*self.p,self.xirho,self.d)
         return 
 class Arrheniusfit():
     
@@ -1947,7 +1951,7 @@ class VFTfit():
         return np.sum((np.log10(tau_pred)/np.log10(tau)-1)**2/tau**0.5)/tau.size
     
     def fitVFT(self):
-        from scipy.optimize import differential_evolution,dual_annealing
+        from scipy.optimize import differential_evolution#,dual_annealing
      #   pars = np.array([1,1,50])
         bounds = [(0,1e-3),(1e2,1e4),(0,180)]
         opt_res = differential_evolution(self.costf, bounds,
@@ -3280,7 +3284,7 @@ class add_atoms():
         
         if m =='h':
             type_map = add_atoms.hydrogen_map
-            self.mass_map.update({m+ty:elements_mass['H'] for ty in types})
+            self.mass_map.update({m+ty:maps.elements_mass['H'] for ty in types})
         else:
             raise NotImplementedError('Currently the only option is to add hydrogens')
         
@@ -3447,6 +3451,8 @@ class bin_Volume_Functions():
         v = 4*np.pi*(bin_up**3-bin_low**3)/3
         return  v
     
+
+
     
 class unit_vector_Functions():
     '''
@@ -3498,9 +3504,125 @@ class unit_vector_Functions():
         uv[:,2] = 0
         return uv
 
-
-
+class RotTrans:
     
+    def __init__(self,method,ref_c,coords,**kwargs):
+        self.modify = getattr(self,method)
+        self.ref_c = ref_c
+        self.coords = coords
+        for k,v in kwargs.items():
+            setattr(self,k,v)
+        self.modify()
+        return
+    
+    @staticmethod
+    def Rx(theta):
+        c = np.cos(theta)
+        s = np.sin(theta)
+        r = np.zeros((3,3))
+        r[0,0] = 1
+        r[1,1] = c
+        r[2,2] = c
+        r[1,2] = -s
+        r[2,1] = s
+        return r
+    @staticmethod
+    def Ry(theta):
+        c = np.cos(theta)
+        s = np.sin(theta)
+        r = np.zeros((3,3))
+        r[1,1] = 1
+        r[0,0] = c
+        r[2,2] = c
+        r[0,2] = -s
+        r[2,0] = s
+        return r
+    @staticmethod
+    def Rz(theta):
+        c = np.cos(theta)
+        s = np.sin(theta)
+        r = np.zeros((3,3))
+        r[2,2] = 1
+        r[0,0] = c
+        r[1,1] = c
+        r[0,1] = -s
+        r[1,0] = s
+        return r
+    
+    @staticmethod
+    def rotate(c,yaw,pitch,roll):
+        Rx = RotTrans.Rx(yaw)
+        Ry = RotTrans.Ry(pitch)
+        Rz = RotTrans.Rz(roll)
+        cn = c.copy()
+        for r in [Rx,Ry,Rz]:
+            for i in range(cn.shape[0]):
+                cn[i] = np.dot(r,cn[i])
+        return cn
+    
+    @staticmethod
+    def distance(r1,r2):
+        r = r2-r1
+        return np.sum(r*r)**0.5
+    
+    @staticmethod
+    def rhat(r1,r2):
+        d = RotTrans.distance(r1,r2)
+        return (r2-r1)/d
+    
+    @staticmethod
+    def translate(r1,rx):
+        return r1+rx
+    
+    @staticmethod
+    def cost_max_dist(angles,cneibs,rotref,coords):
+        relc = coords - rotref
+        cn = RotTrans.rotate(relc, *angles)
+        d = Distance_Functions.minimum_distance(None,cn,cneibs)
+        print(d.max())
+        return np.sum(np.exp(-d))
+    
+    def react(self):
+        cr = self.coords[self.ireact]
+        print(cr.shape,self.ref_c.shape)
+        rh = self.rhat(cr,self.ref_c)
+        cneibs = self.cneibs
+        rt1 = self.ref_c + self.target_d*rh
+        rt2 = self.ref_c - self.target_d*rh
+        d2 = Distance_Functions.spherical_particle(None,cneibs,rt1)
+        d1 = Distance_Functions.spherical_particle(None,cneibs,rt2)
+        if d2.sum() >  d1.sum():
+            self.coords = self.translate(self.coords,rt1-cr)
+        else:
+            self.coords = self.translate(self.coords,rt2-cr)
+        self.rot_ref = self.coords[self.ireact]
+        
+        from scipy.optimize import dual_annealing,differential_evolution
+        bounds= [(-np.pi,np.pi)]*3
+        
+        opt_res = dual_annealing(self.cost_max_dist, bounds,
+                    args = (cneibs,self.rot_ref,self.coords) ,
+                    maxiter = 1000,
+                    restart_temp_ratio=1e-3,
+                    minimizer_kwargs={'method':'SLSQP',#
+                                     'bounds':bounds,
+                                     
+                    'options':{'maxiter':1000,
+                        'disp':True,
+                        'ftol':1e-3},
+                                })
+        '''
+        opt_res = differential_evolution(self.cost_max_dist, bounds,
+                    args = (cneibs,self.rot_ref,self.coords) ,
+                    maxiter = 1000,disp=True,polish=False)
+        '''
+        self.opt_res = opt_res
+        self.p = opt_res.x
+        c = self.coords -self.rot_ref
+        self.coords = self.rotate(c,*self.p) +self.rot_ref
+        
+        return 
+        
 class Analysis:
     '''
     The mother class. It's for simple polymer systems not confined ones
@@ -3522,7 +3644,7 @@ class Analysis:
         self.connectivity_file = connectivity_info
         self.kwargs = kwargs
         self.memory_demanding = memory_demanding
-        
+        self.timeframes = dict()
         if 'types_from_itp' in kwargs:
             self.types_from_itp = kwargs['types_from_itp']
         else:
@@ -3573,7 +3695,7 @@ class Analysis:
             self.angles = dict()
             self.dihedrals = dict()
             self.find_locGlob()
-            self.find_topology_from_itp()
+            self.find_topology()
         self.find_masses()
         
         #Now we want to find the connectivity,angles and dihedrals
@@ -3652,41 +3774,147 @@ class Analysis:
         ids = {v : np.array(temp_ids[v]) for v in types}
         setattr(self,attr_name+'_per_type',ids)
         return 
+    def define_connectivity(self,bond_dists):
+        bond_dists = {tuple(np.sort(k)):v for k,v in bond_dists.items()}
+        self.read_file(self.topol_file)
+        c = self.get_coords(0)
+        at_ids = self.at_ids
+        at_types = self.at_types
+        connectivity = dict()
+        con_ty = dict()
+        for i1,at1 in zip(at_ids,at_types):
+            for i2,at2 in zip(at_ids,at_types):
+                if i1==i2:
+                    continue
+                tyc = tuple(np.sort([at1,at2]))
+                if tyc in bond_dists:
+                    c1 = c[i1]
+                    c2 = c[i2]
+                    rd = c2 -c1
+                    d = np.dot(rd,rd)**0.5
+                    r = bond_dists[tyc]
+                    if d<r[1]:
+                        ids = (i1,i2)
+                        conn_id,c_type = self.sorted_id_and_type(ids)
+                        connectivity[conn_id] = c_type
+                        if d>r[0]:
+                            con_ty[conn_id] = 1
+                        else:
+                            con_ty[conn_id] = 2
+                    
+        self.con_ty = con_ty    
+        self.connectivity = connectivity
+        return
+    def map_the_topology(self,mapper):
+        self.mass_map = mapper['mass']
+        self.charge_map = mapper['charge']
+        self.define_connectivity(mapper['bonds'])
+        return
     
+    def read_topfile(self,file):
+        with open(file,'r') as f:
+            lines = f.readlines()
+            f.closed
+        lookfor = ['atomtypes','bondtypes','angletypes','dihedraltypes','atoms','bonds','angles']
+        nline = dict()
+        un_at_types = np.unique(self.at_types)
+        nt = un_at_types.shape[0]
+        for i,line in enumerate(lines):
+            l = line.strip().split('[')[-1].split(']')[0].strip()
+            if l in lookfor:
+                nline[l] = i
+        #finding masses and charges
+        mass_map = dict()
+        charge_map = dict()
+        n = nline['atomtypes']+1
+        jt = 0
+        for line in lines[n:]:
+            if ';' in line:
+                continue
+            l = line.strip().split()
+            mass_map[l[0]] = float(l[1])
+            charge_map[l[0]] = float(l[2])
+            jt+=1
+            if jt==nt:
+                break
+                
+        self.mass_map = mass_map
+        self.charge_map = charge_map
+        
+        #connectiviy
+        
+        if 'bonds' in nline:
+            n= nline['bonds']+1
+            self.read_total_conangdih(lines[n:],'connectivity')
+        else:
+            self.connectivity = dict()
+        if 'angles' in nline:
+            n = nline['angles']+1
+            self.read_total_conangdih(lines[n:],'angles')
+            self.dont_refine_angles = True
+        else:
+            self.angles = dict()
+        if 'dihedrals' in nline:
+            n = nline['dihedrals']+1
+            self.read_total_conangdih(lines[n:],'dihedrals')
+            self.dont_refine_angles = True
+        else:
+            self.dihedrals = dict()
+        return
     
-    def find_topology_from_itp(self):
+    def read_total_conangdih(self,lines,c,sub=1):
+        cad = dict()
+        if c not in ['connectivity','angles','dihedrals']:
+            raise ValueError('c should be one of these {"connectivity","angles","dihedrals"}')
+        for line in lines:
+            if ';' in line:
+                continue
+            l = line.strip().split()  
+            if len(l)==0 or '[' in line or ']' in line:
+                break
+            ids = tuple(np.array(l,dtype=int)-1)
+            conn_id,c_type = self.sorted_id_and_type(ids)
+            cad[conn_id] = c_type
+        setattr(self,c,cad)
+        return
+    def find_topology(self):
         #t0 = perf_counter()
-
-        if ass.iterable(self.connectivity_file):
+        if type(self.connectivity_info) is dict: 
+            self.map_the_topology(self.connectivity_info)
+            itp = False
+        elif ass.iterable(self.connectivity_file):
             for cf in self.connectivity_file:
                 if '.itp' in cf:
                     self.read_atoms_and_connectivity_from_itp(cf)
-                    #itp =True           
+                    itp =True           
                 else:   
                     raise NotImplementedError('Non itp files are not yet implemented')
-                
+        elif '.top' == self.connectivity_file[-4:]:
+            itp=False
+            self.read_topfile(self.connectivity_file)
         else:
             if '.itp' == self.connectivity_file[-4:]:
                 self.read_atoms_and_connectivity_from_itp(self.connectivity_file)
-                #itp =True
+                itp =True
             else:
                 raise NotImplementedError('Non itp files are not yet implemented') 
-        self.connectivity = dict()
         
-        for j in np.unique(self.mol_ids):
+        if itp:
+            self.connectivity = dict()
+            for j in np.unique(self.mol_ids):
             #global_mol_at_ids = self.at_ids[self.mol_ids==j]
-            res_nm = np.unique(self.mol_names[self.mol_ids==j])
+                res_nm = np.unique(self.mol_names[self.mol_ids==j])
             
-            assert res_nm.shape ==(1,),'many names for a residue. Check code or topology file'
+                assert res_nm.shape ==(1,),'many names for a residue. Check code or topology file'
             
-            res_nm = res_nm[0]
-            local_connectivity = self.connectivity_per_resname[res_nm]
+                res_nm = res_nm[0]
+                local_connectivity = self.connectivity_per_resname[res_nm]
             
-            for b in local_connectivity:       
-                id0 = self.loc_id_to_glob[j][b[0]]
-                id1 = self.loc_id_to_glob[j][b[1]]
-                conn_id,c_type = self.sorted_id_and_type((id0,id1))
-                self.connectivity[conn_id] = c_type
+                for b in local_connectivity:       
+                    id0 = self.loc_id_to_glob[j][b[0]]
+                    id1 = self.loc_id_to_glob[j][b[1]]
+                    conn_id,c_type = self.sorted_id_and_type((id0,id1))
+                    self.connectivity[conn_id] = c_type
 
         
         #tf = perf_counter() - t0
@@ -3778,7 +4006,14 @@ class Analysis:
         else:
             a_id = tuple(a_id[::-1])
         return a_id,t
-        
+    
+    def check_refining_angles(self):
+        try:
+            a  = self.dont_refine_angles
+        except:
+            return True
+        else:
+            return not a
     def find_angles(self):
         '''
         Computes the angles of a system in dictionary format
@@ -3789,6 +4024,9 @@ class Analysis:
             If another atom is bonded to one of them an angle is formed
         We add in the angle the atoms that participate
         '''
+        if not self.check_refining_angles():
+            return
+
         #t0 = perf_counter()
         self.angles = dict()
         for k in self.connectivity.keys():
@@ -3818,6 +4056,8 @@ class Analysis:
             If another atom is bonded to one of them a Dihedral is formed is formed
         We add in the angle the atoms that participate
         '''
+        if not self.check_refining_angles():
+            return
         #t0 = perf_counter()
         self.dihedrals=dict()
         for k in self.angles.keys():
@@ -3868,14 +4108,20 @@ class Analysis:
                 except:
                     pass
                 else:
+                    nl  = len(l)
+                    
                     at_ids.append(i) #already int
                     res_name.append(l[3])
                     t = l[1]
                     cngr.append(l[5])
                     atoms[l[4]] = t
                     at_types.append(t)
-                    charge[t] = float(l[6])
-                    mass[t] = float(l[7])
+                    if nl >6:    
+                        charge[t] = float(l[6])
+                    else:
+                        charge
+                    if nl>7:
+                        mass[t] = float(l[7])
                     res_num.append(int(l[2]))
                     i+=1
                 if '[' in line or ']' in line:
@@ -3968,7 +4214,7 @@ class Analysis:
                 raise NotImplementedError('connectivity_info = {} is not implemented yet'.format(self.connectivity_file))
             else:
                 
-                self.find_topology_from_itp() # reads your itp files to get the connectivity
+                self.find_topology() # reads your itp files to get the connectivity
 
         elif '.ltop' == self.topol_file[-5:]:
             self.read_lammps_topol()
@@ -4429,28 +4675,103 @@ class Analysis:
     
         return
     
-    def merge_system(self,obj,reinit=False):
+    def merge_system(self,obj,reinit=False,trans=None,trans_kwargs=dict()):
+        self.merge_connectivity(obj.connectivity)
+        self.merge_angles(obj.angles)
+        self.merge_dihedrals(obj.dihedrals)
         self.at_ids = np.concatenate((self.at_ids,obj.at_ids))
         self.at_types = np.concatenate((self.at_types,obj.at_types))
         self.mol_ids = np.concatenate((self.mol_ids,obj.mol_ids))
         self.mol_names = np.concatenate((self.mol_names,obj.mol_names))
         for frame in self.timeframes:
-            self.timeframes[frame]['coords'] = np.concatenate((self.get_coords(frame),obj.get_coords(frame)))
+            c1 = self.get_coords(frame)
+            c2 = obj.get_coords(frame)
+            if trans is not None:
+                if trans == 'react':
+                    sid = trans_kwargs['surface_react_id']
+                   
+                    ref_c = c1[sid]
+                    dist = Distance_Functions.spherical_particle(None, c1, ref_c)
+                    cneibs = c1[ np.logical_and(dist < 3.5, dist!= trans_kwargs['target_d'])]
+                    trans_kwargs['cneibs'] = cneibs
+                    c2 = RotTrans(trans,ref_c,c2,**trans_kwargs).coords
+                    #conn_id,cont = self.ids_to_sorted_tuple((sid,rid))
+                    #self.connectivity[conn_id] = cont
+            self.timeframes[frame]['coords'] = np.concatenate((c1,c2))
         
         self.renumber_ids()
+        
         self.renumber_residues()
         
         if reinit:
             self.analysis_initialization()
-    
+    def merge_dihedrals(self,objc):
+        n = self.natoms
+        self.dihedrals.update({
+            (k[0]+n,k[1]+n,k[2]+n,k[3]+n):v for k,v in objc.items()
+            })
+        self.find_unique_dihedral_types()
+        return 
+    def merge_angles(self,objc):
+        n = self.natoms
+        self.angles.update({
+            (k[0]+n,k[1]+n,k[2]+n):v for k,v in objc.items()
+            })
+        self.find_unique_angle_types()
+        return     
+    def merge_connectivity(self,objc):
+        n = self.natoms
+        self.connectivity.update({
+            (k[0]+n,k[1]+n):v for k,v in objc.items()
+            })
+        self.find_unique_bond_types()
+        
+        
+        return 
+        
     def renumber_ids(self,start_from=0):
         at_ids = np.arange(0,self.natoms,1,dtype=int)
         at_ids+=start_from
         self.at_ids = at_ids
         return
     
+    def remove_attached_group(self,reactid,remt,keepids=[]):
+        tys = self.at_types
+        ids = self.at_ids
+        if type(keepids) is int:
+            keept = [keepids]
+        if type(remt) is str:
+            remt = [remt]
+        ids_to_remove = []
+        connected_set = set()
+        def recursive_func(rid,connected_set,connectivity): 
+            lold = len(connected_set)
+            for k in connectivity.keys():
+                if rid not in k:
+                    continue
+                kn = k[0] if k[1] == rid else k[1]
+                tn = tys[kn]
+                
+                if kn not in keepids and tn in remt: 
+                    connected_set.add(kn)
+            if len(connected_set) == lold:
+                return
+            for rid in connected_set.copy():
+                recursive_func(rid,connected_set,connectivity)
+        recursive_func(reactid,connected_set,self.connectivity)
+        
+        ids_to_remove = list(connected_set)
+        new_reactid = reactid - np.count_nonzero(np.array(ids_to_remove)<reactid)
+        self.remove_atoms_ids(ids_to_remove,False)
+        return new_reactid
+            
+    def remove_atoms_ids(self,ids,reinit=True):
+        filt = np.logical_not(np.isin(self.at_ids,ids))
+        self.filter_system(filt,reinit)
+        return
+    
     def remove_atoms(self,crit,frame=0,reinit=True):
-        coords = self.coords(frame)
+        coords = self.get_coords(frame)
         filt = crit(coords)
         filt = np.logical_not(filt)
         self.filter_system(filt,reinit)
@@ -9051,7 +9372,7 @@ class maps:
                   'hC':-0.01,'hCD':0.132,'hCE':-0.01
                       }
         
-elements_mass = {'H' : 1.008,'He' : 4.003, 'Li' : 6.941, 'Be' : 9.012,\
+    elements_mass = {'H' : 1.008,'He' : 4.003, 'Li' : 6.941, 'Be' : 9.012,\
                  'B' : 10.811, 'C' : 12.011, 'N' : 14.007, 'O' : 15.999,\
                  'F' : 18.998, 'Ne' : 20.180, 'Na' : 22.990, 'Mg' : 24.305,\
                  'Al' : 26.982, 'Si' : 28.086, 'P' : 30.974, 'S' : 32.066,\
