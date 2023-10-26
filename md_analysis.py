@@ -11,7 +11,7 @@ import collections
 import six
 from scipy.integrate import simpson
 from pytrr import GroTrrReader
-
+from scipy.optimize import dual_annealing,differential_evolution
 import pandas as pd
 import logging
 import coloredlogs
@@ -902,7 +902,26 @@ class ass():
     3) printing and logger functions e.g. print_time, clear_logs 
     
     '''
-
+    @staticmethod
+    def list_ifint(i):
+        if type(i) is int:
+            return [i,]
+        else:
+            return i
+    
+    @staticmethod
+    def list_ifstr(i):
+        if type(i) is str:
+            return [i,]
+        else:
+            return i
+    @staticmethod
+    def list_iffloat(i):
+        if type(i) is float:
+            return [i,]
+        else:
+            return i
+        
     @staticmethod
     def make_dir(name):
         name = name.replace('\\','/')
@@ -3504,15 +3523,177 @@ class unit_vector_Functions():
         uv[:,2] = 0
         return uv
 
+
+class React_two_systems:
+    def __init__(self,obj1,obj2,bb1,bb2,react1=0,react2=0,
+                 rcut=3.5,method='breakBondsMerge',
+                 frame=0,seed1=None,seed2=None):
+        self.obj1 = obj1
+        self.obj2 = obj2
+        self.seed1 = seed1
+        self.seed2 = seed2
+        self.react1 = react1
+        self.react2 = react2
+        self.bb1 = bb1
+        self.bb2 = bb2
+        self.set_break_bond_id('1')
+        self.set_break_bond_id('2')
+        self.rcut = rcut
+        self.frame = frame
+        self.bond_to_create = (self.break_bondid1[react1],self.break_bondid2[react1])
+         
+        if method == 'breakBondsMerge':
+            self.break_bonds()
+            self.react_id1 = self.obj1.old_to_new_ids[self.bond_to_create[0]]
+            self.react_id2 = self.obj2.old_to_new_ids[self.bond_to_create[1]]
+            
+            self.find_reaction_neibhour_coords()
+            self.place_obj2()
+        else:
+            raise NotImplementedError('There is no such method as "{:s}"'.format(method))
+        return
+    def set_break_bond_id(self,prefix):
+        obj = getattr(self,'obj'+prefix)
+        bb = getattr(self,'bb'+prefix)
+        seed = getattr(self,'seed'+prefix)
+        react = getattr(self,'react'+prefix)
+        
+        if not ( react == 0 or react == 1):
+            raise ValueError('react'+prefix +' must be zero or one')
+            
+        name = 'break_bondid' + prefix
+        
+        if type(bb[0]) is str and type(bb[1]) is str:
+            bond_id  = self.find_random_bond_of_type(obj,bb,seed)
+            assert bb == obj.connectivity[bond_id],'the bond id {} does not give the specified type {}'.format(bond_id,bb) 
+            #if react == 1:
+                #bond_id = (bond_id[1],bond_id[0])
+                
+        elif type(bb[0]) is int and type(bb[1]) is int:
+            bond_id = bb
+        else:
+            raise NotImplementedError('value {} is not understood for {:s}'.format(bb,'bb'+prefix) )
+        setattr(self,name,bond_id)
+        return
+    
+    @staticmethod
+    def find_random_bond_of_type(obj,bb,seed):
+        np.random.seed(seed)
+        
+        bbids = ass.numpy_keys(obj.connectivity)
+        bbts = ass.numpy_values(obj.connectivity)
+        
+        f = bbts == np.array(bb)
+        f = np.logical_and(f[:,0],f[:,1])
+        bids = bbids[f]
+        
+        num = np.random.randint(0,bids.shape[0])
+        
+        np.random.seed(None)
+        
+        bond_id = tuple(bids[num])
+        return bond_id
+    
+    def find_reaction_neibhour_coords(self):
+        
+        coords = self.obj1.get_coords(self.frame)
+        box = self.obj1.get_box(self.frame)
+        cref = coords[self.react_id1]
+        self.creact1 = cref
+        rel_coords = minimum_image(coords-cref,box)
+        d = np.sum(rel_coords*rel_coords,axis=1)**0.5
+        self.reaction_neibs = rel_coords[d<self.rcut]
+        return
+    
+    @staticmethod
+    def identify_trail(obj,trail_from,trail_to):
+        trailing_set_old = set()
+        trailing_set = {trail_to}
+        while len(trailing_set) != len(trailing_set_old):
+            trailing_set_old = trailing_set.copy()
+            for j in trailing_set_old:
+                for neib in obj.neibs[j]:
+                    if neib !=trail_from:
+                        trailing_set.add(neib)
+            
+        return trailing_set
+    
+    @staticmethod
+    def remove_trails(obj,trail_from,trail_to):
+        trailing_ids = set()
+        trailing_ids = React_two_systems.identify_trail(obj,trail_from,trail_to) 
+        trailing_ids = np.array(list(trailing_ids))
+        
+        free_radicals, cf = obj.at_types[trailing_ids], obj.get_coords(0)[trailing_ids]
+        
+        obj.remove_atoms_ids(trailing_ids)
+        
+        return free_radicals, cf
+    
+    def break_bonds(self):
+        #remove product
+        if self.react1 ==1:
+            rbb1 = (self.break_bondid1[1],self.break_bondid1[0])
+        else:
+            rbb1 = self.break_bondid1
+        if self.react2 ==1:
+            print('HEEEEERE4')
+            rbb2 = (self.break_bondid2[1],self.break_bondid2[0]) 
+        else:
+            rbb2 = self.break_bondid2
+        print(rbb1,rbb2)
+        self.radicals1 = self.remove_trails(self.obj1,*rbb1)
+        self.radicals2 = self.remove_trails(self.obj2,*rbb2)
+        return
+    
+    @staticmethod
+    def cost_max_dist(vector_n_angles,cneibs,cref,coords,id2):
+        ctr = RotTrans.trans_n_rot(vector_n_angles, coords)
+        refdist = RotTrans.distance(cref,ctr[id2])
+        #d = Distance_Functions.minimum_distance(None,ctr,cneibs) # shape ctr.shape[0]
+        #mask = np.ones(d.shape[0],dtype=bool)
+        #mask[id2] = False
+        #d = d [mask]
+        return refdist #+ np.sum(np.exp(-0.5*d))
+
+    def place_obj2(self):
+        frame = self.frame  
+        coords = self.obj2.get_coords(frame)
+        
+        
+        bounds= [(-3*m,m*3) for m in np.maximum(self.obj1.get_box(frame),
+                                           self.obj2.get_box(frame))] \
+                + [(-np.pi,np.pi)]*3
+                
+        arguments = (self.reaction_neibs,self.creact1,
+                     coords,self.react_id2)
+        
+        if True:
+            opt_res = dual_annealing(self.cost_max_dist, bounds,
+                    args =  arguments,
+                    maxiter = 1000,
+                    restart_temp_ratio=1e-3,
+                    minimizer_kwargs={'method':'SLSQP',#
+                                     'bounds':bounds,
+                                     
+                    'options':{'maxiter':1000,
+                        'disp':True,
+                        'ftol':1e-3},
+                                })
+        else:
+            opt_res = differential_evolution(self.cost_max_dist, bounds,
+                    args = arguments ,
+                    maxiter = 1000,disp=True,polish=False)
+        self.opt_res = opt_res
+        self.p = opt_res.x
+        
+        self.obj2.timeframes[frame]['coords'] = RotTrans.trans_n_rot(self.p,coords)
+        self.obj1.merge_system(self.obj2)
+        return 
+    
 class RotTrans:
     
-    def __init__(self,method,ref_c,coords,**kwargs):
-        self.modify = getattr(self,method)
-        self.ref_c = ref_c
-        self.coords = coords
-        for k,v in kwargs.items():
-            setattr(self,k,v)
-        self.modify()
+    def __init__(self):
         return
     
     @staticmethod
@@ -3573,56 +3754,18 @@ class RotTrans:
     @staticmethod
     def translate(r1,rx):
         return r1+rx
-    
     @staticmethod
-    def cost_max_dist(angles,cneibs,rotref,coords):
-        relc = coords - rotref
-        cn = RotTrans.rotate(relc, *angles)
-        d = Distance_Functions.minimum_distance(None,cn,cneibs)
-        print(d.max())
-        return np.sum(np.exp(-d))
+    def trans_n_rot(vector_n_angles,coords):
+        vector = vector_n_angles[:3]
+        angles = vector_n_angles[3:]
+        translated_coords = coords + vector
+        #rotref = np.mean(translated_coords,axis=0)
+        #relc = translated_coords - rotref
+        #cr = RotTrans.rotate(relc, *angles) 
+        return translated_coords
+        return cr+rotref
     
-    def react(self):
-        cr = self.coords[self.ireact]
-        print(cr.shape,self.ref_c.shape)
-        rh = self.rhat(cr,self.ref_c)
-        cneibs = self.cneibs
-        rt1 = self.ref_c + self.target_d*rh
-        rt2 = self.ref_c - self.target_d*rh
-        d2 = Distance_Functions.spherical_particle(None,cneibs,rt1)
-        d1 = Distance_Functions.spherical_particle(None,cneibs,rt2)
-        if d2.sum() >  d1.sum():
-            self.coords = self.translate(self.coords,rt1-cr)
-        else:
-            self.coords = self.translate(self.coords,rt2-cr)
-        self.rot_ref = self.coords[self.ireact]
-        
-        from scipy.optimize import dual_annealing,differential_evolution
-        bounds= [(-np.pi,np.pi)]*3
-        
-        opt_res = dual_annealing(self.cost_max_dist, bounds,
-                    args = (cneibs,self.rot_ref,self.coords) ,
-                    maxiter = 1000,
-                    restart_temp_ratio=1e-3,
-                    minimizer_kwargs={'method':'SLSQP',#
-                                     'bounds':bounds,
-                                     
-                    'options':{'maxiter':1000,
-                        'disp':True,
-                        'ftol':1e-3},
-                                })
-        '''
-        opt_res = differential_evolution(self.cost_max_dist, bounds,
-                    args = (cneibs,self.rot_ref,self.coords) ,
-                    maxiter = 1000,disp=True,polish=False)
-        '''
-        self.opt_res = opt_res
-        self.p = opt_res.x
-        c = self.coords -self.rot_ref
-        self.coords = self.rotate(c,*self.p) +self.rot_ref
-        
-        return 
-        
+
 class Analysis:
     '''
     The mother class. It's for simple polymer systems not confined ones
@@ -3999,12 +4142,14 @@ class Analysis:
         t = [self.at_types[i] for i in a_id]
         if t[0]<=t[-1]:
             t = tuple(t)
-        else:
-            t= tuple(t[::-1])
-        if a_id[0]<=a_id[-1]:
             a_id = tuple(a_id)
         else:
+            t = tuple(t[::-1])
             a_id = tuple(a_id[::-1])
+        #if a_id[0]<=a_id[-1]:
+       #     a_id = tuple(a_id)
+        #else:
+        #    a_id = tuple(a_id[::-1])
         return a_id,t
     
     def check_refining_angles(self):
@@ -4109,12 +4254,12 @@ class Analysis:
                     pass
                 else:
                     nl  = len(l)
-                    
+                    #print(l)
                     at_ids.append(i) #already int
                     res_name.append(l[3])
-                    t = l[1]
+                    t = l[4]
                     cngr.append(l[5])
-                    atoms[l[4]] = t
+                    atoms[l[1]] = t
                     at_types.append(t)
                     if nl >6:    
                         charge[t] = float(l[6])
@@ -4126,7 +4271,7 @@ class Analysis:
                     i+=1
                 if '[' in line or ']' in line:
                     break
-                
+            print(at_types)
             #tf = perf_counter() - t0
             #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
             
@@ -4675,7 +4820,7 @@ class Analysis:
     
         return
     
-    def merge_system(self,obj,reinit=False,trans=None,trans_kwargs=dict()):
+    def merge_system(self,obj,reinit=False):
         self.merge_connectivity(obj.connectivity)
         self.merge_angles(obj.angles)
         self.merge_dihedrals(obj.dihedrals)
@@ -4686,17 +4831,6 @@ class Analysis:
         for frame in self.timeframes:
             c1 = self.get_coords(frame)
             c2 = obj.get_coords(frame)
-            if trans is not None:
-                if trans == 'react':
-                    sid = trans_kwargs['surface_react_id']
-                   
-                    ref_c = c1[sid]
-                    dist = Distance_Functions.spherical_particle(None, c1, ref_c)
-                    cneibs = c1[ np.logical_and(dist < 3.5, dist!= trans_kwargs['target_d'])]
-                    trans_kwargs['cneibs'] = cneibs
-                    c2 = RotTrans(trans,ref_c,c2,**trans_kwargs).coords
-                    #conn_id,cont = self.ids_to_sorted_tuple((sid,rid))
-                    #self.connectivity[conn_id] = cont
             self.timeframes[frame]['coords'] = np.concatenate((c1,c2))
         
         self.renumber_ids()
@@ -4705,6 +4839,8 @@ class Analysis:
         
         if reinit:
             self.analysis_initialization()
+        return
+    
     def merge_dihedrals(self,objc):
         n = self.natoms
         self.dihedrals.update({
@@ -4735,39 +4871,10 @@ class Analysis:
         self.at_ids = at_ids
         return
     
-    def remove_attached_group(self,reactid,remt,keepids=[]):
-        tys = self.at_types
-        ids = self.at_ids
-        if type(keepids) is int:
-            keept = [keepids]
-        if type(remt) is str:
-            remt = [remt]
-        ids_to_remove = []
-        connected_set = set()
-        def recursive_func(rid,connected_set,connectivity): 
-            lold = len(connected_set)
-            for k in connectivity.keys():
-                if rid not in k:
-                    continue
-                kn = k[0] if k[1] == rid else k[1]
-                tn = tys[kn]
-                
-                if kn not in keepids and tn in remt: 
-                    connected_set.add(kn)
-            if len(connected_set) == lold:
-                return
-            for rid in connected_set.copy():
-                recursive_func(rid,connected_set,connectivity)
-        recursive_func(reactid,connected_set,self.connectivity)
-        
-        ids_to_remove = list(connected_set)
-        new_reactid = reactid - np.count_nonzero(np.array(ids_to_remove)<reactid)
-        self.remove_atoms_ids(ids_to_remove,False)
-        return new_reactid
             
-    def remove_atoms_ids(self,ids,reinit=True):
+    def remove_atoms_ids(self,ids,reinit=False,filter_topology=True):
         filt = np.logical_not(np.isin(self.at_ids,ids))
-        self.filter_system(filt,reinit)
+        self.filter_system(filt,reinit,filter_topology)
         return
     
     def remove_atoms(self,crit,frame=0,reinit=True):
@@ -4785,7 +4892,35 @@ class Analysis:
         self.filter_system(filt,reinit)
         return
     
-    def filter_system(self,filt,reinit=True):
+    def filter_topology(self,removed_ids):
+        for i in removed_ids:
+            del self.neibs[i]
+            for c in ass.numpy_keys(self.connectivity):
+                if i in c:
+                    del self.connectivity[tuple(c)]
+            for a in ass.numpy_keys(self.angles):
+                if i in a:
+                    del self.angles[tuple(a)]
+            for d in ass.numpy_keys(self.dihedrals):
+                if i in d:
+                    del self.dihedrals[tuple(d)]
+        return
+
+    def filter_system(self,filt,reinit=False,filter_topology=True):
+        if filter_topology:
+            removed_ids = self.at_ids[~filt]
+            self.filter_topology(removed_ids)
+        otn = dict()
+        sub = 0 
+        for j,f in enumerate(filt):
+            if not f:
+                sub+=1
+                otn[j] = None
+            else:
+                otn[j] = j-sub
+        
+        self.old_to_new_ids = otn
+        
         self.at_ids = self.at_ids[filt]
         self.at_types = self.at_types[filt]
         self.mol_ids = self.mol_ids[filt]
