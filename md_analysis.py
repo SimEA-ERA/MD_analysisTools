@@ -1329,11 +1329,11 @@ class XPCS_communicator():
         return
     
 class XPCS_Reader():
-    def __init__(self,fname):
+    def __init__(self,fname,fitfunc='freq'):
         self.relaxation_modes = []
         self.params = []
         self.params_std = []
-        self.func = fitFuncs.freq
+        self.func = getattr(fitFuncs,fitfunc)
         with open( fname,'r') as f:
             lines = f.readlines()
             f.closed
@@ -1369,6 +1369,10 @@ class XPCS_Reader():
         self.taus = self.relax()
         self.bounds=(f[0],f[-1])
         self.contributions  = w*self.taus
+        self.taur = self.tau_relax()
+        dt = 1e-3*self.taur
+        self.t = np.logspace(-4,np.log10(self.taur)+2,num=10000)
+        self.curve =self.fitted_curve(self.t) 
         return
     
     def tau_relax(self):
@@ -1610,7 +1614,7 @@ class plotter():
     
     @staticmethod
     def plotDynamics(datadict,xaxis='time',yaxis=None,compare=None,
-                     style='points',comp_style='lines',
+                     style='points',comp_style='lines', fits = None,
              fname =None,title=None,size=3.5,
              ylabel=None,xlabel=None,
              xlim=None,ylim=None, xscale='log',yscale=None,
@@ -1672,6 +1676,7 @@ class plotter():
                 plt.xlim([min(xticks),max(xticks)])
             else:
                 plt.xlim(xlim[0],xlim[1])
+                
         if ylim is None:
             plt.yticks(fontsize=2.5*size)
         else:
@@ -1695,6 +1700,7 @@ class plotter():
             t = x<=cutf[k]
             x = x[t]
             y = y[t]
+        
             if num == 'all':
                 args = np.arange(0,x.shape[0],dtype='i')
             else:
@@ -1710,6 +1716,11 @@ class plotter():
                 label=labmap[k],color=cmap[k])
             else:
                 raise NotImplementedError('Implement here you own plotting style. Use elif statement')
+            if fits is not None:
+                dy = fits[k]
+                xf = dy[xaxis]
+                yf = dy[yaxis]
+                plt.plot(xf,yf,color=cmap[k],ls='-',lw=0.3*size)
         if legend:
             plt.legend(frameon=False,fontsize=legfont*size,**legkwargs)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
@@ -1767,8 +1778,8 @@ class plotter():
             x = ass.numpy_keys(dy)/1000
             y = ass.numpy_values(dy)
             t = x<=cutf[k]
-            x = x[t][2:]
-            y = y[t][2:]
+            x = x[t][1:]
+            y = y[t][1:]
             
             args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
 
@@ -2862,6 +2873,13 @@ class fitKernels():
 
 class fitFuncs():
     @staticmethod
+    def gauss(t,a,b,w):
+        frqs = fitData.get_logtimes(a,b,len(w))
+        s=0
+        for i,fr in enumerate(frqs):
+            s+= w[i]*np.exp(-t*t*fr)
+        return s
+    @staticmethod
     def freq(t,a,b,w):
         frqs = fitData.get_logtimes(a,b,len(w))
         s=0
@@ -3525,9 +3543,12 @@ class unit_vector_Functions():
 
 
 class React_two_systems:
+    
     def __init__(self,obj1,obj2,bb1,bb2,react1=0,react2=0,
                  rcut=3.5,method='breakBondsMerge',
-                 frame=0,seed1=None,seed2=None):
+                 frame=0,seed1=None,seed2=None,
+                 morse_bond=(100,0.2,2),morse_overlaps=(1e-3,0.4,15),
+                 maptypes=dict()):
         self.obj1 = obj1
         self.obj2 = obj2
         self.seed1 = seed1
@@ -3541,17 +3562,38 @@ class React_two_systems:
         self.rcut = rcut
         self.frame = frame
         self.bond_to_create = (self.break_bondid1[react1],self.break_bondid2[react1])
-         
+        self.maptypes = maptypes
+        self.morse_bond = morse_bond
+        self.morse_overlaps = morse_overlaps
         if method == 'breakBondsMerge':
             self.break_bonds()
+            
             self.react_id1 = self.obj1.old_to_new_ids[self.bond_to_create[0]]
             self.react_id2 = self.obj2.old_to_new_ids[self.bond_to_create[1]]
             
             self.find_reaction_neibhour_coords()
+            
             self.place_obj2()
+            
+            natoms1 = self.obj1.natoms
+            self.obj1.merge_system(self.obj2)
+            #make bond
+            self.reacted_id2 = natoms1 +self.react_id2 #renweing the id
+            self.reacted_id1 = self.react_id1
+            self.map_type(self.reacted_id1)
+            self.map_type(self.reacted_id2)
+            conn_id,c_type = self.obj1.sorted_id_and_type((self.reacted_id1,self.reacted_id2))
+            self.obj1.connectivity[conn_id] = c_type
+            print(self.obj1.connectivity[conn_id])
         else:
             raise NotImplementedError('There is no such method as "{:s}"'.format(method))
         return
+    
+    def map_type(self,at_id):
+        ty = self.obj1.at_types[at_id]
+        if ty in self.maptypes:
+            self.obj1.at_types[at_id] = self.maptypes[ty]
+        return 
     def set_break_bond_id(self,prefix):
         obj = getattr(self,'obj'+prefix)
         bb = getattr(self,'bb'+prefix)
@@ -3595,14 +3637,23 @@ class React_two_systems:
         return bond_id
     
     def find_reaction_neibhour_coords(self):
-        
+        def minimum_image_distance(coords,cref,box):
+            r = coords - cref
+            for j in range(3):
+                b = box[j]
+                b2 = b/2
+                fm = r[:,j] < - b2
+                fp = r[:,j] >   b2
+                r[:,j][fm] += b
+                r[:,j][fp] -= b
+            d = np.sum(r*r,axis=1)**0.5
+            return d
         coords = self.obj1.get_coords(self.frame)
         box = self.obj1.get_box(self.frame)
         cref = coords[self.react_id1]
         self.creact1 = cref
-        rel_coords = minimum_image(coords-cref,box)
-        d = np.sum(rel_coords*rel_coords,axis=1)**0.5
-        self.reaction_neibs = rel_coords[d<self.rcut]
+        d =  minimum_image_distance(coords,cref,box)
+        self.reaction_neibs = coords[d<self.rcut]
         return
     
     @staticmethod
@@ -3637,24 +3688,31 @@ class React_two_systems:
         else:
             rbb1 = self.break_bondid1
         if self.react2 ==1:
-            print('HEEEEERE4')
+            
             rbb2 = (self.break_bondid2[1],self.break_bondid2[0]) 
         else:
             rbb2 = self.break_bondid2
-        print(rbb1,rbb2)
         self.radicals1 = self.remove_trails(self.obj1,*rbb1)
         self.radicals2 = self.remove_trails(self.obj2,*rbb2)
         return
     
     @staticmethod
-    def cost_max_dist(vector_n_angles,cneibs,cref,coords,id2):
+    def morse(r,De,re,alpha):
+        return De*(np.exp(-2*alpha*(r-re))-2*np.exp(-alpha*(r-re)))
+    
+    @staticmethod
+    def cost_max_dist(vector_n_angles,cneibs,cref,coords,id2,
+                      morse_bond,morse_overlaps):
+       
         ctr = RotTrans.trans_n_rot(vector_n_angles, coords)
+        
         refdist = RotTrans.distance(cref,ctr[id2])
-        #d = Distance_Functions.minimum_distance(None,ctr,cneibs) # shape ctr.shape[0]
-        #mask = np.ones(d.shape[0],dtype=bool)
-        #mask[id2] = False
-        #d = d [mask]
-        return refdist #+ np.sum(np.exp(-0.5*d))
+        f = React_two_systems.morse
+       
+        d = [Distance_Functions.spherical_particle(None, cneibs, c)
+             for i,c in enumerate(ctr) if i!=id2]
+        d =np.array(d)# shape ctr.shape[0]
+        return  f(refdist,*morse_bond) + np.sum(f(d,*morse_overlaps))
 
     def place_obj2(self):
         frame = self.frame  
@@ -3666,12 +3724,12 @@ class React_two_systems:
                 + [(-np.pi,np.pi)]*3
                 
         arguments = (self.reaction_neibs,self.creact1,
-                     coords,self.react_id2)
+                     coords,self.react_id2,self.morse_bond,self.morse_overlaps)
         
-        if True:
+        if False:
             opt_res = dual_annealing(self.cost_max_dist, bounds,
                     args =  arguments,
-                    maxiter = 1000,
+                    maxiter = 50,
                     restart_temp_ratio=1e-3,
                     minimizer_kwargs={'method':'SLSQP',#
                                      'bounds':bounds,
@@ -3683,12 +3741,12 @@ class React_two_systems:
         else:
             opt_res = differential_evolution(self.cost_max_dist, bounds,
                     args = arguments ,
-                    maxiter = 1000,disp=True,polish=False)
+                    maxiter = 100,disp=True,polish=False)
         self.opt_res = opt_res
         self.p = opt_res.x
         
         self.obj2.timeframes[frame]['coords'] = RotTrans.trans_n_rot(self.p,coords)
-        self.obj1.merge_system(self.obj2)
+        
         return 
     
 class RotTrans:
@@ -3759,10 +3817,9 @@ class RotTrans:
         vector = vector_n_angles[:3]
         angles = vector_n_angles[3:]
         translated_coords = coords + vector
-        #rotref = np.mean(translated_coords,axis=0)
-        #relc = translated_coords - rotref
-        #cr = RotTrans.rotate(relc, *angles) 
-        return translated_coords
+        rotref = np.mean(translated_coords,axis=0)
+        relc = translated_coords - rotref
+        cr = RotTrans.rotate(relc, *angles) 
         return cr+rotref
     
 
@@ -3840,7 +3897,7 @@ class Analysis:
             self.find_locGlob()
             self.find_topology()
         self.find_masses()
-        
+        self.find_charges()
         #Now we want to find the connectivity,angles and dihedrals
         
         self.find_neibs()
@@ -4264,14 +4321,14 @@ class Analysis:
                     if nl >6:    
                         charge[t] = float(l[6])
                     else:
-                        charge
+                        charge[t] = 0.0
                     if nl>7:
                         mass[t] = float(l[7])
                     res_num.append(int(l[2]))
                     i+=1
                 if '[' in line or ']' in line:
                     break
-            print(at_types)
+            
             #tf = perf_counter() - t0
             #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
             
@@ -4540,6 +4597,15 @@ class Analysis:
         self.angle_types = self.unique_values(self.angles.values())
     def find_unique_dihedral_types(self):
         self.dihedral_types = self.unique_values(self.dihedrals.values())
+    
+    def find_charges(self):
+        
+        charge = np.empty(self.natoms,dtype=float)
+        for i in range(self.natoms):
+            charge[i] = self.charge_map[self.at_types[i]]
+        self.atom_charge = charge
+       
+        return
     
     def find_masses(self):
         
@@ -4820,7 +4886,7 @@ class Analysis:
     
         return
     
-    def merge_system(self,obj,reinit=False):
+    def merge_system(self,obj):
         self.merge_connectivity(obj.connectivity)
         self.merge_angles(obj.angles)
         self.merge_dihedrals(obj.dihedrals)
@@ -4828,6 +4894,8 @@ class Analysis:
         self.at_types = np.concatenate((self.at_types,obj.at_types))
         self.mol_ids = np.concatenate((self.mol_ids,obj.mol_ids))
         self.mol_names = np.concatenate((self.mol_names,obj.mol_names))
+        self.atom_mass = np.concatenate((self.atom_mass,obj.atom_mass))
+        self.atom_charge = np.concatenate((self.atom_charge,obj.atom_charge))
         for frame in self.timeframes:
             c1 = self.get_coords(frame)
             c2 = obj.get_coords(frame)
@@ -4837,8 +4905,8 @@ class Analysis:
         
         self.renumber_residues()
         
-        if reinit:
-            self.analysis_initialization()
+        #if reinit:
+            #self.analysis_initialization()
         return
     
     def merge_dihedrals(self,objc):
@@ -4925,7 +4993,8 @@ class Analysis:
         self.at_types = self.at_types[filt]
         self.mol_ids = self.mol_ids[filt]
         self.mol_names = self.mol_names[filt]
-        
+        self.atom_mass = self.atom_mass[filt]
+        self.atom_charge = self.atom_charge[filt]
         for frame in self.timeframes:
             self.timeframes[frame]['coords'] = self.get_coords(frame)[filt]
         
