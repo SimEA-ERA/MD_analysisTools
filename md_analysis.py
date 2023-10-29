@@ -11,7 +11,7 @@ import collections
 import six
 from scipy.integrate import simpson
 from pytrr import GroTrrReader
-
+from scipy.optimize import dual_annealing,differential_evolution
 import pandas as pd
 import logging
 import coloredlogs
@@ -902,7 +902,33 @@ class ass():
     3) printing and logger functions e.g. print_time, clear_logs 
     
     '''
-
+    @staticmethod
+    def update_dict_in_object(obj,name,di):
+        if not hasattr(obj,name):
+            setattr(obj,name,di)
+        else:
+            getattr(obj,name).update(di)
+        return
+    @staticmethod
+    def list_ifint(i):
+        if type(i) is int:
+            return [i,]
+        else:
+            return i
+    
+    @staticmethod
+    def list_ifstr(i):
+        if type(i) is str:
+            return [i,]
+        else:
+            return i
+    @staticmethod
+    def list_iffloat(i):
+        if type(i) is float:
+            return [i,]
+        else:
+            return i
+        
     @staticmethod
     def make_dir(name):
         name = name.replace('\\','/')
@@ -944,7 +970,11 @@ class ass():
                 if l != len(i):
                     return False
         return True
-
+    @staticmethod
+    def rename_key(d,oldname,newname):
+        d[newname] = d[oldname]
+        del d[oldname]
+        return
     @staticmethod
     def rename_keys_via_keyvalue(new_names,data_dict):
         new_dict = dict()
@@ -1310,11 +1340,11 @@ class XPCS_communicator():
         return
     
 class XPCS_Reader():
-    def __init__(self,fname):
+    def __init__(self,fname,fitfunc='freq'):
         self.relaxation_modes = []
         self.params = []
         self.params_std = []
-        self.func = fitFuncs.freq
+        self.func = getattr(fitFuncs,fitfunc)
         with open( fname,'r') as f:
             lines = f.readlines()
             f.closed
@@ -1350,6 +1380,10 @@ class XPCS_Reader():
         self.taus = self.relax()
         self.bounds=(f[0],f[-1])
         self.contributions  = w*self.taus
+        self.taur = self.tau_relax()
+        
+        self.t = np.logspace(-4,np.log10(self.taur)+2,num=10000)
+        self.curve =self.fitted_curve(self.t) 
         return
     
     def tau_relax(self):
@@ -1591,7 +1625,7 @@ class plotter():
     
     @staticmethod
     def plotDynamics(datadict,xaxis='time',yaxis=None,compare=None,
-                     style='points',comp_style='lines',
+                     style='points',comp_style='lines', fits = None,
              fname =None,title=None,size=3.5,
              ylabel=None,xlabel=None,
              xlim=None,ylim=None, xscale='log',yscale=None,
@@ -1653,6 +1687,7 @@ class plotter():
                 plt.xlim([min(xticks),max(xticks)])
             else:
                 plt.xlim(xlim[0],xlim[1])
+                
         if ylim is None:
             plt.yticks(fontsize=2.5*size)
         else:
@@ -1676,6 +1711,7 @@ class plotter():
             t = x<=cutf[k]
             x = x[t]
             y = y[t]
+        
             if num == 'all':
                 args = np.arange(0,x.shape[0],dtype='i')
             else:
@@ -1691,6 +1727,11 @@ class plotter():
                 label=labmap[k],color=cmap[k])
             else:
                 raise NotImplementedError('Implement here you own plotting style. Use elif statement')
+            if fits is not None:
+                dy = fits[k]
+                xf = dy[xaxis]
+                yf = dy[yaxis]
+                plt.plot(xf,yf,color=cmap[k],ls='-',lw=0.3*size)
         if legend:
             plt.legend(frameon=False,fontsize=legfont*size,**legkwargs)
         if fname is not None:plt.savefig(fname,bbox_inches='tight')
@@ -1748,8 +1789,8 @@ class plotter():
             x = ass.numpy_keys(dy)/1000
             y = ass.numpy_values(dy)
             t = x<=cutf[k]
-            x = x[t][2:]
-            y = y[t][2:]
+            x = x[t][1:]
+            y = y[t][1:]
             
             args = plotter.sample_logarithmically_array(x,midtime=midtime,num=num)
 
@@ -2845,6 +2886,13 @@ class fitKernels():
 
 class fitFuncs():
     @staticmethod
+    def gauss(t,a,b,w):
+        frqs = fitData.get_logtimes(a,b,len(w))
+        s=0
+        for i,fr in enumerate(frqs):
+            s+= w[i]*np.exp(-t*t*fr)
+        return s
+    @staticmethod
     def freq(t,a,b,w):
         frqs = fitData.get_logtimes(a,b,len(w))
         s=0
@@ -3506,15 +3554,279 @@ class unit_vector_Functions():
         uv[:,2] = 0
         return uv
 
+
+class React_two_systems:
+    
+    def __init__(self,obj1,obj2,bb1,bb2,react1=0,react2=0,
+                 rcut=3.5,method='breakBondsMerge',
+                 frame=0,seed1=None,seed2=None,
+                 morse_bond=(100,0.2,2),morse_overlaps=(1e-3,0.4,15),
+                 maptypes=dict()):
+        self.obj1 = obj1
+        self.obj2 = obj2
+        self.seed1 = seed1
+        self.seed2 = seed2
+        self.react1 = react1
+        self.react2 = react2
+        self.bb1 = bb1
+        self.bb2 = bb2
+        self.set_break_bond_id('1')
+        self.set_break_bond_id('2')
+        self.rcut = rcut
+        self.frame = frame
+        self.bond_to_create = (self.break_bondid1[react1],self.break_bondid2[react1])
+        self.maptypes = maptypes
+        self.morse_bond = morse_bond
+        self.morse_overlaps = morse_overlaps
+        if method == 'breakBondsMerge':
+            self.break_bonds()
+            
+            self.react_id1 = self.obj1.old_to_new_ids[self.bond_to_create[0]]
+            self.react_id2 = self.obj2.old_to_new_ids[self.bond_to_create[1]]
+            
+            self.find_reaction_neibhour_coords()
+            
+            self.place_obj2()
+            
+            natoms1 = self.obj1.natoms
+            self.obj1.merge_system(self.obj2)
+            
+            
+            #make bond
+            self.reacted_id2 = natoms1 +self.react_id2 #renweing the id
+            self.reacted_id1 = self.react_id1
+            self.map_type(self.reacted_id1)
+            self.map_type(self.reacted_id2)
+            conn_id,c_type = self.obj1.sorted_id_and_type((self.reacted_id1,self.reacted_id2))
+            self.obj1.connectivity[conn_id] = c_type
+            print(conn_id,self.obj1.natoms)
+            new_angles = self.obj1.find_new_angdihs(conn_id)
+            
+            self.obj1.angles.update(new_angles)
+            for newa in new_angles:
+                new_dihs = self.obj1.find_new_angdihs(newa)
+                self.obj1.dihedrals.update(new_dihs)
+            # refine charge
+            self.refine_charge()
+            
+           
+        else:
+            raise NotImplementedError('There is no such method as "{:s}"'.format(method))
+        return
+    def refine_charge(self):
+        id1 = self.reacted_id1
+        id2 = self.reacted_id2
+        tch = 0.5*self.obj1.total_charge
+        ty1 = self.obj1.at_types[id1]
+        ty2 = self.obj1.at_types[id2]
+        for t,i in zip([ty1,ty2],[id1,id2]):
+            newc = self.obj1.charge_map[t] - tch
+            self.obj1.charge_map[t] = newc 
+            self.obj1.atom_charge[i] = newc
+            val = np.array(self.obj1.ff.atomtypes[t])
+            val[1] = str(newc)
+            self.obj1.ff.atomtypes[t] = tuple(val)
+        totc = self.obj1.total_charge
+        if abs(totc)>1e-10:
+            raise Exception('Total charge is not newtral, total charge = {:.8e}'.format(totc))
+
+        return 
+    def map_type(self,at_id):
+        from copy import copy
+        
+        ty = self.obj1.at_types[at_id]
+        if ty in self.maptypes:
+            newty = self.maptypes[ty]
+        else:
+            newty = self.obj1.at_types[at_id] +'R'
+        self.obj1.at_types[at_id] = newty
+        
+        self.obj1.charge_map[newty] = copy(self.obj1.charge_map[ty])
+        
+        self.obj1.mass_map[newty] = copy(self.obj1.mass_map[ty])
+        
+        
+        for attr_name in ['bondtypes','angletypes','dihedraltypes']:
+            attr = getattr(self.obj1.ff,attr_name)
+            for k in list(attr.keys()):
+                if ty in k:
+                    arr = np.array(k)
+                    i = np.where(arr==ty)[0][0]
+                    arr[i] = newty
+                    ty_new  = tuple(arr)
+                    attr[ty_new] = copy(attr[k])
+                    
+        self.obj1.ff.atomtypes[newty] = copy(self.obj1.ff.atomtypes[ty])
+        self.obj1.filter_ff()
+        return 
+    def set_break_bond_id(self,prefix):
+        obj = getattr(self,'obj'+prefix)
+        bb = getattr(self,'bb'+prefix)
+        seed = getattr(self,'seed'+prefix)
+        react = getattr(self,'react'+prefix)
+        
+        if not ( react == 0 or react == 1):
+            raise ValueError('react'+prefix +' must be zero or one')
+            
+        name = 'break_bondid' + prefix
+        
+        if type(bb[0]) is str and type(bb[1]) is str:
+            bond_id  = self.find_random_bond_of_type(obj,bb,seed)
+            assert bb == obj.connectivity[bond_id],'the bond id {} does not give the specified type {}'.format(bond_id,bb) 
+            #if react == 1:
+                #bond_id = (bond_id[1],bond_id[0])
+                
+        elif type(bb[0]) is int and type(bb[1]) is int:
+            bond_id = bb
+        else:
+            raise NotImplementedError('value {} is not understood for {:s}'.format(bb,'bb'+prefix) )
+        setattr(self,name,bond_id)
+        return
+    
+    @staticmethod
+    def find_random_bond_of_type(obj,bb,seed):
+        np.random.seed(seed)
+        
+        bbids = ass.numpy_keys(obj.connectivity)
+        bbts = ass.numpy_values(obj.connectivity)
+        
+        f = bbts == np.array(bb)
+        f = np.logical_and(f[:,0],f[:,1])
+        bids = bbids[f]
+        
+        num = np.random.randint(0,bids.shape[0])
+        
+        np.random.seed(None)
+        
+        bond_id = tuple(bids[num])
+        return bond_id
+    
+    def find_reaction_neibhour_coords(self):
+        def minimum_image_distance(coords,cref,box):
+            r = coords - cref
+            for j in range(3):
+                b = box[j]
+                b2 = b/2
+                fm = r[:,j] < - b2
+                fp = r[:,j] >   b2
+                r[:,j][fm] += b
+                r[:,j][fp] -= b
+            d = np.sum(r*r,axis=1)**0.5
+            return d
+        coords = self.obj1.get_coords(self.frame)
+        box = self.obj1.get_box(self.frame)
+        cref = coords[self.react_id1]
+        self.creact1 = cref
+        d =  minimum_image_distance(coords,cref,box)
+        self.reaction_neibs = coords[d<self.rcut]
+        return
+    
+    @staticmethod
+    def identify_trail(obj,trail_from,trail_to):
+        trailing_set_old = set()
+        trailing_set = {trail_to}
+        while len(trailing_set) != len(trailing_set_old):
+            trailing_set_old = trailing_set.copy()
+            for j in trailing_set_old:
+                for neib in obj.neibs[j]:
+                    if neib !=trail_from:
+                        trailing_set.add(neib)
+            
+        return trailing_set
+    
+    @staticmethod
+    def remove_trails(obj,trail_from,trail_to):
+        trailing_ids = set()
+        trailing_ids = React_two_systems.identify_trail(obj,trail_from,trail_to) 
+        trailing_ids = np.array(list(trailing_ids))
+        
+        cf = obj.get_coords(0)[trailing_ids]
+        
+        free_radicals = pd.DataFrame({'at_ids':trailing_ids,
+                                      'at_tys':obj.at_types[trailing_ids],
+                                      'mol_ids':obj.mol_ids[trailing_ids],
+                                      'mol_names':obj.mol_names[trailing_ids],
+                                      'atom_charge':obj.atom_charge[trailing_ids],
+                                      'atom_mass':obj.atom_mass[trailing_ids],
+                                      'x':cf[:,0],
+                                      'y':cf[:,1],
+                                      'z':cf[:,2],
+                                      })
+        obj.remove_atoms_ids(trailing_ids)
+        
+        return free_radicals
+    
+    def break_bonds(self):
+        #remove product
+        if self.react1 ==1:
+            rbb1 = (self.break_bondid1[1],self.break_bondid1[0])
+        else:
+            rbb1 = self.break_bondid1
+        if self.react2 ==1:
+            
+            rbb2 = (self.break_bondid2[1],self.break_bondid2[0]) 
+        else:
+            rbb2 = self.break_bondid2
+        self.radicals1 = self.remove_trails(self.obj1,*rbb1)
+        self.radicals2 = self.remove_trails(self.obj2,*rbb2)
+        return
+    
+    @staticmethod
+    def morse(r,De,re,alpha):
+        return De*(np.exp(-2*alpha*(r-re))-2*np.exp(-alpha*(r-re)))
+    
+    @staticmethod
+    def cost_max_dist(vector_n_angles,cneibs,cref,coords,id2,
+                      morse_bond,morse_overlaps):
+       
+        ctr = RotTrans.trans_n_rot(vector_n_angles, coords)
+        
+        refdist = RotTrans.distance(cref,ctr[id2])
+        f = React_two_systems.morse
+       
+        d = [Distance_Functions.spherical_particle(None, cneibs, c)
+             for i,c in enumerate(ctr) if i!=id2]
+        d =np.array(d)# shape ctr.shape[0]
+        return  f(refdist,*morse_bond) + np.sum(f(d,*morse_overlaps))
+
+    def place_obj2(self):
+        frame = self.frame  
+        coords = self.obj2.get_coords(frame)
+        
+        
+        bounds= [(-3*m,m*3) for m in np.maximum(self.obj1.get_box(frame),
+                                           self.obj2.get_box(frame))] \
+                + [(-np.pi,np.pi)]*3
+                
+        arguments = (self.reaction_neibs,self.creact1,
+                     coords,self.react_id2,self.morse_bond,self.morse_overlaps)
+        
+        if False:
+            opt_res = dual_annealing(self.cost_max_dist, bounds,
+                    args =  arguments,
+                    maxiter = 50,
+                    restart_temp_ratio=1e-3,
+                    minimizer_kwargs={'method':'SLSQP',#
+                                     'bounds':bounds,
+                                     
+                    'options':{'maxiter':1000,
+                        'disp':True,
+                        'ftol':1e-3},
+                                })
+        else:
+            opt_res = differential_evolution(self.cost_max_dist, bounds,
+                    args = arguments ,
+                    maxiter = 100,disp=True,polish=False)
+        self.opt_res = opt_res
+        self.p = opt_res.x
+        
+        self.obj2.timeframes[frame]['coords'] = RotTrans.trans_n_rot(self.p,coords)
+        
+        return 
+    
 class RotTrans:
     
-    def __init__(self,method,ref_c,coords,**kwargs):
-        self.modify = getattr(self,method)
-        self.ref_c = ref_c
-        self.coords = coords
-        for k,v in kwargs.items():
-            setattr(self,k,v)
-        self.modify()
+    def __init__(self):
         return
     
     @staticmethod
@@ -3575,56 +3887,19 @@ class RotTrans:
     @staticmethod
     def translate(r1,rx):
         return r1+rx
-    
     @staticmethod
-    def cost_max_dist(angles,cneibs,rotref,coords):
-        relc = coords - rotref
-        cn = RotTrans.rotate(relc, *angles)
-        d = Distance_Functions.minimum_distance(None,cn,cneibs)
-        print(d.max())
-        return np.sum(np.exp(-d))
-    
-    def react(self):
-        cr = self.coords[self.ireact]
-        print(cr.shape,self.ref_c.shape)
-        rh = self.rhat(cr,self.ref_c)
-        cneibs = self.cneibs
-        rt1 = self.ref_c + self.target_d*rh
-        rt2 = self.ref_c - self.target_d*rh
-        d2 = Distance_Functions.spherical_particle(None,cneibs,rt1)
-        d1 = Distance_Functions.spherical_particle(None,cneibs,rt2)
-        if d2.sum() >  d1.sum():
-            self.coords = self.translate(self.coords,rt1-cr)
-        else:
-            self.coords = self.translate(self.coords,rt2-cr)
-        self.rot_ref = self.coords[self.ireact]
+    def trans_n_rot(vector_n_angles,coords):
+        vector = vector_n_angles[:3]
+        angles = vector_n_angles[3:]
+        translated_coords = coords + vector
+        rotref = np.mean(translated_coords,axis=0)
+        relc = translated_coords - rotref
+        cr = RotTrans.rotate(relc, *angles) 
+        return cr+rotref
+
+
         
-        from scipy.optimize import dual_annealing,differential_evolution
-        bounds= [(-np.pi,np.pi)]*3
-        
-        opt_res = dual_annealing(self.cost_max_dist, bounds,
-                    args = (cneibs,self.rot_ref,self.coords) ,
-                    maxiter = 1000,
-                    restart_temp_ratio=1e-3,
-                    minimizer_kwargs={'method':'SLSQP',#
-                                     'bounds':bounds,
-                                     
-                    'options':{'maxiter':1000,
-                        'disp':True,
-                        'ftol':1e-3},
-                                })
-        '''
-        opt_res = differential_evolution(self.cost_max_dist, bounds,
-                    args = (cneibs,self.rot_ref,self.coords) ,
-                    maxiter = 1000,disp=True,polish=False)
-        '''
-        self.opt_res = opt_res
-        self.p = opt_res.x
-        c = self.coords -self.rot_ref
-        self.coords = self.rotate(c,*self.p) +self.rot_ref
-        
-        return 
-        
+
 class Analysis:
     '''
     The mother class. It's for simple polymer systems not confined ones
@@ -3675,12 +3950,15 @@ class Analysis:
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         
         return 
-    
+    class FFparams():
+        def __init__(self):
+            return
     def map_types(self,types_map):
         for i in range(self.natoms):
             self.at_types[i] = types_map[self.at_types[i]]
         self.mass_map = {types_map[k]:v for k,v in self.mass_map.items()}
         self.charge_map = {types_map[k]:v for k,v in self.charge_map.items()}
+        
         return
     
     def analysis_initialization(self,reinit=False):
@@ -3697,22 +3975,18 @@ class Analysis:
             self.angles = dict()
             self.dihedrals = dict()
             self.find_locGlob()
-            self.find_topology()
+           # self.read_gromacs_topology()
         self.find_masses()
-        
+        self.find_charges()
         #Now we want to find the connectivity,angles and dihedrals
         
         self.find_neibs()
         self.find_angles()
         self.find_dihedrals()
         #Find the ids (numpy compatible) of each type and store them
-        self.keysTotype('connectivity')
-        self.keysTotype('angles')
-        self.keysTotype('dihedrals')
         
-        self.find_unique_bond_types()
-        self.find_unique_angle_types()
-        self.find_unique_dihedral_types()
+        
+
         self.dict_to_sorted_numpy('connectivity') #necessary to unwrap the coords efficiently
         
         self.find_args_per_residue(np.ones(self.mol_ids.shape[0],dtype=bool),'molecule_args')
@@ -3721,7 +3995,19 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
             
         return
-    
+    @property
+    def total_charge(self):
+        return self.atom_charge.sum()
+    @property
+    def total_mass(self):
+        return self.atom_mass.sum()
+    @property
+    def inspect_system(self):
+        names = ['at_ids','at_types','mol_ids',
+                 'mol_names','atom_charge','atom_mass']
+
+        return pd.DataFrame({ a:getattr(self,a) for a in names} )
+            
     def update_connectivity(self,bid):
         bid,bt = self.sorted_id_and_type(bid)
         self.connectivity[bid] = bt
@@ -3774,8 +4060,18 @@ class Analysis:
         for k,v in dictionary.items():
             temp_ids[v].append(np.array(k))
         ids = {v : np.array(temp_ids[v]) for v in types}
-        setattr(self,attr_name+'_per_type',ids)
-        return 
+        
+        return ids 
+    @property
+    def connectivity_pertype(self):
+        return self.keysTotype('connectivity')
+    @property
+    def angles_pertype(self):
+        return self.keysTotype('angles')
+    @property
+    def dihedrals_pertype(self):
+        return self.keysTotype('dihedrals')
+    
     def define_connectivity(self,bond_dists):
         bond_dists = {tuple(np.sort(k)):v for k,v in bond_dists.items()}
         self.read_file(self.topol_file)
@@ -3834,12 +4130,36 @@ class Analysis:
             if ';' in line:
                 continue
             l = line.strip().split()
-            mass_map[l[0]] = float(l[1])
-            charge_map[l[0]] = float(l[2])
+            k = l[0]
+            mass_map[k] = float(l[1])
+            charge_map[k] = float(l[2])
             jt+=1
             if jt==nt:
                 break
-                
+        self.ff = self.FFparams()
+        for name,jd in zip(['atomtypes','bondtypes','angletypes','dihedraltypes'],[1,2,3,4]):
+            try:
+                n = nline[name]+1
+            except KeyError:
+                setattr(self.ff,name,dict())
+            else:
+                attr = dict()
+                for line in lines[n:]:
+                    if '[' in line or ']' in line:
+                        break
+                    if ';' in line:
+                        continue
+                    l = line.strip().split()
+                    if len(l)==0:
+                        continue
+                    if jd>1:
+                        ty = self.sorted_type(l[:jd])
+                    else:
+                        ty = l[0]
+                    value = tuple(l[jd:])
+                    attr[ty] = value
+                setattr(self.ff,name,attr)
+
         self.mass_map = mass_map
         self.charge_map = charge_map
         
@@ -3853,13 +4173,13 @@ class Analysis:
         if 'angles' in nline:
             n = nline['angles']+1
             self.read_total_conangdih(lines[n:],'angles')
-            self.dont_refine_angles = True
+            self.refine_angles = False
         else:
             self.angles = dict()
         if 'dihedrals' in nline:
             n = nline['dihedrals']+1
             self.read_total_conangdih(lines[n:],'dihedrals')
-            self.dont_refine_angles = True
+            self.refine_dihedrals = False
         else:
             self.dihedrals = dict()
         return
@@ -3868,59 +4188,84 @@ class Analysis:
         cad = dict()
         if c not in ['connectivity','angles','dihedrals']:
             raise ValueError('c should be one of these {"connectivity","angles","dihedrals"}')
+        if c =='connectivity':
+            ld = 2
+        elif c =='angles':
+            ld = 3
+        elif c=='dihedrals':
+            ld = 4
         for line in lines:
             if ';' in line:
                 continue
-            l = line.strip().split()  
+            l = line.strip().split()[:ld]  
             if len(l)==0 or '[' in line or ']' in line:
                 break
-            ids = tuple(np.array(l,dtype=int)-1)
+            ids = tuple(np.array(l,dtype=int)-sub)
             conn_id,c_type = self.sorted_id_and_type(ids)
             cad[conn_id] = c_type
         setattr(self,c,cad)
         return
-    def find_topology(self):
+    
+    def read_gromacs_topology(self):
         #t0 = perf_counter()
-        if type(self.connectivity_info) is dict: 
-            self.map_the_topology(self.connectivity_info)
-            itp = False
-        elif ass.iterable(self.connectivity_file):
+
+        if ass.iterable(self.connectivity_file):
             for cf in self.connectivity_file:
                 if '.itp' in cf:
-                    self.read_atoms_and_connectivity_from_itp(cf)
-                    itp =True           
+                    self.read_itp_file(cf)          
                 else:   
-                    raise NotImplementedError('Non itp files are not yet implemented')
+                    raise NotImplementedError('Non itp files are not implemented for lists. You can give a top file')
+            self.local_to_global_topology()
+            self.make_ff_from_itp(cf)
         elif '.top' == self.connectivity_file[-4:]:
-            itp=False
             self.read_topfile(self.connectivity_file)
         else:
             if '.itp' == self.connectivity_file[-4:]:
-                self.read_atoms_and_connectivity_from_itp(self.connectivity_file)
-                itp =True
+                cf = self.connectivity_file
+                self.read_itp_file(cf)
+                self.local_to_global_topology()
+                self.make_ff_from_itp(cf)
             else:
                 raise NotImplementedError('Non itp files are not yet implemented') 
-        
-        if itp:
-            self.connectivity = dict()
-            for j in np.unique(self.mol_ids):
-            #global_mol_at_ids = self.at_ids[self.mol_ids==j]
-                res_nm = np.unique(self.mol_names[self.mol_ids==j])
-            
-                assert res_nm.shape ==(1,),'many names for a residue. Check code or topology file'
-            
-                res_nm = res_nm[0]
-                local_connectivity = self.connectivity_per_resname[res_nm]
-            
-                for b in local_connectivity:       
-                    id0 = self.loc_id_to_glob[j][b[0]]
-                    id1 = self.loc_id_to_glob[j][b[1]]
-                    conn_id,c_type = self.sorted_id_and_type((id0,id1))
-                    self.connectivity[conn_id] = c_type
 
+           
+        return
+    
+    def local_to_global_topology(self,):
+        self.connectivity = dict()
+        self.angles = dict()
+        self.dihedrals = dict()
+        self.refine_angles = False
+        self.refine_dihedrals = False
+        for j in np.unique(self.mol_ids):
+            #global_mol_at_ids = self.at_ids[self.mol_ids==j]
+            res_nm = np.unique(self.mol_names[self.mol_ids==j])
+            
+            assert res_nm.shape ==(1,),'many names for a residue. Check code or topology file'
+            
+            res_nm = res_nm[0]
+            local_connectivity = self.connectivity_per_resname[res_nm]
+            local_angles = self.angles_per_resname[res_nm]
+            local_dihedrals = self.dihedrals_per_resname[res_nm]
+            for b in local_connectivity:       
+                id0 = self.loc_id_to_glob[j][b[0]]
+                id1 = self.loc_id_to_glob[j][b[1]]
+                conn_id,c_type = self.sorted_id_and_type((id0,id1))
+                self.connectivity[conn_id] = c_type
+            for a in  local_angles:
+                id0 = self.loc_id_to_glob[j][a[0]]
+                id1 = self.loc_id_to_glob[j][a[1]]
+                id2 = self.loc_id_to_glob[j][a[2]]
+                a_id,a_t = self.sorted_id_and_type((id0,id1,id2))
+                self.angles[a_id] = a_t
+            for d in local_dihedrals:
+                id0 = self.loc_id_to_glob[j][d[0]]
+                id1 = self.loc_id_to_glob[j][d[1]]
+                id2 = self.loc_id_to_glob[j][d[2]]
+                id3 = self.loc_id_to_glob[j][d[3]]
+                d_id,d_t = self.sorted_id_and_type((id0,id1,id2,id3))
+                self.dihedrals[d_id] = d_t
         
-        #tf = perf_counter() - t0
-        #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
 
             
@@ -3997,25 +4342,58 @@ class Analysis:
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return frame_min
     
+    def sorted_type(self,t):
+        if t[0]<=t[-1]:
+            t = tuple(t)
+        else:
+            t = tuple(t[::-1])
+        return t
     def sorted_id_and_type(self,a_id):
         t = [self.at_types[i] for i in a_id]
         if t[0]<=t[-1]:
             t = tuple(t)
-        else:
-            t= tuple(t[::-1])
-        if a_id[0]<=a_id[-1]:
             a_id = tuple(a_id)
         else:
+            t = tuple(t[::-1])
             a_id = tuple(a_id[::-1])
+        #if a_id[0]<=a_id[-1]:
+       #     a_id = tuple(a_id)
+        #else:
+        #    a_id = tuple(a_id[::-1])
         return a_id,t
     
-    def check_refining_angles(self):
+    @property
+    def refining_angles_condition(self):
         try:
-            a  = self.dont_refine_angles
+            a  = self.refine_angles
         except:
             return True
         else:
-            return not a
+            return  a
+    @property
+    def refining_dihedrals_condition(self):
+        try:
+            a  = self.refine_dihedrals
+        except:
+            return True
+        else:
+            return  a
+    def find_new_angdihs(self,new):
+        angdihs = dict()
+        for neib in self.neibs[new[0]]:
+            if neib in new:
+                continue
+            idn = (neib,*new)
+            idns,t = self.sorted_id_and_type(idn)
+            angdihs[idns] = t
+        for neib in self.neibs[new[-1]]:
+            if neib in new:
+                continue
+            idn = (*new,neib)
+            idns,t = self.sorted_id_and_type(idn)
+            angdihs[idns] = t
+        return angdihs
+    
     def find_angles(self):
         '''
         Computes the angles of a system in dictionary format
@@ -4026,7 +4404,7 @@ class Analysis:
             If another atom is bonded to one of them an angle is formed
         We add in the angle the atoms that participate
         '''
-        if not self.check_refining_angles():
+        if not self.refining_angles_condition:
             return
 
         #t0 = perf_counter()
@@ -4058,7 +4436,7 @@ class Analysis:
             If another atom is bonded to one of them a Dihedral is formed is formed
         We add in the angle the atoms that participate
         '''
-        if not self.check_refining_angles():
+        if not self.refining_dihedrals_condition:
             return
         #t0 = perf_counter()
         self.dihedrals=dict()
@@ -4087,108 +4465,108 @@ class Analysis:
                 pass
         return
 
-    def read_atoms_and_connectivity_from_itp(self,file):
+    def read_itp_file(self,file):
         t0 = perf_counter()
         
-        def read_atoms_from_itp(file):
-           #t0 = perf_counter()
-            with open(file,'r') as f:
-                lines = f.readlines()
-                f.closed
-            for j,line in enumerate(lines):
-                if 'atoms' in line and '[' in line and ']' in line:
-                    jatoms = j
-            at_ids = [] ; res_num=[];at_types = [] ;res_name = [] ; cngr =[] 
-            charge = dict() ; mass=dict()
+        with open(file,'r') as f:
+            lines = f.readlines()
+            f.closed
             
-            atoms = dict()
-            i=0
-            for line in lines[jatoms+1:]:
-                l = line.split()
-                try:
-                    int(l[0])
-                except:
-                    pass
-                else:
-                    nl  = len(l)
-                    
-                    at_ids.append(i) #already int
-                    res_name.append(l[3])
-                    t = l[1]
-                    cngr.append(l[5])
-                    atoms[l[4]] = t
-                    at_types.append(t)
-                    if nl >6:    
-                        charge[t] = float(l[6])
-                    else:
-                        charge
-                    if nl>7:
-                        mass[t] = float(l[7])
-                    res_num.append(int(l[2]))
-                    i+=1
-                if '[' in line or ']' in line:
-                    break
-                
-            #tf = perf_counter() - t0
-            #ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
-            
-            return np.array(at_ids),np.array(at_types),np.array(res_num),np.array(res_name),atoms,cngr,charge,mass
- 
-        def read_connectivity_from_itp(file):
-            #t0 = perf_counter()
-            with open(file,'r') as f:
-                lines = f.readlines()
-                f.closed
-                
-            for j,line in enumerate(lines):
-                
-                if 'bonds' in line and '[' in line and ']' in line:
-                    jbonds = j
-            bonds = []
+        # Reading atoms
+        jlines = {'atoms':set(),'bonds':set(),'angles':set(),'dihedrals':set()}
+        for j,line in enumerate(lines):
+            for k in jlines:
+                if k in line and '[' in line and ']' in line:
+                    jlines[k].add(j)
+
+        at_ids = [] ; res_num=[];at_types = [] ;res_name = [] ; cngr =[] 
+        charge_map = dict() ; mass_map=dict()
+        
+        atomscode_map = dict()
+        jli = list(jlines['atoms'])[0]
+        i=0
+        for line in lines[jli+1:]:
+            l = line.split()
             try:
-                jbonds
-            except UnboundLocalError:
+                int(l[0])
+            except:
                 pass
             else:
-                for line in lines[jbonds+1:]:
+                nl  = len(l)
+                #print(l)
+                at_ids.append(i) #already int
+                res_name.append(l[3])
+                t = l[4]
+                cngr.append(l[5])
+                atomscode_map[l[1]] = i
+                at_types.append(t)
+                if nl >6:    
+                    charge_map[t] = float(l[6])
+                else:
+                    charge_map[t] = 0.0
+                if nl>7:
+                    mass_map[t] = float(l[7])
+                res_num.append(int(l[2]))
+                i+=1
+            if '[' in line or ']' in line:
+                break
+        
+        at_ids = np.array(at_ids)
+        at_types = np.array(at_types)
+        res_num = np.array(res_num) 
+        res_name = np.array(res_name)
+        cngr = np.array(cngr)
+        if not hasattr(self,'atomscode_map'):
+            self.atomscode_map = atomscode_map
+        else:    
+            self.atomscode_map.update( atomscode_map)
+        if not hasattr(self, 'charge_map'):
+            self.charge_map = charge_map
+        else:
+            for k,c in charge_map.items():
+                self.charge_map[k] = c
+        if not hasattr(self, 'mass_map'):
+            self.mass_map = mass_map
+        else:
+            for k,m in mass_map.items():
+                self.mass_map[k] = m
+
+        jd = {'bonds':2,'angles':3,'dihedrals':4}
+        topol =  {'bonds':[],'angles':[],'dihedrals':[]}
+
+            
+        for key in ['bonds','angles','dihedrals']:
+            for jli in jlines[key]:
+                ffd = dict()
+                for line in lines[jli+1:]:
                     l = line.split()
+                    if len(l)<2:
+                        continue
                     try:
-                        b = [int(l[0]),int(l[1])]
+                        b = np.array(l[:jd[key]],dtype=int)
                     except:
                         pass
                     else:
-                        bonds.append(b)
+                        topol[key].append(b)
                     if '[' in line or ']' in line:
                         break
-            bonds = np.array(bonds)
-            try:
-                bonds-=bonds.min()
-            except ValueError as e:
-                logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
-            
-            return  bonds
-    
+
         
-        at_ids,at_types,res_num,res_name,atoms,cngr,charge,mass \
-        = read_atoms_from_itp(file)
+        bonds = np.array(topol['bonds'])
         
-        
-        if self.types_from_itp:
-            self.correct_types_from_itp(atoms)
-        if not hasattr(self, 'charge_map'):
-            self.charge_map = charge
-        else:
-            for k,c in charge.items():
-                self.charge_map[k] = c
-        if not hasattr(self, 'mass_map'):
-            self.mass_map = mass
-        else:
-            for k,m in mass.items():
-                self.mass_map[k] = m
-        bonds = read_connectivity_from_itp(file)
-        
-        connectivity_per_resname = {t:[] for t in np.unique(res_name) }
-        
+        try:
+            bonds[0]
+        except ValueError as e:
+            logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
+        sub = bonds.min()
+        self.sub =sub
+        bonds -= sub
+        angles = np.array(topol['angles']) - sub
+        dihedrals = np.array(topol['dihedrals']) - sub
+        resnames = np.unique(res_name) 
+        connectivity_per_resname = {t:[] for t in resnames }
+        angles_per_resname = {t:[] for t in resnames }
+        dihedrals_per_resname = {t:[] for t in resnames }
         for b in bonds:
             i0 = np.where(at_ids == b[0])[0][0]
             i1 = np.where(at_ids == b[1])[0][0]
@@ -4196,17 +4574,107 @@ class Analysis:
             
             res_nm = res_name[i0]
             connectivity_per_resname[res_nm].append(b)
-            
-        if not hasattr(self, 'connectivity_per_resname'):
-            self.connectivity_per_resname = connectivity_per_resname
-        else:
-            for t,c in connectivity_per_resname.items():
-                self.connectivity_per_resname[t] = c
+        for a in angles:
+            i0 = np.where(at_ids == a[0])[0][0]
+            i1 = np.where(at_ids == a[1])[0][0]
+            i2 = np.where(at_ids == a[2])[0][0]
+            assert res_name[i0] == res_name[i1], 'Angle ids {:d} - {:d} is between two different residues'.format(i0,i1)
+            assert res_name[i0] == res_name[i2], 'Angle ids {:d} - {:d} is between two different residues'.format(i0,i2)
+            res_nm = res_name[i0]
+            angles_per_resname[res_nm].append(a)
+        for d in dihedrals:
+            i0 = np.where(at_ids == d[0])[0][0]
+            i1 = np.where(at_ids == d[1])[0][0]
+            i2 = np.where(at_ids == d[2])[0][0]
+            i3 = np.where(at_ids == d[2])[0][0]
+            assert res_name[i0] == res_name[i1], 'Dihedral ids {:d} - {:d} is between two different residues'.format(i0,i1)
+            assert res_name[i0] == res_name[i2], 'Dihedral ids {:d} - {:d} is between two different residues'.format(i0,i2)
+            assert res_name[i0] == res_name[i3], 'Dihedral ids {:d} - {:d} is between two different residues'.format(i0,i3)
+            res_nm = res_name[i0]
+            dihedrals_per_resname[res_nm].append(d)
+     
+        for c in ['connectivity','angles','dihedrals']:
+            name = c+'_per_resname'
+            var  = locals()[name]
+            if not hasattr(self,name):
+                setattr(self,name,var)
+            else:
+                attr = getattr(self,name)
+                for t,bad in var.items():
+                    attr[t] = bad
+                setattr(self,name,attr)
+        
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
     
-
+    def make_ff_from_itp(self,file):
+        if not hasattr(self,'ff'):
+            self.ff = self.FFparams()
+        with open(file,'r') as f:
+            lines = f.readlines()
+            f.closed
+        nline = dict()            
+        lookfor = ['atomtypes','atoms','bonds','angles','dihedrals']
+        for j,line in enumerate(lines):
+            for k in lookfor:
+                if k in line and '[' in line and ']' in line:
+                    nline[k] = j
+        residues = []
+        for line in lines[nline['atoms']+1:]:
+            if ';' in line :
+                continue
+            l = line.strip().split()
+            if len(l) == 0 :
+                continue
+            
+            if '[' in line or ']' in line :
+                break
+            residues.append(l[3])
+        ures = np.unique(residues)
+        if len(ures) != 1:
+            raise ValueError('Residues in this itp file are not unique')
+        
+        jd = {'atomtypes':1,'bonds':2,'angles':3,'dihedrals':4}
+        names = {'atomtypes':'atomtypes','bonds':'bondtypes',
+                 'angles':'angletypes','dihedrals':'dihedraltypes'}
+        mol_ids = self.mol_ids[self.mol_names==ures[0]]
+        for k in jd:            
+            attr = dict()
+            attr_name = names[k]
+            for j,line in enumerate(lines[nline[k]+1:]):
+                
+                if ';' in line: 
+                    continue
+                if '[' in line or ']' in line : break
+                l = line.strip().split()
+                
+                if len(l) ==0: continue
+            
+                if k =='atomtypes':
+                    if not hasattr(self.ff,'atomtypes'):
+                        self.ff.atomtypes = dict()
+                    aid = self.atomscode_map[l[0]]
+                    for res_id in np.unique(mol_ids): 
+                        a = self.loc_id_to_glob[res_id][aid]
+                        ty = self.at_types[a]
+                    
+                        mass1 = self.mass_map[ty]
+                        mass2 = float(l[2])
+                        assert round(mass1,6) ==round(mass2,6),'mass1 = {:4.6f}  while mass2 = {:4.6f}'.format(mass1,mass2)  
+                        ch = self.charge_map[ty]
+                        val = (str(mass1),str(ch),*l[-3:])
+                        attr[ty] = val
+                    
+                else:#
+                    aid =  tuple(np.array(l[:jd[k]],dtype=int)-self.sub)
+                    cid,ty = self.sorted_id_and_type(aid)
+                    
+                    val = tuple(l[jd[k]:])
+                    attr[ty] = val
+                ass.update_dict_in_object(self.ff, attr_name, attr)
+        return 
+    
     def read_topology(self):
         if '.gro' == self.topol_file[-4:]:
             self.read_gro_topol()  # reads from gro file
@@ -4215,8 +4683,10 @@ class Analysis:
             except:
                 raise NotImplementedError('connectivity_info = {} is not implemented yet'.format(self.connectivity_file))
             else:
-                
-                self.find_topology() # reads your itp files to get the connectivity
+                if type(self.connectivity_info) is dict: 
+                    self.map_the_topology(self.connectivity_info)
+                else:
+                    self.read_gromacs_topology() # reads your itp files to get the connectivity
 
         elif '.ltop' == self.topol_file[-5:]:
             self.read_lammps_topol()
@@ -4390,13 +4860,27 @@ class Analysis:
                 if x not in un:
                     un.append(x)
             return un
-
-    def find_unique_bond_types(self):
-        self.bond_types = self.unique_values(self.connectivity.values())
-    def find_unique_angle_types(self):
-        self.angle_types = self.unique_values(self.angles.values())
-    def find_unique_dihedral_types(self):
-        self.dihedral_types = self.unique_values(self.dihedrals.values())
+    @property
+    def atom_types(self):
+        return self.unique_values(self.at_types)
+    @property
+    def bond_types(self):
+        return self.unique_values(self.connectivity.values())
+    @property
+    def angle_types(self):
+        return self.unique_values(self.angles.values())
+    @property
+    def dihedral_types(self):
+        return self.unique_values(self.dihedrals.values())
+    
+    def find_charges(self):
+        
+        charge = np.empty(self.natoms,dtype=float)
+        for i in range(self.natoms):
+            charge[i] = self.charge_map[self.at_types[i]]
+        self.atom_charge = charge
+       
+        return
     
     def find_masses(self):
         
@@ -4673,63 +5157,49 @@ class Analysis:
             if mid1!=mid0:
                 counter+=1
             mol_ids[i] = counter
-        self.mol_ids=mol_ids
-    
+        self.mol_ids = mol_ids
+     
         return
-    
-    def merge_system(self,obj,reinit=False,trans=None,trans_kwargs=dict()):
-        self.merge_connectivity(obj.connectivity)
-        self.merge_angles(obj.angles)
-        self.merge_dihedrals(obj.dihedrals)
+        
+    def merge_ff(self,obj):
+        names = ['atomtypes','bondtypes','angletypes','dihedraltypes']
+        for name in names:
+            ffdata = getattr(self.ff,name)
+            medata = getattr(obj.ff,name)
+            ffdata.update(medata)
+        
+    def merge_system(self,obj):
+        n = self.natoms
+        self.connectivity.update( {(n+c[0],n+c[1]):t for c,t in obj.connectivity.items()} )
+        #self.find_neibs()
+        self.neibs.update({n+aid: {n+a for a in neibs} for aid,neibs in obj.neibs.items()} )
+        self.angles.update( {(n+c[0],n+c[1],n+c[2]):t for c,t in obj.angles.items()} )
+        self.dihedrals.update( {(n+c[0],n+c[1],n+c[2],n+c[3]):t for c,t in obj.dihedrals.items()} )
+        
+       
         self.at_ids = np.concatenate((self.at_ids,obj.at_ids))
         self.at_types = np.concatenate((self.at_types,obj.at_types))
         self.mol_ids = np.concatenate((self.mol_ids,obj.mol_ids))
         self.mol_names = np.concatenate((self.mol_names,obj.mol_names))
+        self.atom_mass = np.concatenate((self.atom_mass,obj.atom_mass))
+        self.atom_charge = np.concatenate((self.atom_charge,obj.atom_charge))
         for frame in self.timeframes:
             c1 = self.get_coords(frame)
             c2 = obj.get_coords(frame)
-            if trans is not None:
-                if trans == 'react':
-                    sid = trans_kwargs['surface_react_id']
-                   
-                    ref_c = c1[sid]
-                    dist = Distance_Functions.spherical_particle(None, c1, ref_c)
-                    cneibs = c1[ np.logical_and(dist < 3.5, dist!= trans_kwargs['target_d'])]
-                    trans_kwargs['cneibs'] = cneibs
-                    c2 = RotTrans(trans,ref_c,c2,**trans_kwargs).coords
-                    #conn_id,cont = self.ids_to_sorted_tuple((sid,rid))
-                    #self.connectivity[conn_id] = cont
             self.timeframes[frame]['coords'] = np.concatenate((c1,c2))
         
         self.renumber_ids()
         
         self.renumber_residues()
         
-        if reinit:
-            self.analysis_initialization()
-    def merge_dihedrals(self,objc):
-        n = self.natoms
-        self.dihedrals.update({
-            (k[0]+n,k[1]+n,k[2]+n,k[3]+n):v for k,v in objc.items()
-            })
-        self.find_unique_dihedral_types()
-        return 
-    def merge_angles(self,objc):
-        n = self.natoms
-        self.angles.update({
-            (k[0]+n,k[1]+n,k[2]+n):v for k,v in objc.items()
-            })
-        self.find_unique_angle_types()
-        return     
-    def merge_connectivity(self,objc):
-        n = self.natoms
-        self.connectivity.update({
-            (k[0]+n,k[1]+n):v for k,v in objc.items()
-            })
-        self.find_unique_bond_types()
-        
-        
-        return 
+        self.charge_map.update(obj.charge_map)
+        self.mass_map.update(obj.mass_map)
+        self.merge_ff(obj)
+        #if reinit:
+            #self.analysis_initialization()
+        return
+    
+    
         
     def renumber_ids(self,start_from=0):
         at_ids = np.arange(0,self.natoms,1,dtype=int)
@@ -4737,39 +5207,10 @@ class Analysis:
         self.at_ids = at_ids
         return
     
-    def remove_attached_group(self,reactid,remt,keepids=[]):
-        tys = self.at_types
-        ids = self.at_ids
-        if type(keepids) is int:
-            keept = [keepids]
-        if type(remt) is str:
-            remt = [remt]
-        ids_to_remove = []
-        connected_set = set()
-        def recursive_func(rid,connected_set,connectivity): 
-            lold = len(connected_set)
-            for k in connectivity.keys():
-                if rid not in k:
-                    continue
-                kn = k[0] if k[1] == rid else k[1]
-                tn = tys[kn]
-                
-                if kn not in keepids and tn in remt: 
-                    connected_set.add(kn)
-            if len(connected_set) == lold:
-                return
-            for rid in connected_set.copy():
-                recursive_func(rid,connected_set,connectivity)
-        recursive_func(reactid,connected_set,self.connectivity)
-        
-        ids_to_remove = list(connected_set)
-        new_reactid = reactid - np.count_nonzero(np.array(ids_to_remove)<reactid)
-        self.remove_atoms_ids(ids_to_remove,False)
-        return new_reactid
             
-    def remove_atoms_ids(self,ids,reinit=True):
+    def remove_atoms_ids(self,ids,reinit=False,filter_topology=True):
         filt = np.logical_not(np.isin(self.at_ids,ids))
-        self.filter_system(filt,reinit)
+        self.filter_system(filt,reinit,filter_topology)
         return
     
     def remove_atoms(self,crit,frame=0,reinit=True):
@@ -4787,18 +5228,77 @@ class Analysis:
         self.filter_system(filt,reinit)
         return
     
-    def filter_system(self,filt,reinit=True):
+    def filter_topology(self,removed_ids):
+        
+        m = self.old_to_new_ids
+        
+        for i in removed_ids:
+            del self.neibs[i]
+            for c in ass.numpy_keys(self.connectivity):
+                if i in c:
+                    del self.connectivity[tuple(c)]
+            for a in ass.numpy_keys(self.angles):
+                if i in a:
+                    del self.angles[tuple(a)]
+            for d in ass.numpy_keys(self.dihedrals):
+                if i in d:
+                    del self.dihedrals[tuple(d)]
+                    
+        
+        self.connectivity = {(m[i[0]],m[i[1]]):t for i,t in self.connectivity.items() }
+        self.find_neibs()
+        self.angles = {(m[i[0]],m[i[1]],m[i[2]]):t for i,t in self.angles.items() }
+        self.dihedrals = {(m[i[0]],m[i[1]],m[i[2]],m[i[3]]):t for i,t in self.dihedrals.items()}
+                
+        return
+    
+    def filter_ff(self):
+        at = self.atom_types
+        bt  = self.bond_types
+        angt = self.angle_types
+        diht = self.dihedral_types
+        tys = [at,bt,angt,diht]
+        names = ['atomtypes','bondtypes','angletypes','dihedraltypes']
+        for ty,name in zip(tys,names):
+            ffdata = getattr(self.ff,name)
+            for t in list(ffdata.keys()):
+                if t not in ty:
+                    del ffdata[t]
+    
+    def filter_system(self,filt,reinit=False,filter_topology=True):
+        
+        otn = dict()
+        sub = 0 
+        
+        for j,f in enumerate(filt):
+            if not f:
+                sub+=1
+                otn[j] = None
+            else:
+                otn[j] = j-sub
+        
+        self.old_to_new_ids = otn
+        
+        
+        if filter_topology:
+            removed_ids = self.at_ids[~filt]
+            self.filter_topology(removed_ids)
+
+
+        
         self.at_ids = self.at_ids[filt]
         self.at_types = self.at_types[filt]
         self.mol_ids = self.mol_ids[filt]
         self.mol_names = self.mol_names[filt]
-        
+        self.atom_mass = self.atom_mass[filt]
+        self.atom_charge = self.atom_charge[filt]
         for frame in self.timeframes:
             self.timeframes[frame]['coords'] = self.get_coords(frame)[filt]
         
         self.renumber_ids()
         self.renumber_residues()
         
+        self.filter_ff()
         if reinit:
             self.analysis_initialization(reinit)
         return
