@@ -3655,7 +3655,7 @@ class React_two_systems:
                     attr[ty_new] = copy(attr[k])
                     
         self.obj1.ff.atomtypes[newty] = copy(self.obj1.ff.atomtypes[ty])
-             
+        self.obj1.filter_ff()
         return 
     def set_break_bond_id(self,prefix):
         obj = getattr(self,'obj'+prefix)
@@ -3982,9 +3982,7 @@ class Analysis:
         self.find_angles()
         self.find_dihedrals()
         #Find the ids (numpy compatible) of each type and store them
-        self.keysTotype('connectivity')
-        self.keysTotype('angles')
-        self.keysTotype('dihedrals')
+        
         
 
         self.dict_to_sorted_numpy('connectivity') #necessary to unwrap the coords efficiently
@@ -4060,8 +4058,17 @@ class Analysis:
         for k,v in dictionary.items():
             temp_ids[v].append(np.array(k))
         ids = {v : np.array(temp_ids[v]) for v in types}
-        setattr(self,attr_name+'_per_type',ids)
-        return 
+        
+        return ids 
+    @property
+    def connectivity_pertype(self):
+        return self.keysTotype('connectivity')
+    @property
+    def angles_pertype(self):
+        return self.keysTotype('angles')
+    @property
+    def dihedrals_pertype(self):
+        return self.keysTotype('dihedrals')
     
     def define_connectivity(self,bond_dists):
         bond_dists = {tuple(np.sort(k)):v for k,v in bond_dists.items()}
@@ -4372,10 +4379,14 @@ class Analysis:
     def find_new_angdihs(self,new):
         angdihs = dict()
         for neib in self.neibs[new[0]]:
+            if neib in new:
+                continue
             idn = (neib,*new)
             idns,t = self.sorted_id_and_type(idn)
             angdihs[idns] = t
         for neib in self.neibs[new[-1]]:
+            if neib in new:
+                continue
             idn = (*new,neib)
             idns,t = self.sorted_id_and_type(idn)
             angdihs[idns] = t
