@@ -1872,7 +1872,7 @@ class fitLinear():
         breaks = self.breaks[self.breaks.argsort()]
         for i,b in enumerate(breaks[1:]):
             bm = breaks[i]
-            print(bm,b)
+            
             fb = np.logical_and(bm<xf,xf<b)
            
             x = xf[fb]
@@ -3595,11 +3595,11 @@ class React_two_systems:
             #make bond
             self.reacted_id2 = natoms1 +self.react_id2 #renweing the id
             self.reacted_id1 = self.react_id1
-            self.map_type(self.reacted_id1)
-            self.map_type(self.reacted_id2)
+            self.change_type(self.reacted_id1)
+            self.change_type(self.reacted_id2)
             conn_id,c_type = self.obj1.sorted_id_and_type((self.reacted_id1,self.reacted_id2))
             self.obj1.connectivity[conn_id] = c_type
-            print(conn_id,self.obj1.natoms)
+            
             new_angles = self.obj1.find_new_angdihs(conn_id)
             
             self.obj1.angles.update(new_angles)
@@ -3631,7 +3631,7 @@ class React_two_systems:
             raise Exception('Total charge is not newtral, total charge = {:.8e}'.format(totc))
 
         return 
-    def map_type(self,at_id):
+    def change_type(self,at_id):
         from copy import copy
         
         ty = self.obj1.at_types[at_id]
@@ -3645,19 +3645,31 @@ class React_two_systems:
         
         self.obj1.mass_map[newty] = copy(self.obj1.mass_map[ty])
         
+        for attr_name in ['connectivity','angles','dihedrals']:
+            attr = getattr(self.obj1,attr_name)
+            for c in list(attr.keys()):
+                
+                if at_id in c:
+                    t = [i for i in attr[c]]      
+                    i = np.where(np.array(t)==ty)[0][0]
+                    t[i] = newty
+                    logger.debug('changed {} to {}'.format(attr[c],tuple(t)))
+                    attr[c] = tuple(t) 
+                    
         
         for attr_name in ['bondtypes','angletypes','dihedraltypes']:
             attr = getattr(self.obj1.ff,attr_name)
             for k in list(attr.keys()):
                 if ty in k:
-                    arr = np.array(k)
-                    i = np.where(arr==ty)[0][0]
+                    arr = [i for i in k]
+                    i = np.where(np.array(arr)==ty)[0][0]
                     arr[i] = newty
                     ty_new  = tuple(arr)
+                    logger.debug('made type {} same as  {}'.format(k,newty))
                     attr[ty_new] = copy(attr[k])
-                    
+                    #del attr[k]
         self.obj1.ff.atomtypes[newty] = copy(self.obj1.ff.atomtypes[ty])
-        self.obj1.filter_ff()
+        #self.obj1.filter_ff()
         return 
     def set_break_bond_id(self,prefix):
         obj = getattr(self,'obj'+prefix)
@@ -3999,15 +4011,21 @@ class Analysis():
                 mn = self.mol_names[a]
                 line = '{:5d}  {:5s}  {:5d}  {:5s}  {:5s}  {:5d}'.format(j+s,ty,mid,mn,ty,j+s)
                 lines.append(line)
-            lines.extend(['','[ bonds ]',';ai   aj  '])
+            lines.extend(['','[ bonds ]',';ai   aj  func'])
             for c in conpm[mol_id]:
-                lines.append('{:5d}  {:5d}'.format(c[0]+s,c[1]+s))
-            lines.extend(['','[ angles ]',';ai   aj   ak'])
+                func = self.ff.bondtypes[self.connectivity[c]][0]
+                
+                lines.append('{:5d}  {:5d}   {:}'.format(c[0]+s,c[1]+s,func))
+            lines.extend(['','[ angles ]',';ai   aj   ak func'])
             for c in angpm[mol_id]:
-                lines.append('{:5d}  {:5d}  {:5d}'.format(c[0]+s,c[1]+s,c[2]+s))
-            lines.extend(['','[ dihedrals ]',';ai   aj   ak   al'])
+                func = self.ff.angletypes[self.angles[c]][0]
+                lines.append('{:5d}  {:5d}  {:5d}   {:}'.format(c[0]+s,c[1]+s,c[2]+s,func))
+            lines.extend(['','[ dihedrals ]','; improper ai   aj   ak   al  func'])
+            lines.extend(['','[ dihedrals ]','; proper ai   aj   ak   al  func'])
             for c in dihpm[mol_id]:
-                lines.append('{:5d}  {:5d}  {:5d}  {:5d}'.format(c[0]+s,c[1]+s,c[2]+s,c[3]+s))
+                
+                func = self.ff.dihedraltypes[self.dihedrals[c]][0]
+                lines.append('{:5d}  {:5d}  {:5d}  {:5d}    {:}'.format(c[0]+s,c[1]+s,c[2]+s,c[3]+s,func))
             lines.append('')
             with open(fname,'w') as f:
                 for line in lines:
@@ -4035,8 +4053,8 @@ class Analysis():
         lines.extend(['','[ angletypes ]','; i    j    k func       th0         cth'])
         for k,v in self.ff.angletypes.items():
             lines.append('{:5s}  {:5s}  {:5s}  {:1d}  {:9.6f}  {:9.6f}'.format(k[0],k[1],k[2],int(v[0]),float(v[1]),float(v[2])))
-        lines.append('')
-        lines.append('[ dihedraltypes ]')
+        
+        lines.extend(['','[ dihedraltypes ]','; i   j  k   l'])
         for k,v in self.ff.dihedraltypes.items():
             l = '   '.join(v)
             lines.append('{:5s}  {:5s}  {:5s}  {:5s}  {:s}'.format(k[0],k[1],k[2],k[3],l))
@@ -4619,7 +4637,7 @@ class Analysis():
                         attr[ty] = val
                     
                 else:#
-                    aid =  tuple(np.array(l[:jd[k]],dtype=int)-self.sub)
+                    aid =  tuple(int(i)-self.sub for i in l[:jd[k]])
                     cid,ty = self.sorted_id_and_type(aid)
                     
                     val = tuple(l[jd[k]:])
@@ -6894,7 +6912,6 @@ class Analysis():
         
         if prop.lower() == 'fs':
             if q is None:
-                print(q)
                 raise Exception('For {} calculation you must give a "q" value '.format(prop))
             kernel_args =(q,)
         else:
