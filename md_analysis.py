@@ -3683,7 +3683,11 @@ class React_two_systems:
         name = 'break_bondid' + prefix
         
         if type(bb[0]) is str and type(bb[1]) is str:
-            bond_id  = self.find_random_bond_of_type(obj,bb,seed)
+            if prefix =='1':
+                pm = 'absz'
+            else:
+                pm = None
+            bond_id  = self.find_random_bond_of_type(obj,bb,seed,react,pm)
             assert bb == obj.connectivity[bond_id],'the bond id {} does not give the specified type {}'.format(bond_id,bb) 
             #if react == 1:
                 #bond_id = (bond_id[1],bond_id[0])
@@ -3696,7 +3700,7 @@ class React_two_systems:
         return
     
     @staticmethod
-    def find_random_bond_of_type(obj,bb,seed):
+    def find_random_bond_of_type(obj,bb,seed,idr,propmethod=None):
         np.random.seed(seed)
         
         bbids = ass.numpy_keys(obj.connectivity)
@@ -3705,9 +3709,20 @@ class React_two_systems:
         f = bbts == np.array(bb)
         f = np.logical_and(f[:,0],f[:,1])
         bids = bbids[f]
+        nums = np.arange(0,bids.shape[0],1,dtype=int)
         
-        num = np.random.randint(0,bids.shape[0])
-        
+        if propmethod =='absz':
+            z = obj.get_coords(0)[:,2]
+            
+            z = z[bids[:,idr]]
+            zm = np.sum(z)/z.shape[0]
+            zrel = np.abs(z-zm)
+            zrel -= zrel.min()
+            prop = np.exp(-1/zrel)
+            propnorm = prop/np.sum(prop)
+            num = np.random.choice(nums,p=propnorm)
+        else:
+            num = np.random.choice(nums)
         np.random.seed(None)
         
         bond_id = tuple(bids[num])
