@@ -150,7 +150,7 @@ class logs():
         
     def get_logger(self):
     
-        LOGGING_LEVEL = logging.INFO
+        LOGGING_LEVEL = logging.CRITICAL
         
         logger = logging.getLogger(__name__)
         logger.setLevel(LOGGING_LEVEL)
@@ -164,7 +164,7 @@ class logs():
             logger.addHandler(logfile_handler)
             self.log_file = logfile_handler
             stream = logging.StreamHandler()
-            stream.setLevel(logging.DEBUG)
+            stream.setLevel(logging.CRITICAL)
             stream.setFormatter(formatter)
             
             logger.addHandler(stream)
@@ -1170,7 +1170,7 @@ class ass():
         return     
     
 
-@jit(nopython=True,fastmath=True,parallel=True)
+@jit(nopython=True,fastmath=True,parallel=False)
 def distance_kernel(d,coords,c):
     #Kernels for finding distances
     nd = coords.shape[1]
@@ -3561,13 +3561,14 @@ class React_two_systems:
                  rcut=3.5,method='breakBondsMerge',
                  frame=0,seed1=None,seed2=None,
                  morse_bond=(100,0.15,5),morse_overlaps=(1e-3,0.4,15),
-                 maptypes=dict()):
+                 maptypes=dict(),updown_method=None):
         self.obj1 = obj1
         self.obj2 = obj2
         self.seed1 = seed1
         self.seed2 = seed2
         self.react1 = react1
         self.react2 = react2
+        self.updown_method = updown_method
         self.bb1 = bb1
         self.bb2 = bb2
         self.set_break_bond_id('1')
@@ -3578,13 +3579,14 @@ class React_two_systems:
         self.maptypes = maptypes
         self.morse_bond = morse_bond
         self.morse_overlaps = morse_overlaps
+        
         if method == 'breakBondsMerge':
             self.break_bonds()
             
             self.react_id1 = self.obj1.old_to_new_ids[self.bond_to_create[0]]
             self.react_id2 = self.obj2.old_to_new_ids[self.bond_to_create[1]]
             
-            self.find_reaction_neibhour_coords()
+            
             
             self.place_obj2()
             
@@ -3684,7 +3686,7 @@ class React_two_systems:
         
         if type(bb[0]) is str and type(bb[1]) is str:
             if prefix =='1':
-                pm = 'absz'
+                pm = 'absz_n'
             else:
                 pm = None
             bond_id  = self.find_random_bond_of_type(obj,bb,seed,react,pm)
@@ -3700,7 +3702,10 @@ class React_two_systems:
         return
     
     @staticmethod
-    def find_random_bond_of_type(obj,bb,seed,idr,propmethod=None):
+    def numb_of_neibs(c,ctot):
+        n = [np.sum(np.exp(-0.5/Distance_Functions.spherical_particle(None,ctot,c[i]))) for i in range(c.shape[0])]
+        return np.array(n)
+    def find_random_bond_of_type(self,obj,bb,seed,idr,propmethod=None):
         np.random.seed(seed)
         
         bbids = ass.numpy_keys(obj.connectivity)
@@ -3710,17 +3715,40 @@ class React_two_systems:
         f = np.logical_and(f[:,0],f[:,1])
         bids = bbids[f]
         nums = np.arange(0,bids.shape[0],1,dtype=int)
-        
-        if propmethod =='absz':
-            z = obj.get_coords(0)[:,2]
+        ids = bids[:,idr]
+        if propmethod =='absz_n':
             
-            z = z[bids[:,idr]]
+            c = obj.get_coords(0).copy()
+            z = c[:,2]
+            
+            z = z[ids]
             zm = np.sum(z)/z.shape[0]
-            zrel = np.abs(z-zm)
-            zrel -= zrel.min()
-            prop = np.exp(-1/zrel)
+            z -= zm
+            
+            if self.updown_method =='random':
+                
+                updown = np.random.choice([True,False]) 
+            else:
+                if not hasattr(self.obj1,'updown'):
+                    self.obj1.updown = False
+                self.obj1.updown = not self.obj1.updown
+                updown = self.obj1.updown
+            if updown:
+                fz = z>0
+                zf = z[fz]
+            else:
+                fz = z<0
+                zf = z[fz]
+            za = np.abs(zf)
+            zrel = za - za.min() + 1e-14
+            propz = np.exp(-0.5/zrel)
+            prop_neibs = 1.0/self.numb_of_neibs(c[ids][fz],c)
+            prop = propz*prop_neibs
+            
             propnorm = prop/np.sum(prop)
-            num = np.random.choice(nums,p=propnorm)
+
+            num = np.random.choice(nums[fz],p=propnorm)
+            #print(z[nums[fz][num]])
         else:
             num = np.random.choice(nums)
         np.random.seed(None)
@@ -3728,25 +3756,38 @@ class React_two_systems:
         bond_id = tuple(bids[num])
         return bond_id
     
-    def find_reaction_neibhour_coords(self):
-        def minimum_image_distance(coords,cref,box):
+    @staticmethod
+    @jit(nopython=True,fastmath=True,parallel=True)
+    def minimum_image_distance(coords,cref,box):
             r = coords - cref
+            imag_coords = coords.copy()
             for j in range(3):
                 b = box[j]
                 b2 = b/2
                 fm = r[:,j] < - b2
                 fp = r[:,j] >   b2
+                            
                 r[:,j][fm] += b
+                imag_coords[:,j][fm] +=b
+                
                 r[:,j][fp] -= b
-            d = np.sum(r*r,axis=1)**0.5
-            return d
-        coords = self.obj1.get_coords(self.frame)
-        box = self.obj1.get_box(self.frame)
-        cref = coords[self.react_id1]
-        self.creact1 = cref
-        d =  minimum_image_distance(coords,cref,box)
-        self.reaction_neibs = coords[d<self.rcut]
-        return
+                imag_coords[:,j][fp] -= b
+            d = np.zeros(r.shape[0],dtype=float)
+            for i in prange(r.shape[0]):
+                for j in range(3):
+                    x = r[i,j]
+                    d[i] += x*x
+                d[i] = np.sqrt(d[i])
+            
+            return d,imag_coords
+    
+    @staticmethod
+    def find_reaction_neibhour_coords(coords,cref,box,rcut):
+
+       
+        d,imag_coords =  React_two_systems.minimum_image_distance(coords,cref,box)
+        reaction_neibs = imag_coords[d<rcut]
+        return reaction_neibs
     
     @staticmethod
     def identify_trail(obj,trail_from,trail_to):
@@ -3799,58 +3840,79 @@ class React_two_systems:
         return
     
     @staticmethod
+    @jit(nopython=True,fastmath=True)
     def morse(r,De,re,alpha):
         return De*(np.exp(-2*alpha*(r-re))-2*np.exp(-alpha*(r-re)))
     
     @staticmethod
-    def cost_max_dist(vector_n_angles,cneibs,cref,coords,id2,
+    def cost_overlaps(vector_n_angles,creact1,id2,coords_neib_obj1,coords_obj2,
                       morse_bond,morse_overlaps):
        
-        ctr = RotTrans.trans_n_rot(vector_n_angles, coords)
+        ctr = RotTrans.trans_n_rot(vector_n_angles, coords_obj2)
+        # distance of reaction bond
+        refdist = RotTrans.distance(creact1,ctr[id2])
         
-        refdist = RotTrans.distance(cref,ctr[id2])
         f = React_two_systems.morse
-       
-        d = [Distance_Functions.spherical_particle(None, cneibs, c)
+        
+        d = [Distance_Functions.spherical_particle(None, coords_neib_obj1, c)
              for i,c in enumerate(ctr) if i!=id2]
         d =np.array(d)# shape ctr.shape[0]
         return  f(refdist,*morse_bond) + np.sum(f(d,*morse_overlaps))
 
     def place_obj2(self):
+        t0 = perf_counter()
         frame = self.frame  
-        coords = self.obj2.get_coords(frame)
+        coords_obj2 = self.obj2.get_coords(frame)
+        coords_obj1 = self.obj1.get_coords(frame)
+        
+        creact1 = coords_obj1[self.react_id1]
         
         
-        bounds= [(-3*m,m*3) for m in np.maximum(self.obj1.get_box(frame),
-                                           self.obj2.get_box(frame))] \
-                + [(-np.pi,np.pi)]*3
+        box = self.obj1.get_box(frame)
+        bm = box/2
+        cm2 = np.mean(coords_obj2,axis=0)
+        coords_obj2 += bm-cm2
+        
+        coords_neibs_obj1 = self.find_reaction_neibhour_coords(coords_obj1,creact1,box,self.rcut)
+        
+        bounds= [(-m,m) for m in box] + [(-np.pi,np.pi)]*3
                 
-        arguments = (self.reaction_neibs,self.creact1,
-                     coords,self.react_id2,self.morse_bond,self.morse_overlaps)
+        arguments = (creact1,self.react_id2,
+                     coords_neibs_obj1,coords_obj2,
+                     self.morse_bond,self.morse_overlaps)
         
         if False:
-            opt_res = dual_annealing(self.cost_max_dist, bounds,
+            opt_res = dual_annealing(self.cost_overlaps, bounds,
                     args =  arguments,
-                    maxiter = 50,
-                    restart_temp_ratio=1e-3,
+                    maxiter = 1000,
+                    restart_temp_ratio=1e-5,
                     minimizer_kwargs={'method':'SLSQP',#
                                      'bounds':bounds,
                                      
-                    'options':{'maxiter':1000,
-                        'disp':True,
+                    'options':{'maxiter':300,
+                        'disp':False,
                         'ftol':1e-3},
-                                })
+                                },
+                              )
+            
         else:
-            opt_res = differential_evolution(self.cost_max_dist, bounds,
+            opt_res = differential_evolution(self.cost_overlaps, bounds,
                     args = arguments ,
-                    maxiter = 100,disp=True,polish=False)
+                    maxiter = 60,disp=False,polish=True)
+        print('Energy = {:4.6f}'.format(opt_res.fun))
+        
+        if not hasattr(self.obj1,'se'):
+            self.obj1.se =[]
+        self.obj1.se.append(opt_res.fun)
+        
         self.opt_res = opt_res
         self.p = opt_res.x
         
-        self.obj2.timeframes[frame]['coords'] = RotTrans.trans_n_rot(self.p,coords)
-        
+        self.obj2.timeframes[frame]['coords'] = RotTrans.trans_n_rot(self.p,coords_obj2)
+        tf = perf_counter()-t0
+        print('time of placing object = {:.3e} sec'.format(tf))
         return 
-    
+  
 class RotTrans:
     
     def __init__(self):
@@ -4006,13 +4068,17 @@ class Analysis():
                     bpm[j].append(c)
         return bpm
     
-    def write_itp(self,mols,nexcl=2):
+    def write_itp(self,mols,path,nexcl=2):
         conpm = self.get_chem_per_molecule('connectivity')
         angpm = self.get_chem_per_molecule('angles')
         dihpm = self.get_chem_per_molecule('dihedrals')
         for k in mols:
             num = mols[k]
-            fname = k+'.itp'
+            if path !='':
+                fname = '{:s}/{:s}.itp'.format(path,k)
+            else:
+                fname ='{:s}.itp'.format(k)
+                
             lines = ['; generated by md_analysis library', '','']
             lines.extend(['','[ moleculetype ]', '; molname      nrexcl'])
             lines.append('{:5s}    {:1d}'.format(k,2))
@@ -4077,7 +4143,12 @@ class Analysis():
         mols = dict()
         for nm in np.unique(self.mol_names):
             mols[nm] = np.unique(self.mol_ids[nm == self.mol_names]).shape[0]
-        self.write_itp(mols,nexcl)
+        if '/' in fname:
+            path = '/'.join(fname.split('/')[:-1])
+        else:
+            path = ''
+        self.write_itp(mols,path,nexcl)
+        
         for k in mols:
             lines.append('#include "{:s}.itp"'.format(k))
         
