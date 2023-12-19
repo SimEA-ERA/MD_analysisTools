@@ -259,7 +259,7 @@ class gromacsTop():
                 aid = self.asys.at_ids[i] - subtr
                 ty = self.asys.at_types[i]
                 mass = self.asys.atom_mass[i]
-                charge = self.asys.charge_map[ty]
+                charge = self.asys.atom_charge[i]
                 f.write('{:5d}  {:5s}  {:5d}  {:5s}  {:5s}  {:5d}  {:4.5f}  {:4.5f} \n'.format(aid,
                                 ty,aid,mol_name,ty,1,charge,mass))
             
@@ -316,9 +316,13 @@ class supraClass():
         return data
     
     def dealloc_timeframes(self):
-        if type(self.traj_files) is not str:
-            del self.mdobj.timeframes
-            self.mdobj.timeframes = dict()
+        try:
+            if type(self.traj_files) is not str:
+                del self.mdobj.timeframes
+                self.mdobj.timeframes = dict()
+        except:
+            pass
+            logger.warning('WARNING: timeframes not been able to deallocated. Unless you have multiple trajectories you should not have any problem other than filling the memory')
         return
     
     def read_timeframes(self,trajf):
@@ -338,7 +342,7 @@ class supraClass():
         if len(appendhydro)>0:
             add_atoms.add_ghost_hydrogens(self.mdobj,appendhydro)
             add_atoms.append_atoms(self.mdobj,'ghost')
-        self.mdobj.charge_from_maps()
+        
         return 
     
     def handleWeights(self,ft,dynOptions):
@@ -441,14 +445,11 @@ class supraClass():
         
         self.read_timeframes(trajf)
         
-        seg_t,fseg = self.mdobj.calc_segmental_vectors_t(topol_vec,filters = filters)
-        del seg_t
-    
         self.handleCharge(appendhydro)
 
-        dm_t,fdm = self.mdobj.calc_segmental_dipole_moment_t(topol_vec,segbond=segbond)
+        dm_t,fdm = self.mdobj.calc_segmental_dipole_moment_t(topol_vec,segbond=segbond,filters=filters)
 
-        dyn = self.computeDynamics(prop,dm_t,fseg,dynOptions)        
+        dyn = self.computeDynamics(prop,dm_t,fdm,dynOptions)        
         
         self.dealloc_timeframes()
         
@@ -619,6 +620,12 @@ class supraClass():
         self.dealloc_timeframes()
         return p2
     
+    def Rg(self,trajf,option=''):
+        self.read_timeframes(trajf)
+        cha = self.mdobj.calc_Rg(option)
+        self.dealloc_timeframes()
+        return cha
+    
     def chain_structure(self,trajf,binl,dmax,offset=0,option=''):
         self.read_timeframes(trajf)
         cha = self.mdobj.calc_chain_characteristics(binl,dmax,offset)
@@ -632,15 +639,17 @@ class supraClass():
         self.dealloc_timeframes()
         return corrs
     
-    def pair_distribution(self,trajf,binl,dmax,type1=None,type2=None,
-                               ids=None,direction=None,
-                               density='number',normalize=False,
-                               bulkMaxDiff=0.1,perc_bulk=0.75,
-                               **kwargs):
+    def segmental_pair_distribution(self,trajf,binl,dmax,topol_vector,segbond,far_region=0.8):
         self.read_timeframes(trajf)
-        pd = self.mdobj.calc_pair_distribution(binl,dmax,type1,type2,ids,direction,
-                                               density,normalize,bulkMaxDiff,perc_bulk,
-                                               **kwargs)
+        paird = self.mdobj.calc_segmental_pair_distribution(binl,dmax,topol_vector,segbond,far_region)
+        self.dealloc_timeframes()
+        return paird
+    
+    def pair_distribution(self,trajf,binl,dmax,type1=None,type2=None,
+                              intra=False,inter=False,
+                               far_region=0.8):
+        self.read_timeframes(trajf)
+        pd = self.mdobj.calc_pair_distribution(binl,dmax,type1,type2,intra,inter,far_region)
         self.dealloc_timeframes()
         return pd
     
@@ -843,7 +852,7 @@ class multy_traj():
         return wraped_data
     
     @staticmethod
-    def multiple_trajectory(files,function,*fargs,**fkwargs,):
+    def multiple_trajectory(files,function,*fargs,**fkwargs):
        
         if 'wrapon' not in fkwargs:
             wrapon = 'time'
@@ -1168,7 +1177,50 @@ class ass():
             else:
                 raise Exception('{} is more than once in the array'.format(i))
         return     
+    @jit(nopython=True,fastmath=True)
+    def running_average(X,every=1):
+        # curnel to find running average
+        n = X.shape[0]
+        xrun_mean = np.zeros(n)
+        for j in range(0,len(X),every):
+            y = X[:j+1]
+            n = y.shape[0]
+            xrun_mean[j] = np.sum(y)/n
+        return xrun_mean
     
+    def moving_average(a, n=10) :
+        #moving average kernel
+        mov = np.empty_like(a)
+        
+        n2 = int(n/2)
+        if n2%2 ==1: n2+=1
+        up = a.shape[0]-n2
+        for i in range(n2):
+            mov[i] = a[:2*i+1].mean()
+        for i in range(n2,up):
+            mov[i] = a[i-n2:i+n2+1].mean()
+        for i in range(up,a.shape[0]):
+            j = (a.shape[0]-i)-1
+            mov[i] = a[up-j:].mean()
+            
+        return mov
+    
+    def block_average(a, n=100) :
+        #block average kernel
+     
+        bv = np.empty(int(a.shape[0]/n)+1,dtype=float)
+        for i in range(bv.shape[0]):
+            x = a[i*n:(i+1)*n]
+            bv[i] = x.mean()
+        return bv
+    
+    def block_std(a, n=100) :
+        #block standard diviation
+        bstd = np.empty(int(a.shape[0]/n),dtype=float)
+        for i in range(bstd.shape[0]):
+            x = a[i*n:(i+1)*n]
+            bstd[i] = x.std()
+        return bstd
 
 @jit(nopython=True,fastmath=True,parallel=False)
 def distance_kernel(d,coords,c):
@@ -1194,50 +1246,7 @@ def smaller_distance_kernel(d1,d2,c1,c2):
                 d1[i] = d2[j]
     return
 
-@jit(nopython=True,fastmath=True)
-def running_average(X,every=1):
-    # curnel to find running average
-    n = X.shape[0]
-    xrun_mean = np.zeros(n)
-    for j in range(0,len(X),every):
-        y = X[:j+1]
-        n = y.shape[0]
-        xrun_mean[j] = np.sum(y)/n
-    return xrun_mean
 
-def moving_average(a, n=10) :
-    #moving average kernel
-    mov = np.empty_like(a)
-    
-    n2 = int(n/2)
-    if n2%2 ==1: n2+=1
-    up = a.shape[0]-n2
-    for i in range(n2):
-        mov[i] = a[:2*i+1].mean()
-    for i in range(n2,up):
-        mov[i] = a[i-n2:i+n2+1].mean()
-    for i in range(up,a.shape[0]):
-        j = (a.shape[0]-i)-1
-        mov[i] = a[up-j:].mean()
-        
-    return mov
-
-def block_average(a, n=100) :
-    #block average kernel
- 
-    bv = np.empty(int(a.shape[0]/n)+1,dtype=float)
-    for i in range(bv.shape[0]):
-        x = a[i*n:(i+1)*n]
-        bv[i] = x.mean()
-    return bv
-
-def block_std(a, n=100) :
-    #block standard diviation
-    bstd = np.empty(int(a.shape[0]/n),dtype=float)
-    for i in range(bstd.shape[0]):
-        x = a[i*n:(i+1)*n]
-        bstd[i] = x.std()
-    return bstd
 
 
 class Energetic_Analysis():
@@ -1478,7 +1487,8 @@ class plotter():
                 lst_map['loosely dashdotted'],
                 lst_map['dashdotted'],
                 lst_map['densely dashdotted']]
-        lst7 = [lst_map['loosely dotted'],
+        lst7 = ['-','-.','--',
+                lst_map['loosely dotted'],
                 lst_map['dotted'],
                 lst_map['dashed'],
                 lst_map['loosely dashdotted'],
@@ -1616,8 +1626,8 @@ class plotter():
             except ValueError as e:
                 logger.warning('Excepted ValueError{}\nConsider increasing number of sumpling points'.format(e))
             i=np.log10(mid)
-  
-        return np.unique(args[args<x.shape[0]])
+        args = np.unique(args[args<x.shape[0]])
+        return np.array(args,dtype=int)
     
     @staticmethod
     def colormaps():
@@ -1630,9 +1640,10 @@ class plotter():
              ylabel=None,xlabel=None,
              xlim=None,ylim=None, xscale='log',yscale=None,
              pmap=None, cmap = None, labmap=None,lstmap=None,cutf=None,
-             midtime=None,num=100,write_plot_data=False,
-             edgewidth=0.3,markersize=1.5,legend=True,
-             legkwargs=dict(),legfont=2.0):
+             midtime=None,num=100,write_plot_data=False,ls=None,lw=0.5,
+             edgewidth=0.3,markersize=1.5,legend=True,moving_average=None,
+             legkwargs=dict(),legfont=2.0,extra_line=False,
+             xticks=None,yticks=None,minoryticks=None,minorxticks=None):
         if not ass.is_dict_of_dicts(datadict):
             datadict = {'key':datadict}
             legend=False
@@ -1649,10 +1660,13 @@ class plotter():
             cm = matplotlib.cm.get_cmap(cmap)
             n = len(datadict)
             cmap = {k: cm((i+0.5)/n) for i,k in enumerate(datadict.keys())}
-            
+        
         if lstmap is None:
-            lst = plotter.linestyles.lst7*10
-            lstmap = {k:lst[i] for i,k in enumerate(datadict.keys())}
+            if ls is None:
+                lst = plotter.linestyles.lst7*10
+                lstmap = {k:lst[i] for i,k in enumerate(datadict.keys())}
+            else:
+                lstmap = {k:'-' for i,k in enumerate(datadict.keys())}
         elif type(lstmap) is str:
             lstmap = {k:lstmap for k in datadict}
         if ylabel is not  None:
@@ -1669,10 +1683,18 @@ class plotter():
         fig,ax=plt.subplots(figsize=figsize,dpi=dpi)
         plt.minorticks_on()
         plt.tick_params(direction='in', which='minor',length=size*1.5)
-        plt.tick_params(direction='in', which='major',length=size*3)
+        if minorxticks is not None:
+            plt.tick_params(direction='in',axis='x', which='minor',length=size*minorxticks)
+        if minoryticks is not None:
+            plt.tick_params(direction='in',axis='y', which='minor',length=size*minoryticks)
+            
+        plt.tick_params(direction='in', which='major',length=size*2)
         plt.xticks(fontsize=2.5*size) 
         plt.yticks(fontsize=2.5*size) 
-        
+        if xticks is not None:
+            plt.xticks(xticks,fontsize=2.5*size) 
+        if yticks is not None:
+            plt.yticks(yticks,fontsize=2.5*size) 
         if xscale =='log':
             plt.xscale('log')
         if yscale is not None:
@@ -1697,21 +1719,24 @@ class plotter():
                 locmin = matplotlib.ticker.LogLocator(base=10.0,subs=np.arange(0.1,1,0.1),numticks=12)
                 ax.yaxis.set_minor_locator(locmin)
                 ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                plt.ylim([min(yticks),max(yticks)])
             else:
                 plt.ylim(ylim)
                 
         if title is not None:
-            plt.title(r'{:s}'.format(title))
+            plt.title(r'{:s}'.format(title),fontsize=3.2*size)
         plt.xlabel(xlabel,fontsize=3*size)
         plt.ylabel(ylabel,fontsize=3*size)
-
+        
         for i,(k,dy) in enumerate(datadict.items()):
-            x = dy[xaxis]
-            y = dy[yaxis]
+            x = np.array(dy[xaxis])
+            y = np.array(dy[yaxis])
             t = x<=cutf[k]
             x = x[t]
             y = y[t]
-        
+            if moving_average is not None:
+                if extra_line == False:
+                    y = ass.moving_average(y,moving_average)
             if num == 'all':
                 args = np.arange(0,x.shape[0],dtype='i')
             else:
@@ -1723,10 +1748,18 @@ class plotter():
                 label=labmap[k], markersize=size*markersize,fillstyle='none',
                 color=cmap[k])
             elif style=='lines':
-                plt.plot(x[args],y[args],ls=lstmap[k],lw=size/1.5,
+                plt.plot(x[args],y[args],ls=lstmap[k],lw=size*lw,
                 label=labmap[k],color=cmap[k])
+            elif style=='linepoints':
+                plt.plot(x[args],y[args],ls=lstmap[k],lw=size*lw,
+                marker = pmap[k],markeredgewidth=edgewidth*size,
+                label=labmap[k], markersize=size*markersize,fillstyle='none',
+                color=cmap[k])
             else:
                 raise NotImplementedError('Implement here you own plotting style. Use elif statement')
+            if extra_line and moving_average is not None:
+                y = ass.moving_average(y,moving_average)
+                plt.plot(x[args],y[args],ls='-',lw=size*lw,color=cmap[k])
             if fits is not None:
                 dy = fits[k]
                 xf = dy[xaxis]
@@ -3553,6 +3586,126 @@ class unit_vector_Functions():
         uv = np.ones((r.shape[0],3))
         uv[:,2] = 0
         return uv
+    
+    
+class add_sudo_atoms:
+    def __init__(self,obj1,num,sigma,frame=0,sep_dist=3.0,decrease_rate=0.9,positions=None):
+        self.obj1 = obj1
+        self.nsudos = num
+        self.sigma = sigma
+        self.frame = frame
+        self.sep_dist = sep_dist
+        self.decrease_rate = decrease_rate
+        self.grid = self.d3grid()
+        if positions is None:
+            self.find_positions()
+        else:
+            self.positions = positions
+        self.update_topology()
+        return
+    def d3grid(self):
+        # from long to short 
+        boxsort = self.obj1.get_box(self.frame).argsort()[::-1]
+        grid = np.array([0,0,0])
+        i=0
+        while grid.prod() < self.nsudos:
+            j = i%3
+            grid[j]+=1
+            i+=1
+        grid[(j+1)%3]+=1
+        return grid[boxsort]
+    @property
+    def position_distances_nonperiodic(self):
+        dists = []
+        box = self.obj1.get_box(self.frame)
+        for i,c1 in enumerate(self.positions):
+            c2 = self.positions[i+1:]
+            r = c2-c1
+            d = np.sum(r*r,axis=1)*0.5
+            dists.extend(d)
+        return np.array(dists)
+    @property
+    def position_distances(self):
+        dists = []
+        box = self.obj1.get_box(self.frame)
+        for i,c1 in enumerate(self.positions):
+            c2 = self.positions[i+1:]
+            d = React_two_systems.minimum_image_distance(c2,c1,box)
+            dists.extend(d)
+        return np.array(dists)
+   
+    def find_positions(self):
+        self.separation_positions()
+        return
+    
+    def random_positions(self):
+        box = self.obj1.get_box(self.frame)
+        self.positions = np.random.uniform([0,0,0],box,(self.nsudos,3))
+        return
+    
+    def separation_positions(self):
+        box = self.obj1.get_box(self.frame)
+        sudo_coords = []
+        sep_dist = self.sep_dist
+        for jadd in range(self.nsudos):
+            accepted = False
+            jfailed=0
+            while not accepted:
+                pos = np.random.uniform([0,0,0],box)
+                if len(sudo_coords) ==0:
+                    accepted = True
+                else:
+                    c_comp = np.array(sudo_coords)
+                    dists = React_two_systems.minimum_image_distance(c_comp,pos,box)
+                    if not (dists > sep_dist).all():
+                        jfailed +=1
+                    else:
+                        accepted = True
+                if jfailed>=30:
+                    jfailed =0
+                    print(' separation distance {:4.3f} too big for sudo atom {:d}. Reducing to {:4.3f}'.format(
+                            sep_dist,jadd,sep_dist*self.decrease_rate))
+                    sep_dist *=self.decrease_rate
+                    
+                    
+                
+            sudo_coords.append(pos)
+        self.positions = np.array(sudo_coords)
+        return 
+    
+    def uniform_positions(self):
+        box = self.obj1.get_box(self.frame)
+        dx,dy,dz = box/self.grid
+        gx,gy,gz = int(self.grid[0]), int(self.grid[1]), int(self.grid[2]) 
+        positions = []
+        num =0
+        for i in range(gx):
+            x = (i+1)*dx/2
+            for j in range(gy):
+                y = (j+1)*dy/2
+                for k in range(gz):
+                    if num>= self.nsudos:
+                        break
+                    z = (k+1)*dz/2
+                    positions.append(np.array([x,y,z]))
+                    num+=1
+
+        self.positions = np.array(positions)
+        
+        return
+    
+    def update_topology(self):
+        box = self.obj1.get_box(self.frame)
+        timeframes = {0:{'coords':self.positions,'boxsize':box,'time':0,'step':0}}
+        natoms = self.positions.shape[0]
+        ty = 'SUDO'
+        tyff = {ty:(ty,'10000.000','0.0','A','0.01','1E-06')}
+        obj2 = Topology(natoms,at_types=ty,atom_code=ty,timeframes=timeframes,atomtypes=tyff)
+        self.obj2 = obj2
+        self.obj1.merge_system(self.obj2)
+      
+        return
+
 
 
 class React_two_systems:
@@ -3560,8 +3713,11 @@ class React_two_systems:
     def __init__(self,obj1,obj2,bb1,bb2,react1=0,react2=0,
                  rcut=3.5,method='breakBondsMerge',
                  frame=0,seed1=None,seed2=None,
-                 morse_bond=(100,0.15,5),morse_overlaps=(1e-3,0.4,15),
-                 maptypes=dict(),updown_method=None):
+                 morse_bond=(100,0.16,2),morse_overlaps=(0.2,5),use_bounds=True,bound_types=None,
+                 maptypes=dict(),updown_method=None,cite_method='random',cite_method_kwargs=dict()):
+        self.cite_method = cite_method
+        for k,v in cite_method_kwargs.items():
+            setattr(self,k,v)
         self.obj1 = obj1
         self.obj2 = obj2
         self.seed1 = seed1
@@ -3579,7 +3735,9 @@ class React_two_systems:
         self.maptypes = maptypes
         self.morse_bond = morse_bond
         self.morse_overlaps = morse_overlaps
-        
+        self.bound_types = bound_types
+        self.set_bounds()
+        self.use_bounds = use_bounds
         if method == 'breakBondsMerge':
             self.break_bonds()
             
@@ -3591,6 +3749,7 @@ class React_two_systems:
             self.place_obj2()
             
             natoms1 = self.obj1.natoms
+            self.obj2.mol_names[:] = self.obj1.mol_names[0]
             self.obj1.merge_system(self.obj2)
             
             
@@ -3615,6 +3774,35 @@ class React_two_systems:
         else:
             raise NotImplementedError('There is no such method as "{:s}"'.format(method))
         return
+    def set_bounds(self):
+        coords = self.obj1.get_coords(0)
+        if self.bound_types is not None:
+            if type(self.bound_types) is list:
+                f = np.isin(self.obj1.at_types,self.bound_types)
+            elif type(self.bound_types) is str:
+                f = self.obj1.at_types == self.bound_types
+            else:
+                raise ValueError('bound_types must be string or list')
+            coords = coords[f]
+        mxz = coords[:,2].max()
+        miz = coords[:,2].min()
+        self.bounds_z =(miz,mxz)
+        return 
+    
+    def break_bonds(self):
+        #remove product
+        if self.react1 ==1:
+            rbb1 = (self.break_bondid1[1],self.break_bondid1[0])
+        else:
+            rbb1 = self.break_bondid1
+        if self.react2 ==1:
+            
+            rbb2 = (self.break_bondid2[1],self.break_bondid2[0]) 
+        else:
+            rbb2 = self.break_bondid2
+        self.radicals1 = self.remove_trails(self.obj1,*rbb1)
+        self.radicals2 = self.remove_trails(self.obj2,*rbb2)
+        return
     def refine_charge(self):
         id1 = self.reacted_id1
         id2 = self.reacted_id2
@@ -3622,11 +3810,10 @@ class React_two_systems:
         ty1 = self.obj1.at_types[id1]
         ty2 = self.obj1.at_types[id2]
         for t,i in zip([ty1,ty2],[id1,id2]):
-            newc = self.obj1.charge_map[t] - tch
-            self.obj1.charge_map[t] = newc 
+            newc = self.obj1.atom_charge[i] - tch   
             self.obj1.atom_charge[i] = newc
             val = np.array(self.obj1.ff.atomtypes[t])
-            val[1] = str(newc)
+            val[2] = str(newc)
             self.obj1.ff.atomtypes[t] = tuple(val)
         totc = self.obj1.total_charge
         if abs(totc)>1e-10:
@@ -3634,7 +3821,7 @@ class React_two_systems:
 
         return 
     def change_type(self,at_id):
-        from copy import copy
+        #from copy import copy
         
         ty = self.obj1.at_types[at_id]
         if ty in self.maptypes:
@@ -3642,10 +3829,7 @@ class React_two_systems:
         else:
             newty = self.obj1.at_types[at_id] +'R'
         self.obj1.at_types[at_id] = newty
-        
-        self.obj1.charge_map[newty] = copy(self.obj1.charge_map[ty])
-        
-        self.obj1.mass_map[newty] = copy(self.obj1.mass_map[ty])
+        self.obj1.atom_code[at_id] = newty
         
         for attr_name in ['connectivity','angles','dihedrals']:
             attr = getattr(self.obj1,attr_name)
@@ -3668,11 +3852,19 @@ class React_two_systems:
                     arr[i] = newty
                     ty_new  = tuple(arr)
                     logger.debug('made type {} same as  {}'.format(k,newty))
-                    attr[ty_new] = copy(attr[k])
+                    val = list(attr[k])
+                    
+                    code = '  '.join(ty_new)
+                    val[0] = code
+                    attr[ty_new] = tuple(val)
                     #del attr[k]
-        self.obj1.ff.atomtypes[newty] = copy(self.obj1.ff.atomtypes[ty])
+            #setattr(self.obj1.ff,attr_name,attr)
+        val = list(self.obj1.ff.atomtypes[ty])
+        val[0] = newty
+        self.obj1.ff.atomtypes[newty] = tuple(val)
         #self.obj1.filter_ff()
         return 
+    
     def set_break_bond_id(self,prefix):
         obj = getattr(self,'obj'+prefix)
         bb = getattr(self,'bb'+prefix)
@@ -3686,7 +3878,7 @@ class React_two_systems:
         
         if type(bb[0]) is str and type(bb[1]) is str:
             if prefix =='1':
-                pm = 'absz_n'
+                pm = self.cite_method
             else:
                 pm = None
             bond_id  = self.find_random_bond_of_type(obj,bb,seed,react,pm)
@@ -3703,9 +3895,53 @@ class React_two_systems:
     
     @staticmethod
     def numb_of_neibs(c,ctot):
-        n = [np.sum(np.exp(-0.5/Distance_Functions.spherical_particle(None,ctot,c[i]))) for i in range(c.shape[0])]
+        n = [np.sum(np.exp(-(1/0.265)*Distance_Functions.spherical_particle(None,ctot,c[i]))) for i in range(c.shape[0])]
         return np.array(n)
+    
+    
     def find_random_bond_of_type(self,obj,bb,seed,idr,propmethod=None):
+        
+        def height(zf):
+            za = np.abs(zf)
+            zrel = za - za.min()
+            m = zrel.max()
+            prop = 1-np.exp(-5*m*zrel)
+            return prop
+        def neibs(cf,c):
+            prop = np.exp(-self.numb_of_neibs(cf,c))
+            return prop
+        def separation(nums):
+            sids = self.obj1.at_ids [self.obj1.at_types ==self.separation_type]
+            sep = False
+            jmax = self.obj1.natoms
+            j=0
+            set_nums = set(nums)
+            box = self.obj1.get_box(0)
+            ncites =0
+            while (sep==False):
+                if len(set_nums) ==0:
+                    self.separation_distance*=0.8
+                    set_nums = set(nums)
+                num = np.random.choice(list(set_nums))
+                
+                cre = c[ids[num]]
+                c_comp = c[sids]
+                
+                dists = self.minimum_image_distance(c_comp,cre,box)
+
+                if (dists< self.separation_distance).any():
+                    #print('cite {:d} to close'.format(ids[num]))
+                    ncites+=1
+                    sep = False
+                else:
+                    print('# of Failed cites = {:d},  cite {:d} ok'.format(ncites,ids[num]))
+                    sep = True
+                set_nums.remove(num)
+                j+=1
+                if j>jmax:
+                    raise Exception('infinite while loop')
+            return num
+        
         np.random.seed(seed)
         
         bbids = ass.numpy_keys(obj.connectivity)
@@ -3716,17 +3952,14 @@ class React_two_systems:
         bids = bbids[f]
         nums = np.arange(0,bids.shape[0],1,dtype=int)
         ids = bids[:,idr]
-        if propmethod =='absz_n':
-            
-            c = obj.get_coords(0).copy()
-            z = c[:,2]
-            
+        c = obj.get_coords(0).copy()
+        z = c[:,2]
+        if propmethod is not None:
             z = z[ids]
             zm = np.sum(z)/z.shape[0]
             z -= zm
-            
             if self.updown_method =='random':
-                
+                    
                 updown = np.random.choice([True,False]) 
             else:
                 if not hasattr(self.obj1,'updown'):
@@ -3735,30 +3968,99 @@ class React_two_systems:
                 updown = self.obj1.updown
             if updown:
                 fz = z>0
-                zf = z[fz]
             else:
                 fz = z<0
-                zf = z[fz]
-            za = np.abs(zf)
-            zrel = za - za.min() + 1e-14
-            propz = np.exp(-0.5/zrel)
-            prop_neibs = 1.0/self.numb_of_neibs(c[ids][fz],c)
-            prop = propz*prop_neibs
             
-            propnorm = prop/np.sum(prop)
-
-            num = np.random.choice(nums[fz],p=propnorm)
-            #print(z[nums[fz][num]])
+            nums = nums[fz]
+            zf = z[fz]
         else:
             num = np.random.choice(nums)
-        np.random.seed(None)
+            return tuple(bids[num])
+        print(propmethod)
+         
+        if propmethod=='random':
+            num =  np.random.choice(nums)
+        elif propmethod =='height':
+            prop = height(zf)
+        elif propmethod=='neibs':
+            prop = neibs(c[ids][fz],z)
+        elif propmethod =='height_neibs':
+            prop = neibs(c[ids][fz],z)*height(zf)
+        elif propmethod =='separation_distance':
+            num = separation(nums)
+            return tuple(bids[num])
+        elif propmethod =='uniform':
+            self.initial_separation_distance = self.separation_distance
+            grid_x,grid_y = self.grid
+            box = self.obj1.get_box(0)
+            Lx = box[0]
+            Ly = box[1]
+            dLx = Lx/grid_x
+            dLy = Ly/grid_y
+            areas = [(i,j,u) for i in range(grid_x) for j in range(grid_y) for u in [0,1]]
+            if not hasattr(self.obj1,'filled_areas'):
+                self.obj1.filled_areas = {k:0 for k in areas}
+            if updown:
+                kselect=(0,0,1)
+                areas = {k:v for k,v in self.obj1.filled_areas.items() if k[2] == 1}
+            else:
+                kselect=(0,0,0)
+                areas = {k:v for k,v in self.obj1.filled_areas.items() if k[2] == 0}
+            for k,v in areas.items():
+                if v < areas[kselect]:
+                    kselect = k
+            same = []
+            for k,v in areas.items():
+                if v == areas[kselect]:
+                    same.append(k)
+            kselect = same[ np.random.choice(np.arange(0,len(same),1,dtype=int)) ]
+            #print(kselect)
+            cids = c[ids,:][fz]
+            cx = cids[:,0]
+            cy = cids[:,1]
+            kx = kselect[0]
+            ky = kselect[1]
+            fx = np.logical_and(kx*dLx < cx, cx <= (kx+1)*dLx)
+            fy = np.logical_and(ky*dLy < cy, cy <= (ky+1)*dLy)
+            f = np.logical_and(fx,fy)
+            
+            self.obj1.filled_areas[kselect]+=1
+            #print(self.obj1.filled_areas)
+            num = separation(nums[f])
+            #print(self.obj1.at_types[bids[num]])
+            self.separation_distance = self.initial_separation_distance
+            return tuple(bids[num])
+                
+        else:
+           raise ValueError('There is no method name  as {:s}'.format(propmethod))
         
+        prop/=prop.sum()
+        num = np.random.choice(nums,p=prop)
         bond_id = tuple(bids[num])
         return bond_id
-    
     @staticmethod
     @jit(nopython=True,fastmath=True,parallel=True)
     def minimum_image_distance(coords,cref,box):
+            r = coords - cref
+           
+            for j in range(3):
+                b = box[j]
+                b2 = b/2
+                fm = r[:,j] < - b2
+                fp = r[:,j] >   b2
+                r[:,j][fm] += b
+                r[:,j][fp] -= b
+            d = np.zeros(r.shape[0],dtype=float)
+            for i in prange(r.shape[0]):
+                for j in range(3):
+                    x = r[i,j]
+                    d[i] += x*x
+                d[i] = np.sqrt(d[i])
+            
+            return d
+    @staticmethod
+    @jit(nopython=True,fastmath=True,parallel=True)
+    def minimum_image_distance_coords(coords,cref,box):
             r = coords - cref
             imag_coords = coords.copy()
             for j in range(3):
@@ -3785,7 +4087,7 @@ class React_two_systems:
     def find_reaction_neibhour_coords(coords,cref,box,rcut):
 
        
-        d,imag_coords =  React_two_systems.minimum_image_distance(coords,cref,box)
+        d,imag_coords =  React_two_systems.minimum_image_distance_coords(coords,cref,box)
         reaction_neibs = imag_coords[d<rcut]
         return reaction_neibs
     
@@ -3824,26 +4126,15 @@ class React_two_systems:
         
         return free_radicals
     
-    def break_bonds(self):
-        #remove product
-        if self.react1 ==1:
-            rbb1 = (self.break_bondid1[1],self.break_bondid1[0])
-        else:
-            rbb1 = self.break_bondid1
-        if self.react2 ==1:
-            
-            rbb2 = (self.break_bondid2[1],self.break_bondid2[0]) 
-        else:
-            rbb2 = self.break_bondid2
-        self.radicals1 = self.remove_trails(self.obj1,*rbb1)
-        self.radicals2 = self.remove_trails(self.obj2,*rbb2)
-        return
-    
     @staticmethod
     @jit(nopython=True,fastmath=True)
     def morse(r,De,re,alpha):
         return De*(np.exp(-2*alpha*(r-re))-2*np.exp(-alpha*(r-re)))
     
+    @staticmethod
+    @jit(nopython=True,fastmath=True)
+    def morse_rep(r,re,alpha):
+        return np.exp(-alpha*(r-re))
     @staticmethod
     def cost_overlaps(vector_n_angles,creact1,id2,coords_neib_obj1,coords_obj2,
                       morse_bond,morse_overlaps):
@@ -3852,15 +4143,15 @@ class React_two_systems:
         # distance of reaction bond
         refdist = RotTrans.distance(creact1,ctr[id2])
         
-        f = React_two_systems.morse
-        
+        f1 = React_two_systems.morse
+        f2 = React_two_systems.morse_rep
         d = [Distance_Functions.spherical_particle(None, coords_neib_obj1, c)
              for i,c in enumerate(ctr) if i!=id2]
         d =np.array(d)# shape ctr.shape[0]
-        return  f(refdist,*morse_bond) + np.sum(f(d,*morse_overlaps))
+        return  f1(refdist,*morse_bond) + np.sum(f2(d,*morse_overlaps))
 
     def place_obj2(self):
-        t0 = perf_counter()
+        #t0 = perf_counter()
         frame = self.frame  
         coords_obj2 = self.obj2.get_coords(frame)
         coords_obj1 = self.obj1.get_coords(frame)
@@ -3875,7 +4166,7 @@ class React_two_systems:
         
         coords_neibs_obj1 = self.find_reaction_neibhour_coords(coords_obj1,creact1,box,self.rcut)
         
-        bounds= [(-m,m) for m in box] + [(-np.pi,np.pi)]*3
+        bounds= [(-m/2,m/2) for m in box] + [(-np.pi,np.pi)]*3
                 
         arguments = (creact1,self.react_id2,
                      coords_neibs_obj1,coords_obj2,
@@ -3908,9 +4199,22 @@ class React_two_systems:
         self.opt_res = opt_res
         self.p = opt_res.x
         
-        self.obj2.timeframes[frame]['coords'] = RotTrans.trans_n_rot(self.p,coords_obj2)
-        tf = perf_counter()-t0
-        print('time of placing object = {:.3e} sec'.format(tf))
+        new_coords = RotTrans.trans_n_rot(self.p,coords_obj2)
+        
+        miz = new_coords[:,2].min()
+        mxz = new_coords[:,2].max()
+        bz = self.bounds_z
+        between_bounds = bz[0] <= 0.5*(miz+mxz) <= bz[1]
+        if self.use_bounds and  between_bounds:
+            self.morse_overlaps = (self.morse_overlaps[0]*2,self.morse_overlaps[1]/2)
+            print('Min z surf = {:4.3f} Max z surf = {:4.3f}\n Min placement {:4.3f} Max placement {:4.3f}'.format(*bz,miz,mxz))
+            print('refining placement')
+            self.place_obj2()
+            return 
+        else:
+            self.obj2.timeframes[frame]['coords'] = new_coords
+        #tf = perf_counter()-t0
+        #print('time of placing object = {:.3e} sec'.format(tf))
         return 
   
 class RotTrans:
@@ -3987,63 +4291,50 @@ class RotTrans:
         return cr+rotref
 
 
-        
 
-class Analysis():
-    '''
-    The mother class. It's for simple polymer systems not confined ones
-    '''
-    def __init__(self,
-                 topol_file, # gro/trr/ltop for now
-                 connectivity_info, #itp #ltop
-                 memory_demanding=False,
-                 **kwargs):
-        '''
-        'connectivity_file': itp or list of itps. From the bonds it finds angles and dihedrals
-        'gro_file': one frame gro file to read the topology (can be extended to other formats). It reads molecule name,molecule id, atom type
-        memory_demanding: If True each time we loop over frames, these are readen from the disk and are not stored in memory
-        types_from_itp: if different types excist in itp and gro then the itp ones are kept
-        '''
-        #t0 = perf_counter()
-        self.topol_file = topol_file
-        self.connectivity_info = connectivity_info
-        self.connectivity_file = connectivity_info
-        self.kwargs = kwargs
-        self.memory_demanding = memory_demanding
-        self.timeframes = dict()
-        if 'types_from_itp' in kwargs:
-            self.types_from_itp = kwargs['types_from_itp']
-        else:
-            self.types_from_itp = True
+class Topology:
+    def __init__(self,natoms,at_types='ATOP',atom_code='ATOP',mol_ids=1,mol_names='MTOP',
+                 atom_charge=0.0,atom_mass=10.0,timeframes= dict(),neibs=dict(),
+                 connectivity=dict(),angles=dict(),dihedrals=dict(),pairs=dict(),exclusions=dict(),
+                 atomtypes=dict(),bondtypes=dict(),angletypes=dict(),dihedraltypes=dict(),
+                 ):
+        self.at_ids = np.arange(0,natoms,1,dtype='i')
+        self.ff = self.FFparams()
+        defaults_str = ['at_types','mol_names','atom_code']
+        defaults_int = ['mol_ids']
+        defaults_float = ['atom_charge','atom_mass']
+        update_defaults = ['timeframes','neibs','connectivity','angles','dihedrals','pairs','exclusions']
+        update_ff_defaults = ['atomtypes','bondtypes','angletypes','dihedraltypes']
+        
+        for a in defaults_str:
+            setattr(self,a,np.empty(natoms,dtype=object))
+        for a in defaults_int:
+            setattr(self,a,np.empty(natoms,dtype=int))
+        for a in defaults_float:
+            setattr(self,a,np.empty(natoms,dtype=float))
+        
+        if mol_ids is not None:
+            self.mol_ids[:] = mol_ids
+        if atom_code is not None:
+            self.atom_code[:] = atom_code
+        if mol_names is not None:
+            self.mol_names[:] = mol_names
+        if at_types is not None:
+            self.at_types[:] = at_types
+        
+        if atom_charge is not None:
+            self.atom_charge[:] = atom_charge
+        if atom_mass is not None:
+            self.atom_mass[:] = atom_mass
 
-        self.read_topology()
-        
-        if 'types_map' in kwargs:
-            self.map_types(kwargs['types_map'])
-        if 'key_method' not in kwargs:
-            self.key_method = 'get_timekey'
-        else:
-            self.key_method = 'get_' + kwargs['key_method'] + 'key'
-        
-        if 'round_dec' not in kwargs:
-            self.round_dec = 7
-        else:
-            self.round_dec = kwargs['round_dec']
-        False_defaults = ['refine_dihedrals','refine_angles']
-        for nm in False_defaults:
-            if nm not in kwargs:
-                setattr(self,nm,False)
-            else:
-                setattr(self,nm,kwargs[nm])
-        
-        self.topology_initialization()
- 
-        self.timeframes = dict() # we will store the coordinates,box,step and time here
-        
-        #tf = perf_counter()-t0
-        #ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        
-        return 
+   
+        for a in update_defaults:
+            d = locals()[a]
+            setattr(self,a,d)
+        for a in update_ff_defaults:
+            d = locals()[a]
+            setattr(self.ff,a,d)
+        return
     
     class FFparams():
         def __init__(self):
@@ -4052,181 +4343,14 @@ class Analysis():
             self.angletypes = dict()
             self.dihedraltypes = dict()
             return
-
-    def get_chem_per_molecule(self,chem):
-        cad = ['connectivity','angles','dihedrals']
-        if chem not in cad:
-            raise ValueError('chem value must be one of {}'.format(cad))
-        else:
-            data = getattr(self,chem) 
-        bpm = dict()
-        for j in np.unique(self.mol_ids):
-            bpm[j] = []
-            at_ids = self.at_ids[self.mol_ids==j]
-            for c in data:
-                if np.isin(c,at_ids).all():
-                    bpm[j].append(c)
-        return bpm
-    
-    def write_itp(self,mols,path,nexcl=2):
-        conpm = self.get_chem_per_molecule('connectivity')
-        angpm = self.get_chem_per_molecule('angles')
-        dihpm = self.get_chem_per_molecule('dihedrals')
-        for k in mols:
-            num = mols[k]
-            if path !='':
-                fname = '{:s}/{:s}.itp'.format(path,k)
-            else:
-                fname ='{:s}.itp'.format(k)
-                
-            lines = ['; generated by md_analysis library', '','']
-            lines.extend(['','[ moleculetype ]', '; molname      nrexcl'])
-            lines.append('{:5s}    {:1d}'.format(k,2))
-            lines.extend(['','[ atoms ]',';id atype resnr  resname atname cgnr'])
-            s = 1
-            mol_id = self.mol_ids[k==self.mol_names][0]
-            ids_mol = self.at_ids[mol_id==self.mol_ids]
-            for j,a in enumerate(self.at_ids[mol_id == self.mol_ids]):
-                ty = self.at_types[a]
-                mid = self.mol_ids[a]
-                mn = self.mol_names[a]
-                line = '{:5d}  {:5s}  {:5d}  {:5s}  {:5s}  {:5d}'.format(j+s,ty,mid,mn,ty,j+s)
-                lines.append(line)
-            lines.extend(['','[ bonds ]',';ai   aj  func'])
-            for c in conpm[mol_id]:
-                func = self.ff.bondtypes[self.connectivity[c]][0]
-                
-                lines.append('{:5d}  {:5d}   {:}'.format(c[0]+s,c[1]+s,func))
-            lines.extend(['','[ angles ]',';ai   aj   ak func'])
-            for c in angpm[mol_id]:
-                func = self.ff.angletypes[self.angles[c]][0]
-                lines.append('{:5d}  {:5d}  {:5d}   {:}'.format(c[0]+s,c[1]+s,c[2]+s,func))
-            lines.extend(['','[ dihedrals ]','; improper ai   aj   ak   al  func'])
-            lines.extend(['','[ dihedrals ]','; proper ai   aj   ak   al  func'])
-            for c in dihpm[mol_id]:
-                
-                func = self.ff.dihedraltypes[self.dihedrals[c]][0]
-                lines.append('{:5d}  {:5d}  {:5d}  {:5d}    {:}'.format(c[0]+s,c[1]+s,c[2]+s,c[3]+s,func))
-            lines.append('')
-            with open(fname,'w') as f:
-                for line in lines:
-                    f.write('{:s}\n'.format(line))
-                f.close()
-            return
-    def write_topfile(self,fname,nbfunc='1',combrule='2',
-                      genpairs='no',fudgeLJ='1.0',fudgeQQ='1.0',
-                      nexcl=2):
-        if fname[:-4]!='.top': fname += '.top'
-        lines = ['; generated by md_analysis library']
-        lines.extend(['','','[ defaults ]',
-                      '; nbfunc       comb-rule      gen-pairs      fudgeLJ   fudgeQQ'])
-        lines.append('            '.join([str(nbfunc),str(combrule),str(genpairs),str(fudgeLJ),str(fudgeQQ)]))
-        lines.extend(['','[ atomtypes ]'])
-        lines.append('; type  mass    charge  ptype   sig     eps')
-        def jt(k):
-            return '  '.join([str(i) for i in k])
-        for k,v in self.ff.atomtypes.items():
-            lines.append('{:5s}  {:9.6f}  {:9.6f}  {:5s}  {:9.6f} {:9.6f}'.format(
-                k,float(v[0]),float(v[1]),v[2],float(v[3]),float(v[4])))
-        lines.extend(['','[ bondtypes ]',';  i     j   func    b0    kb'])
-        for k,v in self.ff.bondtypes.items():
-            lines.append('{:5s}  {:5s}  {:1d}  {:9.6f}  {:9.6f}'.format(k[0],k[1],int(v[0]),float(v[1]),float(v[2])))
-        lines.extend(['','[ angletypes ]','; i    j    k func       th0         cth'])
-        for k,v in self.ff.angletypes.items():
-            lines.append('{:5s}  {:5s}  {:5s}  {:1d}  {:9.6f}  {:9.6f}'.format(k[0],k[1],k[2],int(v[0]),float(v[1]),float(v[2])))
-        
-        lines.extend(['','[ dihedraltypes ]','; i   j  k   l'])
-        for k,v in self.ff.dihedraltypes.items():
-            l = '   '.join(v)
-            lines.append('{:5s}  {:5s}  {:5s}  {:5s}  {:s}'.format(k[0],k[1],k[2],k[3],l))
-        
-        mols = dict()
-        for nm in np.unique(self.mol_names):
-            mols[nm] = np.unique(self.mol_ids[nm == self.mol_names]).shape[0]
-        if '/' in fname:
-            path = '/'.join(fname.split('/')[:-1])
-        else:
-            path = ''
-        self.write_itp(mols,path,nexcl)
-        
-        for k in mols:
-            lines.append('#include "{:s}.itp"'.format(k))
-        
-        lines.extend(['','[ system ]',fname.split('.')[0]])
-        
-        lines.extend(['','[ molecules ]',';molecule name number'])
-        for k,v in mols.items():
-            lines.append('   '.join([k,str(v)]) )
-  
-        with open(fname,'w') as f:
-            for line in lines:
-                f.write('{:s}\n'.format(line))
-            f.close()
-        return 
-    def clean_dihedrals_on_ff(self):
-        nonex = self.nonexisting_types('dihedral')
-        new_dihs = dict()
-        for k,v in self.dihedrals.items():
-            if v not in nonex:
-                new_dihs[k] = v
-        self.dihedrals=new_dihs
-        return
-    
-    def nonexisting_types(self,which,where='inff'):
-        listcheck = ['atom','bond','angle' ,'dihedral']
-        if which not in listcheck:
-            raise ValueError('give one of the following {}'.format(listcheck))
-            
-        attr = getattr(self.ff,which+'types')
-        data = getattr(self, which+'_types')
-        if where =='inff':
-            nonex = [k for k in data if k not in attr]
-        else:
-            nonex = [k for k in attr if k not in data]
-        return nonex
-    
-    def map_types(self,types_map):
-        for i in range(self.natoms):
-            self.at_types[i] = types_map[self.at_types[i]]
-        self.mass_map = {types_map[k]:v for k,v in self.mass_map.items()}
-        self.charge_map = {types_map[k]:v for k,v in self.charge_map.items()}
-        
-        return
-    
-    def topology_initialization(self,reinit=False):
-        '''
-        Finds some essential information for the system and stores it in self
-        like angles,dihedrals
-        Also makes some data manipulation that might be used later
-        '''
-        t0 = perf_counter()
-        ## We want masses into numpy array
-        if reinit:
-            self.connectivity = dict()
-            self.neibs = dict()
-            self.angles = dict()
-            self.dihedrals = dict()
-            self.find_locGlob()
-           # self.read_gromacs_topology()
-        self.find_masses()
-        self.find_charges()
-        #Now we want to find the connectivity,angles and dihedrals
-        
-        self.find_neibs()
-        self.find_angles()
-        self.find_dihedrals()
-        #Find the ids (numpy compatible) of each type and store them
-        
-        
-
-        self.dict_to_sorted_numpy('connectivity') #necessary to unwrap the coords efficiently
-        
-        self.find_args_per_residue(np.ones(self.mol_ids.shape[0],dtype=bool),'molecule_args')
-        self.find_args_per_residue(np.ones(self.mol_ids.shape[0],dtype=bool),'chain_args')
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-            
-        return
+        def add_posres(self,data):
+            if type(data) is list:
+                if type(data[0]) is not dict:
+                    raise Excepion('give prober informations see function documentation')
+            if type(data) is dict:
+                data = [data]
+            self.posres = data
+            return 
     @property
     def total_charge(self):
         return self.atom_charge.sum()
@@ -4236,7 +4360,7 @@ class Analysis():
     @property
     def inspect_system(self):
         names = ['at_ids','at_types','mol_ids',
-                 'mol_names','atom_charge','atom_mass']
+                 'mol_names','atom_charge','atom_mass','atom_code']
 
         return pd.DataFrame({ a:getattr(self,a) for a in names} )
             
@@ -4342,7 +4466,8 @@ class Analysis():
         with open(file,'r') as f:
             lines = f.readlines()
             f.closed
-        lookfor = ['atomtypes','bondtypes','angletypes','dihedraltypes','atoms','bonds','angles']
+        lookfor = ['atomtypes','bondtypes','angletypes','dihedraltypes',
+                   'atoms','bonds','angles','pairs','exclusions']
         nline = dict()
         un_at_types = np.unique(self.at_types)
         nt = un_at_types.shape[0]
@@ -4350,7 +4475,9 @@ class Analysis():
             l = line.strip().split('[')[-1].split(']')[0].strip()
             if l in lookfor:
                 nline[l] = i
+        
         #finding masses and charges
+        
         mass_map = dict()
         charge_map = dict()
         n = nline['atomtypes']+1
@@ -4365,6 +4492,15 @@ class Analysis():
             jt+=1
             if jt==nt:
                 break
+
+        self.read_itp_file(file,find_mass=mass_map,find_charge=charge_map)
+        self.local_to_global_topology()
+        
+        
+        self.atom_charge = self.find_with_typemap(charge_map)
+        self.atom_mass = self.find_with_typemap(mass_map)
+        #connectiviy
+        
         self.ff = self.FFparams()
         for name,jd in zip(['atomtypes','bondtypes','angletypes','dihedraltypes'],[1,2,3,4]):
             try:
@@ -4383,36 +4519,70 @@ class Analysis():
                         continue
                     if jd>1:
                         ty = self.sorted_type(l[:jd])
+                        value = (' '.join(ty),*l[jd:])
                     else:
-                        ty = l[0]
-                    value = tuple(l[jd:])
+                        if len(l) ==7:
+                            ty = l[1]
+                            value = (l[0],*l[jd:])
+                        else:
+                            ty=l[0]
+                            value = (ty,*l[jd:])
                     attr[ty] = value
                 setattr(self.ff,name,attr)
 
-        self.mass_map = mass_map
-        self.charge_map = charge_map
         
-        #connectiviy
-        
-        if 'bonds' in nline:
-            n= nline['bonds']+1
-            self.read_total_conangdih(lines[n:],'connectivity')
-        else:
-            self.connectivity = dict()
-        if 'angles' in nline:
-            n = nline['angles']+1
-            self.read_total_conangdih(lines[n:],'angles')
-            self.refine_angles = False
-        else:
-            self.angles = dict()
-        if 'dihedrals' in nline:
-            n = nline['dihedrals']+1
-            self.read_total_conangdih(lines[n:],'dihedrals')
-            self.refine_dihedrals = False
-        else:
-            self.dihedrals = dict()
         return
-    
+    def read_topfile_ff(self,file):
+        print('HERE')
+        with open(file,'r') as f:
+            lines = f.readlines()
+            f.closed
+        lookfor = ['atomtypes','bondtypes','angletypes','dihedraltypes']
+        nline = dict()
+
+        for i,line in enumerate(lines):
+            l = line.strip().split('[')[-1].split(']')[0].strip()
+            if l in lookfor:
+                nline[l] = i
+        
+        self.ff = self.FFparams()
+        for name,jd in zip(lookfor,[1,2,3,4]):
+            try:
+                n = nline[name]+1
+            except KeyError:
+                setattr(self.ff,name,dict())
+            else:
+                attr = dict()
+                for line in lines[n:]:
+                    if '[' in line or ']' in line:
+                        break
+                    if ';' in line:
+                        continue
+                    l = line.strip().split()
+                    if len(l)==0:
+                        continue
+                    if jd>1:
+                        ty = self.sorted_type(l[:jd])
+                        value = (' '.join(ty),*l[jd:])
+                    else:
+                        if len(l) ==7:
+                            ty = l[1]
+                            value = (l[0],*l[jd:])
+                        else:
+                            ty=l[0]
+                            value = (ty,*l[jd:])
+                    attr[ty] = value
+                    print(ty,value)
+                setattr(self.ff,name,attr)
+        return
+ 
+                
+    def find_with_typemap(self,usedmap):
+        first_element_type =  type(list(usedmap.values())[0])
+        arr = np.empty(self.natoms,dtype = first_element_type)
+        for i,ty in enumerate(self.at_types):
+            arr[i] = usedmap[ty]
+        return arr
     def read_total_conangdih(self,lines,c,sub=1):
         cad = dict()
         if c not in ['connectivity','angles','dihedrals']:
@@ -4464,8 +4634,17 @@ class Analysis():
         self.connectivity = dict()
         self.angles = dict()
         self.dihedrals = dict()
+        self.pairs = dict()
+        self.exclusions = dict()
         self.refine_angles = False
         self.refine_dihedrals = False
+        if not hasattr(self,'atom_charge'):
+            self.atom_charge = np.empty(self.natoms,dtype=float)
+        if not hasattr(self,'atom_mass'):
+            self.atom_mass = np.empty(self.natoms,dtype=float)
+        if not hasattr(self,'atom_code'):
+            self.atom_code = np.empty(self.natoms,dtype=object)
+        
         for j in np.unique(self.mol_ids):
             #global_mol_at_ids = self.at_ids[self.mol_ids==j]
             res_nm = np.unique(self.mol_names[self.mol_ids==j])
@@ -4473,9 +4652,18 @@ class Analysis():
             assert res_nm.shape ==(1,),'many names for a residue. Check code or topology file'
             
             res_nm = res_nm[0]
+            mol = self.molecule_map[res_nm]
+           
+            for i,idm in enumerate(mol['at_ids']):
+                id0 = self.loc_id_to_glob[j][i]
+                self.atom_charge[id0] = mol['charge'][i]
+                self.atom_mass[id0] = mol['mass'][i]
+                self.atom_code[id0] = mol['code'][i]
             local_connectivity = self.connectivity_per_resname[res_nm]
             local_angles = self.angles_per_resname[res_nm]
             local_dihedrals = self.dihedrals_per_resname[res_nm]
+            local_pairs =  self.pairs_per_resname[res_nm]
+            local_exclusions = self.exclusions_per_resname[res_nm]
             for b in local_connectivity:       
                 id0 = self.loc_id_to_glob[j][b[0]]
                 id1 = self.loc_id_to_glob[j][b[1]]
@@ -4494,7 +4682,16 @@ class Analysis():
                 id3 = self.loc_id_to_glob[j][d[3]]
                 d_id,d_t = self.sorted_id_and_type((id0,id1,id2,id3))
                 self.dihedrals[d_id] = d_t
-        
+            for p in local_pairs:       
+                id0 = self.loc_id_to_glob[j][p[0]]
+                id1 = self.loc_id_to_glob[j][p[1]]
+                conn_id,c_type = self.sorted_id_and_type((id0,id1))
+                self.pairs[conn_id] = c_type
+            for e in local_exclusions:       
+                id0 = self.loc_id_to_glob[j][e[0]]
+                id1 = self.loc_id_to_glob[j][e[1]]
+                conn_id,c_type = self.sorted_id_and_type((id0,id1))
+                self.exclusions[conn_id] = c_type
         return 
 
             
@@ -4520,8 +4717,16 @@ class Analysis():
             except KeyError:
                 pass
         return
-
-    def read_itp_file(self,file):
+    def identify_element(self,ty):
+        if ty[1:2].islower():
+            return ty[:2]
+        else:
+            return ty[:1]
+    @property
+    def attribute_names(self):
+        return list(self.__dict__.keys())
+    
+    def read_itp_file(self,file,find_mass=dict(),find_charge=dict()):
         t0 = perf_counter()
         
         with open(file,'r') as f:
@@ -4529,18 +4734,32 @@ class Analysis():
             f.closed
             
         # Reading atoms
-        jlines = {'atoms':set(),'bonds':set(),'angles':set(),'dihedrals':set()}
+        jlines = {'atoms':set(),'bonds':set(),'angles':set(),
+                  'dihedrals':set(),'moleculetype':set(),'pairs':set(),
+                  'exclusions':set()}
         for j,line in enumerate(lines):
             for k in jlines:
                 if k in line and '[' in line and ']' in line:
                     jlines[k].add(j)
-
+        mt = jlines['moleculetype']
+        exclusions_map = dict()
+        if len(mt) ==1:
+            for line in lines[list(mt)[0]+1:]:
+                if ';' in line:continue
+                if len(line.split()) ==0: continue
+                if '[' in line or ']' in line:
+                    break
+                
+                l = line.strip().split()
+                
+                exclusions_map[l[0]] = int(l[1])
         at_ids = [] ; res_num=[];at_types = [] ;res_name = [] ; cngr =[] 
-        charge_map = dict() ; mass_map=dict()
-        
+        code = [] ; charge = [] ; mass = []
+
         atomscode_map = dict()
         jli = list(jlines['atoms'])[0]
         i=0
+
         for line in lines[jli+1:]:
             l = line.split()
             try:
@@ -4555,13 +4774,26 @@ class Analysis():
                 t = l[4]
                 cngr.append(l[5])
                 atomscode_map[l[1]] = i
+                code.append(l[1])
                 at_types.append(t)
                 if nl >6:    
-                    charge_map[t] = float(l[6])
+                    charge.append( float(l[6]))
+                elif len(find_charge)==0:
+                    charge.append( 0.0 )
                 else:
-                    charge_map[t] = 0.0
+                    charge.append(find_charge[l[1]])
                 if nl>7:
-                    mass_map[t] = float(l[7])
+                    ms= float(l[7])
+                else:
+                    if len(find_mass)==0:
+                        try:
+                            ms = maps.elements_mass[self.identify_element(t)]
+                        except KeyError:
+                            ms = maps.elements_mass[self.identify_element(t[0])]
+
+                    else:
+                        ms = find_mass[l[1]]
+                mass.append(ms)
                 res_num.append(int(l[2]))
                 i+=1
             if '[' in line or ']' in line:
@@ -4571,27 +4803,43 @@ class Analysis():
         at_types = np.array(at_types)
         res_num = np.array(res_num) 
         res_name = np.array(res_name)
+        code = np.array(code)
+        charge = np.array(charge)
+        mass = np.array(mass)
+        
         cngr = np.array(cngr)
+        resnames = np.unique(res_name) 
+        f = {rn: res_name == rn for rn in res_name}
+        molecule_map = {rn : {'at_ids':at_ids[f[rn]],
+                              'at_types':at_types[f[rn]],
+                              'res_num':res_num[f[rn]],
+                              'res_name':res_name[f[rn]],
+                              'code':code[f[rn]],
+                              'charge':charge[f[rn]],
+                              'cngr':cngr[f[rn]],
+                              'mass':mass[f[rn]]} 
+                            for rn in resnames
+                            }
+        
+        if not hasattr(self,'molecule_map'):
+            self.molecule_map = molecule_map
+        else:    
+            self.molecule_map.update(molecule_map)
+        if not hasattr(self,'exclusions_map'):
+            self.exclusions_map = exclusions_map
+        else:    
+            self.exclusions_map.update(exclusions_map)
         if not hasattr(self,'atomscode_map'):
             self.atomscode_map = atomscode_map
         else:    
             self.atomscode_map.update( atomscode_map)
-        if not hasattr(self, 'charge_map'):
-            self.charge_map = charge_map
-        else:
-            for k,c in charge_map.items():
-                self.charge_map[k] = c
-        if not hasattr(self, 'mass_map'):
-            self.mass_map = mass_map
-        else:
-            for k,m in mass_map.items():
-                self.mass_map[k] = m
 
-        jd = {'bonds':2,'angles':3,'dihedrals':4}
-        topol =  {'bonds':[],'angles':[],'dihedrals':[]}
+
+        jd = {'bonds':2,'angles':3,'dihedrals':4,'pairs':2,'exlcusions':2}
+        topol =  {'bonds':[],'angles':[],'dihedrals':[],'pairs':[],'exclusions':[]}
 
             
-        for key in ['bonds','angles','dihedrals']:
+        for key in ['bonds','angles','dihedrals','pairs','exclusions']:
             for jli in jlines[key]:
                 ffd = dict()
                 for line in lines[jli+1:]:
@@ -4612,24 +4860,38 @@ class Analysis():
         
         try:
             bonds[0]
-        except ValueError as e:
+        except IndexError as e:
             logger.warning('Warning: File {:s} probably contains no bonds\n Excepted ValueError : {:}'.format(file,e))
-        sub = bonds.min()
+          
+        try:
+            sub = bonds.min()
+        except:
+            sub =1
         self.sub =sub
+        
         bonds -= sub
         angles = np.array(topol['angles']) - sub
         dihedrals = np.array(topol['dihedrals']) - sub
-        resnames = np.unique(res_name) 
+        pairs = np.array(topol['pairs']) - sub
+        exclusions = np.array(topol['exclusions']) - sub
+        
+        
+        
+        
+        
+        pairs_per_resname = {t:[] for t in resnames }
+        exclusions_per_resname = {t:[] for t in resnames }
         connectivity_per_resname = {t:[] for t in resnames }
         angles_per_resname = {t:[] for t in resnames }
         dihedrals_per_resname = {t:[] for t in resnames }
+        
         for b in bonds:
             i0 = np.where(at_ids == b[0])[0][0]
             i1 = np.where(at_ids == b[1])[0][0]
             assert res_name[i0] == res_name[i1], 'Bond {:d} - {:d} is between two different residues'.format(i0,i1)
-            
             res_nm = res_name[i0]
             connectivity_per_resname[res_nm].append(b)
+        
         for a in angles:
             i0 = np.where(at_ids == a[0])[0][0]
             i1 = np.where(at_ids == a[1])[0][0]
@@ -4638,6 +4900,7 @@ class Analysis():
             assert res_name[i0] == res_name[i2], 'Angle ids {:d} - {:d} is between two different residues'.format(i0,i2)
             res_nm = res_name[i0]
             angles_per_resname[res_nm].append(a)
+        
         for d in dihedrals:
             i0 = np.where(at_ids == d[0])[0][0]
             i1 = np.where(at_ids == d[1])[0][0]
@@ -4648,14 +4911,28 @@ class Analysis():
             assert res_name[i0] == res_name[i3], 'Dihedral ids {:d} - {:d} is between two different residues'.format(i0,i3)
             res_nm = res_name[i0]
             dihedrals_per_resname[res_nm].append(d)
-     
-        for c in ['connectivity','angles','dihedrals']:
+        
+        for p in pairs:
+            i0 = np.where(at_ids == p[0])[0][0]
+            i1 = np.where(at_ids == p[1])[0][0]
+            assert res_name[i0] == res_name[i1], 'Pair {:d} - {:d} is between two different residues'.format(i0,i1)   
+            res_nm = res_name[i0]
+            pairs_per_resname[res_nm].append(p)
+        for e in exclusions:
+            i0 = np.where(at_ids == e[0])[0][0]
+            i1 = np.where(at_ids == e[1])[0][0]
+            assert res_name[i0] == res_name[i1], 'Exclusion {:d} - {:d} is between two different residues'.format(i0,i1)   
+            res_nm = res_name[i0]
+            pairs_per_resname[res_nm].append(e)
+            
+        for c in ['connectivity','angles','dihedrals','pairs','exclusions']:
             name = c+'_per_resname'
             var  = locals()[name]
             if not hasattr(self,name):
                 setattr(self,name,var)
             else:
                 attr = getattr(self,name)
+                #updating
                 for t,bad in var.items():
                     attr[t] = bad
                 setattr(self,name,attr)
@@ -4671,13 +4948,14 @@ class Analysis():
             lines = f.readlines()
             f.closed
         nline = dict()            
-        lookfor = ['atomtypes','atoms','bonds','angles','dihedrals']
+        lookfor = ['atomtypes','atoms','bonds','angles','dihedrals','bondtypes','angletypes','dihedraltypes']
+        nline = {k:set() for k in lookfor}
         for j,line in enumerate(lines):
             for k in lookfor:
                 if k in line and '[' in line and ']' in line:
-                    nline[k] = j
+                    nline[k].add(j)
         residues = []
-        for line in lines[nline['atoms']+1:]:
+        for line in lines[list(nline['atoms'])[0]+1:]:
             if ';' in line :
                 continue
             l = line.strip().split()
@@ -4691,44 +4969,84 @@ class Analysis():
         if len(ures) != 1:
             raise ValueError('Residues in this itp file are not unique')
         
-        jd = {'atomtypes':1,'bonds':2,'angles':3,'dihedrals':4}
+        jd = {'atomtypes':1,'bondtypes':2,'angletypes':3,'dihedraltypes':4,'bonds':2,'angles':3,'dihedrals':4}
         names = {'atomtypes':'atomtypes','bonds':'bondtypes',
-                 'angles':'angletypes','dihedrals':'dihedraltypes'}
+                 'angles':'angletypes','dihedrals':'dihedraltypes',
+                 'bondtypes':'bondtypes','angletypes':'angletypes','dihedraltypes':'dihedraltypes'}
         mol_ids = self.mol_ids[self.mol_names==ures[0]]
-        for k in jd:            
+        
+        for k in ['atomtypes','bondtypes','angletypes','dihedraltypes']:            
             attr = dict()
             attr_name = names[k]
-            for j,line in enumerate(lines[nline[k]+1:]):
-                
-                if ';' in line: 
-                    continue
-                if '[' in line or ']' in line : break
-                l = line.strip().split()
-                
-                if len(l) ==0: continue
-            
-                if k =='atomtypes':
-                    if not hasattr(self.ff,'atomtypes'):
-                        self.ff.atomtypes = dict()
-                    aid = self.atomscode_map[l[0]]
-                    for res_id in np.unique(mol_ids): 
-                        a = self.loc_id_to_glob[res_id][aid]
-                        ty = self.at_types[a]
+            for nlin in list(nline[k]):
+                for j,line in enumerate(lines[nlin+1:]):
                     
-                        mass1 = self.mass_map[ty]
-                        mass2 = float(l[2])
-                        assert round(mass1,6) ==round(mass2,6),'mass1 = {:4.6f}  while mass2 = {:4.6f}'.format(mass1,mass2)  
-                        ch = self.charge_map[ty]
-                        val = (str(mass1),str(ch),*l[-3:])
-                        attr[ty] = val
+                    if ';' in line: 
+                        continue
+                    if '[' in line or ']' in line : break
+                    l = line.strip().split()
                     
-                else:#
+                    if len(l) ==0: continue
+                
+                    if k =='atomtypes':
+                        if not hasattr(self.ff,'atomtypes'):
+                            self.ff.atomtypes = dict()
+                        aid = self.atomscode_map[l[0]]
+                        for res_id in np.unique(mol_ids): 
+                            a = self.loc_id_to_glob[res_id][aid]
+                            ty = self.at_types[a]
+                            
+                            mass1 = self.atom_mass[a]
+                            mass2 = float(l[2]) if len(l) == 7 else float(l[1])
+                            assert round(mass1,6) == round(mass2,6),'mass1 = {:4.6f}  while mass2 = {:4.6f}'.format(mass1,mass2)  
+                            ch = self.atom_charge[a]
+                            code = self.atom_code[a]
+                            atyc = ty if self.bytype else code
+                            val = (atyc,str(mass1),str(ch),*l[-3:])
+                            attr[ty] = val
+                    elif k in ['bondtypes','angletypes','dihedraltypes']:
+                        tys = getattr(self,k.split('types')[0]+'_'+'types')
+                        for ty in tys:
+                            
+                            atyc = ty #if self.bytype else code
+                            val = ('  '.join(atyc),*l[jd[k]:])
+                            attr[ty] = val
+                       
+                    else:
+                        raise Exception('something wrong with naming. Check your code')
+                    ass.update_dict_in_object(self.ff, attr_name, attr)
+        for k in ['bonds','angles','dihedrals']:            
+            attr = dict()
+            attr_name = names[k]
+            for nlin in list(nline[k]):
+                for j,line in enumerate(lines[nlin+1:]):
+                    
+                    if ';' in line: 
+                        continue
+                    if '[' in line or ']' in line : break
+                    l = line.strip().split()
+                    
+                    if len(l) ==0: continue                            
                     aid =  tuple(int(i)-self.sub for i in l[:jd[k]])
-                    cid,ty = self.sorted_id_and_type(aid)
-                    
-                    val = tuple(l[jd[k]:])
-                    attr[ty] = val
-                ass.update_dict_in_object(self.ff, attr_name, attr)
+                    for res_id in np.unique(mol_ids):
+                        a = tuple(self.loc_id_to_glob[res_id][i] for i in aid)
+                        cid,ty = self.sorted_id_and_type(a)
+                        code = tuple(self.atom_code[i] for i in cid)
+                        atyc = ty if self.bytype else code
+                        try:
+                            default_val = getattr(self.ff,attr_name)[atyc]
+                        except KeyError:
+                            default_val = ( 'no default value check your code',)
+                        except AttributeError:
+                            default_val = ( 'not in {:s} check your code'.format(attr_name),)
+                        
+                        proposed_val = ('  '.join(atyc),*l[jd[k]:])
+                        if len(default_val)>len(proposed_val):
+                            val = default_val
+                        else:
+                            val = proposed_val
+                        attr[ty] = val
+                    ass.update_dict_in_object(self.ff, attr_name, attr)
         return 
     
     def read_topology(self):
@@ -4743,7 +5061,8 @@ class Analysis():
                     self.map_the_topology(self.connectivity_info)
                 else:
                     self.read_gromacs_topology() # reads your itp files to get the connectivity
-
+            if hasattr(self,'fftop'):
+                self.read_topfile_ff(self.fftop)
         elif '.ltop' == self.topol_file[-5:]:
             self.read_lammps_topol()
         else:
@@ -4885,13 +5204,7 @@ class Analysis():
         self.loc_id_to_glob = loc_id_to_glob
         self.glob_id_to_loc = glob_id_to_loc 
         return 
-    def charge_from_maps(self):
-        '''
-        Updates a dictionary which contains charges for elements from the maps class
-        '''
-        self.charge_map.update(maps.charge_map)
-        return
-    
+
     @property
     def natoms(self):
         return self.at_ids.shape[0]
@@ -4929,14 +5242,7 @@ class Analysis():
     def dihedral_types(self):
         return self.unique_values(self.dihedrals.values())
     
-    def find_charges(self):
-        
-        charge = np.empty(self.natoms,dtype=float)
-        for i in range(self.natoms):
-            charge[i] = self.charge_map[self.at_types[i]]
-        self.atom_charge = charge
-       
-        return
+
     def sorted_type(self,t):
         if t[0]<=t[-1]:
             t = tuple(t)
@@ -5051,6 +5357,7 @@ class Analysis():
         #tf = perf_counter()
         #ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return
+    
     def find_masses(self):
         
         mass = np.empty(self.natoms,dtype=float)
@@ -5113,7 +5420,7 @@ class Analysis():
         except Exception:
             return True
         self.timeframes[frame] = header
-        self.timeframes[frame]['boxsize'] = np.diag(data['box'])
+        self.timeframes[frame]['boxsize'] = np.diag(data['box']).copy()
         self.timeframes[frame]['coords'] = data['x']
         try:
             self.timeframes[frame]['velocities'] = data['v']
@@ -5337,14 +5644,19 @@ class Analysis():
             medata = getattr(obj.ff,name)
             ffdata.update(medata)
         
-    def merge_system(self,obj):
-        n = self.natoms
+    def update_topology(self,n,obj):
         self.connectivity.update( {(n+c[0],n+c[1]):t for c,t in obj.connectivity.items()} )
+        self.pairs.update( {(n+c[0],n+c[1]):t for c,t in obj.pairs.items()} )
+        self.exclusions.update( {(n+c[0],n+c[1]):t for c,t in obj.exclusions.items()} )
         #self.find_neibs()
         self.neibs.update({n+aid: {n+a for a in neibs} for aid,neibs in obj.neibs.items()} )
         self.angles.update( {(n+c[0],n+c[1],n+c[2]):t for c,t in obj.angles.items()} )
         self.dihedrals.update( {(n+c[0],n+c[1],n+c[2],n+c[3]):t for c,t in obj.dihedrals.items()} )
-        
+        return 
+    def merge_system(self,obj):
+        n = self.natoms
+
+        self.update_topology(n,obj)
        
         self.at_ids = np.concatenate((self.at_ids,obj.at_ids))
         self.at_types = np.concatenate((self.at_types,obj.at_types))
@@ -5352,6 +5664,7 @@ class Analysis():
         self.mol_names = np.concatenate((self.mol_names,obj.mol_names))
         self.atom_mass = np.concatenate((self.atom_mass,obj.atom_mass))
         self.atom_charge = np.concatenate((self.atom_charge,obj.atom_charge))
+        self.atom_code = np.concatenate((self.atom_code,obj.atom_code))
         for frame in self.timeframes:
             c1 = self.get_coords(frame)
             c2 = obj.get_coords(frame)
@@ -5360,12 +5673,10 @@ class Analysis():
         self.renumber_ids()
         
         self.renumber_residues()
+        self.find_locGlob()
         
-        self.charge_map.update(obj.charge_map)
-        self.mass_map.update(obj.mass_map)
         self.merge_ff(obj)
-        #if reinit:
-            #self.topology_initialization()
+
         return
     
     
@@ -5402,10 +5713,19 @@ class Analysis():
         m = self.old_to_new_ids
         
         for i in removed_ids:
-            del self.neibs[i]
+            try:
+                del self.neibs[i]
+            except KeyError:
+                pass
             for c in ass.numpy_keys(self.connectivity):
                 if i in c:
                     del self.connectivity[tuple(c)]
+            for c in ass.numpy_keys(self.pairs):
+                if i in c:
+                    del self.pairs[tuple(c)]
+            for c in ass.numpy_keys(self.exclusions):
+                if i in c:
+                    del self.exclusions[tuple(c)]
             for a in ass.numpy_keys(self.angles):
                 if i in a:
                     del self.angles[tuple(a)]
@@ -5415,6 +5735,8 @@ class Analysis():
                     
         
         self.connectivity = {(m[i[0]],m[i[1]]):t for i,t in self.connectivity.items() }
+        self.pairs = {(m[i[0]],m[i[1]]):t for i,t in self.pairs.items() }
+        self.exclusions = {(m[i[0]],m[i[1]]):t for i,t in self.exclusions.items() }
         self.find_neibs()
         self.angles = {(m[i[0]],m[i[1]],m[i[2]]):t for i,t in self.angles.items() }
         self.dihedrals = {(m[i[0]],m[i[1]],m[i[2]],m[i[3]]):t for i,t in self.dihedrals.items()}
@@ -5433,7 +5755,7 @@ class Analysis():
             for t in list(ffdata.keys()):
                 if t not in ty:
                     del ffdata[t]
-    
+        return 
     def filter_system(self,filt,reinit=False,filter_topology=True):
         
         otn = dict()
@@ -5461,12 +5783,13 @@ class Analysis():
         self.mol_names = self.mol_names[filt]
         self.atom_mass = self.atom_mass[filt]
         self.atom_charge = self.atom_charge[filt]
+        self.atom_code = self.atom_code[filt]
         for frame in self.timeframes:
             self.timeframes[frame]['coords'] = self.get_coords(frame)[filt]
         
         self.renumber_ids()
         self.renumber_residues()
-        
+        self.find_locGlob()
         self.filter_ff()
         if reinit:
             self.topology_initialization(reinit)
@@ -5518,14 +5841,14 @@ class Analysis():
         setattr(self,'N'+attr_name, len(args))
         return 
     
-
     
-    def multiply_periodic(self,multiplicity):
+    
+    def multiply_periodic(self,multiplicity,one_molecule=False):
         if len(multiplicity) !=3:
             raise Exception('give the multyplicity in the form (times x, times y, times z)')
         for d,mult in enumerate(multiplicity):
             if mult ==0: continue
-        #multiplicity= np.array([t for t in multiplicity])
+        
             natoms = self.natoms
             nmols = self.nmolecules
             totm = mult+1
@@ -5539,20 +5862,31 @@ class Analysis():
             mol_ids = np.empty(shape,dtype=int)
             at_types = np.empty(shape,dtype=object)
             mol_names = np.empty(shape,dtype=object)
+            atom_code = np.empty(shape,dtype=object)
+            atom_mass = np.empty(shape,dtype=float)
+            atom_charge = np.empty(shape,dtype=float)
             for m in range(0,mult+1):
                 na = m*natoms
-                mm = m*nmols
+                self.update_topology(na,self)
+                mm = m*nmols if not one_molecule else 0
                 for i in range(natoms):
                     idx = i+na
                     at_ids[idx] = idx
                     at_types[idx] =self.at_types[idx%natoms]
                     mol_ids[idx] = self.mol_ids[idx%natoms]+mm
                     mol_names[idx] = self.mol_names[idx%natoms]
+                    atom_code[idx] = self.atom_code[idx%natoms]
+                    atom_mass[idx] = self.atom_mass[idx%natoms]
+                    atom_charge[idx] = self.atom_charge[idx%natoms]
             self.at_ids = at_ids
             self.at_types = at_types
             self.mol_ids = mol_ids
             self.mol_names = mol_names
-        
+            self.atom_code = atom_code
+            self.atom_mass = atom_mass
+            self.atom_charge = atom_charge
+            
+            
             #allocate coords
             
             for frame in self.timeframes:
@@ -5570,9 +5904,325 @@ class Analysis():
             
                 self.timeframes[frame]['coords'] = coords
                 self.timeframes[frame]['boxsize'][d]*=mult+1
-        self.topology_initialization()
+        self.resort_by_molname()
         return
     
+    def resort_by_molname(self):
+        #first mol first
+        names = []
+        for name in self.mol_names:
+            if name not in names:
+                names.append(name)
+        
+        #map_ids old to new
+        mapids = dict()
+        n = 0
+        for name in names:
+            argsn = np.where(self.mol_names==name)[0]
+            for i,j in enumerate(argsn):
+                mapids[j] = i  + n
+            n = argsn.shape[0]
+        for attrname in ['at_types','mol_names','atom_code','atom_mass','atom_charge','mol_ids']:
+            attrold = getattr(self,attrname)
+            attrnew = np.empty_like(attrold)
+            for j,i in mapids.items():
+                attrnew[i] = attrold[j]
+            setattr(self,attrname,attrnew)
+        
+        self.resorting_mapids = mapids
+        self.renumber_residues()
+        
+        self.connectivity = {(mapids[c[0]],mapids[c[1]]): val for c,val in self.connectivity.items()}
+        self.angles = {(mapids[c[0]],mapids[c[1]],mapids[c[2]]): val for c,val in self.angles.items()}
+        self.dihedrals = {(mapids[c[0]],mapids[c[1]],mapids[c[2]],mapids[c[3]]): val for c,val in self.dihedrals.items()}
+        self.neibs = {mapids[j]:{mapids[neib] for neib in s } for j,s in self.neibs.items()}
+        
+        for frame in self.timeframes:
+            
+            cold = self.get_coords(frame)
+            cnew = np.empty_like(cold)
+            
+            for j,i in mapids.items():
+                cnew[i] = cold[j]
+            self.timeframes[frame]['coords'] = cnew
+            
+        return
+    
+    def get_coords(self,frame):
+        return self.timeframes[frame]['coords']
+    
+    def get_velocities(self,frame):
+        return self.timeframes[frame]['velocities']
+    
+    def get_forces(self,frame):
+        return self.timeframes[frame]['forces']
+    
+    def get_box(self,frame):
+        return self.timeframes[frame]['boxsize']
+    
+    def get_time(self,frame):
+        return self.timeframes[frame]['time']
+    
+   
+    def get_whole_coords(self,frame):
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+        coords = self.unwrap_coords(coords, box)
+        return coords
+    @property
+    def dihedrals_per_type(self):
+        
+        tys = self.dihedral_types
+        d = {t:[] for t in tys}
+        for k,t in self.dihedrals.items():
+            d[t].append(np.array(k))
+        for t in tys:
+            d[t] = np.array(d[t])
+        return d
+    @property
+    def connectivity_per_type(self):
+        
+        tys = self.bond_types
+        d = {t:[] for t in tys}
+        for k,t in self.connectivity.items():
+            d[t].append(np.array(k))
+        for t in tys:
+            d[t] = np.array(d[t])
+        return d
+    @property
+    def angles_per_type(self):
+        
+        tys = self.angle_types
+        d = {t:[] for t in tys}
+        for k,t in self.angles.items():
+            d[t].append(np.array(k))
+        for t in tys:
+            d[t] = np.array(d[t])
+        return d
+    
+    def ids_from_topology(self,topol_vector):
+        inter = len(topol_vector)
+        if inter == 2: 
+            ids = self.connectivity_per_type
+        elif inter == 3: 
+            ids = self.angles_per_type
+        elif inter == 4: 
+            ids = self.dihedrals_per_type
+        else:
+            raise Exception('Large topology vectors with size >= {} are not Implemented'.format(inter))
+        topol_vector = tuple(topol_vector)
+      
+        if topol_vector in ids: tp = topol_vector
+        elif topol_vector[::-1] in ids: tp = topol_vector[::-1]
+        else:
+            raise Exception('{} not in {}'.format(topol_vector,list(ids)))
+        
+        arr0 = ids[tp][:,0] ; arr1 = ids[tp][:,-1]
+        
+        return arr0,arr1
+   
+    def ids_from_keyword(self,keyword,exclude=[]):
+        if keyword in ['4',4,'1-4']:
+            ids = self.dihedrals_per_type
+        if keyword in ['3',3,'1-3']:
+            ids = self.angles_per_type
+        if keyword in ['2',2,'1-2']:
+            ids = self.connectivity_per_type
+        ids1 = np.empty(0,dtype=int)
+        ids2 = np.empty(0,dtype=int)
+        for k,i in ids.items():
+            if k in exclude:
+                continue
+            ids1 = np.concatenate( (ids1,i[:,0]) )
+            ids2 = np.concatenate( (ids2,i[:,-1]) )
+        return ids1,ids2
+    
+
+    def ids_from_backbone(self,bonddist):
+        ids = self.polymer_ids
+        if hasattr(self,'backbone_dist_matrix'):
+            bd = self.backbone_dist_matrix
+        else:
+            bd = self.find_bond_distance_matrix(ids) 
+            self.backbone_dist_matrix = bd
+        
+        b1,b2 = np.nonzero(bd == bonddist)
+        ids1 = ids[b1]
+        ids2 = ids[b2]
+        
+        return ids1,ids2
+    
+    def find_vector_ids(self,topol_vector,exclude=[]):
+        '''
+        
+
+        Parameters
+        ----------
+        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
+            Used to find e.g. the segmental vector ids
+        exclude : TYPE, optional
+            DESCRIPTION. The default is [].
+
+        Returns
+        -------
+        ids1 : int array of atom ids
+        ids2 : int array of atom ids
+
+        '''
+        t0 = perf_counter()
+        ty = type(topol_vector)
+        if ty is list or ty is tuple:
+            ids1,ids2 = self.ids_from_topology(topol_vector)
+        if  ty is int:
+            if topol_vector<=4:
+                ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
+            else:
+                ids1,ids2 = self.ids_from_backbone(int(topol_vector))
+        if ty is str:
+            dump = True
+            for k in ['-','_',' ']:
+                if k in topol_vector:
+                    t1,t2 = tuple(topol_vector.split(k))
+                    ids1 = self.at_ids[self.at_types == t1]
+                    ids2 = self.at_ids[self.at_types == t2]
+                    dump = False
+            if dump:
+                raise Exception('could not find topology ids')
+        
+        logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
+        return ids1,ids2
+    
+    
+    def find_bond_distance_matrix(self,ids):
+        '''
+        takes an array of atom ids and finds how many bonds 
+        are between each atom id with the rest on the array
+
+        Parameters
+        ----------
+        ids : numpy array of int
+
+        Returns
+        -------
+        distmatrix : numpy array shape = (ids.shape[0],ids.shape[0])
+        
+        '''
+        
+        t0 = perf_counter()
+        size = ids.shape[0]
+        distmatrix = np.zeros((size,size),dtype=int)
+        for j1,i1 in enumerate(ids):
+            nbonds = self.bond_distance_id_to_ids(i1,ids)
+            distmatrix[j1,:] = nbonds
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        return distmatrix
+    
+    def bond_distance_id_to_ids(self,i,ids):
+        '''
+        takes an atom id and find the number of bonds between it 
+        and the rest of ids. 
+        If it is not connected the returns a very
+        large number
+        
+        Parameters
+        ----------
+        i : int
+        ids : array of int
+
+        Returns
+        -------
+        nbonds : int array of same shape as ids
+            number of bonds of atom i and atoms ids
+
+        '''
+        chunk = {i}
+        n = ids.shape[0]
+        nbonds = np.ones(n)*(-1)
+        incr_bonds = 0
+        new_neibs = np.array(list(chunk))
+        while new_neibs.shape[0]!=0:
+            f = np.zeros(ids.shape[0],dtype=bool)
+            numba_isin(ids,new_neibs,f)
+            nbonds[f] = incr_bonds
+            new_set = set()
+            for ii in new_neibs:
+                for neib in self.neibs[ii]:
+                    if neib not in chunk:
+                        new_set.add(neib)
+                        chunk.add(neib)
+            new_neibs = np.array(list(new_set))
+            incr_bonds+=1
+        return nbonds
+
+                
+    def ids_nbondsFrom_args(self,ids,args):
+        '''
+        This function finds the minimum number of bonds
+        that each atom id in ids has from args.
+        If an id is not connected in any way with any of the args then
+        a very large number is return within the nbonds array
+
+        Parameters
+        ----------
+        ids : int array
+        args : int array
+
+        Returns
+        -------
+        nbonds : int array of shape as ids
+
+        '''
+        n = ids.shape[0]
+        nbonds = np.ones(n)*10**10
+        
+        #old_chunk = set() ;
+        new_neibs = args.copy()
+        chunk = set(args)
+        incr_bonds=0
+        #same_set = False
+        fnotin_args = np.logical_not(np.isin(ids,args))
+
+        while  new_neibs.shape[0] !=0:
+            
+            #f = np.logical_and(np.isin(ids,new_neibs),fnotin_args)
+            f = np.zeros(ids.shape[0],dtype=bool)
+            numba_isin(ids,new_neibs,f)
+            f = np.logical_and(f,fnotin_args)
+            
+            
+            nbonds [ f ] = incr_bonds
+            new_set = set()
+            for ii in new_neibs:
+                for neib in self.neibs[ii]:                    
+                    if neib in chunk: continue        
+                    new_set.add(neib)
+                    chunk.add(neib)
+            
+            new_neibs = np.array(list(new_set)) 
+            incr_bonds += 1
+            
+        return nbonds
+    
+    def append_timeframes(self,object2):
+        '''
+        Used to append one trajectory to another
+        !It assumes that time of the second starts at the end of the first
+        Parameters
+        ----------
+        object2 : A second object of the class Analysis
+
+        Returns
+        -------
+        None.
+
+        '''
+        tlast = self.get_time(self.nframes-1)
+        nfr = self.nframes
+        for i,frame in enumerate(object2.timeframes):
+            self.timeframes[nfr+i] = object2.timeframes[frame]
+            self.timeframes[nfr+i]['time']+=tlast
+        return    
     def unwrap_coords(self,coords,box):   
         '''
         Do not trust this function. Works only for linear polymers
@@ -5641,7 +6291,439 @@ class Analysis():
         except AttributeError as err:
             raise AttributeError('{}\nCall function "find_EndGroup_args" to set this attribute'.format(err))
         else:
-            return args
+            return args   
+    @staticmethod
+    def element_from_type(ty):
+        elements = list(maps.elements_mass.keys())
+        n = len(ty)
+        while ty[:n] not in elements:
+            n-=1
+            if n==0:
+                raise ValueError('cannot find a corresponding element for type {:s}'.format(ty))
+        return ty[:n]
+    
+    def match_types(self,types1,types2):
+        
+        for ctype1,ctype2 in zip(types1,types2):
+            
+            if len(ctype1) == 2:
+                dictionary = self.ff.bondtypes
+            elif len(ctype1) ==3:
+                dictionary = self.ff.angletypes
+            elif len(ctype1) == 4:
+                dictionary = self.ff.dihedraltypes
+
+            val = list(dictionary[ctype2])
+            val[0] = '  '.join(ctype1)
+            dictionary[ctype1] = tuple(val) 
+        return
+    
+    
+    def element_based_matching(self,types):
+        
+        for ctype1 in types:
+            eletype1 = tuple(self.element_from_type(c) for c in ctype1) 
+            if len(ctype1) == 2:
+                dictionary = self.ff.bondtypes
+            elif len(ctype1) ==3:
+                dictionary = self.ff.angletypes
+            elif len(ctype1) == 4:
+                dictionary = self.ff.dihedraltypes
+                
+            for ctype2 in list(dictionary.keys()):
+                eletype2 = tuple(self.element_from_type(c) for c in ctype2)
+                if eletype1 == eletype2:
+                    val = list(dictionary[ctype2])
+                    val[0] = '  '.join(ctype1)
+                    print('1',ctype1,eletype1)
+                    print('2',ctype2,eletype2)
+                    dictionary[ctype1] = tuple(val) 
+        return
+                    
+
+        
+    def get_chem_per_molecule(self,mol_id):
+        cad = ['connectivity','angles','dihedrals','pairs','exclusions']
+        b = {c:[] for c in cad}
+        at_ids = self.at_ids[self.mol_ids==mol_id]
+        for c in cad:
+            data = getattr(self,c)
+            for conid in data:
+                if np.isin(conid,at_ids).all():
+                    b[c].append(conid)
+        return b
+    @property
+    def molecules(self):
+        mols = dict()
+        for nm in np.unique(self.mol_names):
+            mols[nm] = np.unique(self.mol_ids[nm == self.mol_names]).shape[0]
+        return mols
+    
+    def write_itp(self,path,Defaults=True,
+                  include_pairs=[],include_exclusions=[]):
+        
+        mols = self.molecules 
+        for k in mols:
+            try:
+                nexcl = self.exclusions_map[k]
+            except KeyError:
+                nexcl = 3
+            #num = mols[k]
+            if path !='':
+                fname = '{:s}/{:s}.itp'.format(path,k)
+            else:
+                fname ='{:s}.itp'.format(k)
+                
+            lines = ['; generated by md_analysis library', '','']
+            lines.extend(['','[ moleculetype ]', '; molname      nrexcl'])
+            lines.append('{:5s}    {:1d}'.format(k,nexcl))
+            lines.extend(['','[ atoms ]',';id atype resnr  resname atname cgnr'])
+            s = 1
+            mol_id = self.mol_ids[k==self.mol_names][0]
+            chem = self.get_chem_per_molecule(mol_id)
+            globloc = self.glob_id_to_loc[mol_id]
+            #ids_mol = self.at_ids[mol_id==self.mol_ids]
+            for j,a in enumerate(self.at_ids[mol_id == self.mol_ids]):
+                code = self.atom_code[a]
+                ty = self.at_types[a]
+                mid = self.mol_ids[a]
+                mn = self.mol_names[a]
+                ch = self.atom_charge[a]
+                ms = self.atom_mass[a]
+                line = '{:5d}  {:5s}  {:5d}  {:5s}  {:5s}  {:5d}  {:8.6f}  {:8.6f}'.format(j+s,code,mid,mn,ty,j+s,ch,ms)
+                lines.append(line)
+            
+            
+            lines.extend(['','[ bonds ]',';ai   aj  func'])
+            for c in chem['connectivity']:
+                bc =self.connectivity[c]
+                try:
+                    func = self.ff.bondtypes[bc][1]
+                except IndexError:
+                    if Defaults:
+                        func = ''
+                    else:
+                        raise Exception('could not find func for bondtype {:}'.format( bc))
+                except KeyError:
+                    if Defaults:
+                        func = ''
+                    else:
+                        raise Exception('could not find bondtype {:}'.format( bc))
+                i1,i2 = globloc[c[0]], globloc[c[1]]
+                lines.append('{:5d}  {:5d}   {:}'.format(i1+s,i2+s,func))
+            
+            
+            lines.extend(['','[ angles ]',';ai   aj   ak func'])
+            for c in chem['angles']:
+                ac = self.angles[c]
+                try:
+                    func = self.ff.angletypes[ac][1]
+                except IndexError:
+                    if Defaults:
+                        func = ''
+                    else:
+                        raise Exception('could not find func for angletype {:}'.format( ac))
+                except KeyError:
+                    if Defaults:
+                        func = ''
+                    else:
+                        raise Exception('could not find angletype {:}'.format( ac))
+                i1,i2,i3 = globloc[c[0]], globloc[c[1]], globloc[c[2]]
+                lines.append('{:5d}  {:5d}  {:5d}   {:}'.format(i1+s,i2+s,i3+s,func))
+            
+            
+            lines.extend(['','[ dihedrals ]','; improper ai   aj   ak   al  func'])
+            lines.extend(['','[ dihedrals ]','; proper ai   aj   ak   al  func'])
+            for c in chem['dihedrals']:
+                dc = self.dihedrals[c]
+                try:
+                    func = self.ff.dihedraltypes[dc][1]
+                except IndexError:
+                    if Defaults:
+                        func = '3'
+                    else:
+                        raise Exception('could not find func for dihedraltype {:}'.format( dc))
+                except KeyError:
+                    if Defaults:
+                        func = '3'
+                    else:
+                        raise Exception('could not find dihedraltype {:}'.format( dc))
+    
+                i1,i2,i3,i4 = globloc[c[0]], globloc[c[1]], globloc[c[2]], globloc[c[3]]
+                lines.append('{:5d}  {:5d}  {:5d}  {:5d}    {:}'.format(i1+s,i2+s,i3+s,i4+s,func))
+            lines.append('')
+            
+            lines.extend(['','[ pairs ]',';ai   aj  func'])
+            for c in chem['pairs']:
+                func = ''
+                i1,i2 = globloc[c[0]], globloc[c[1]]
+                lines.append('{:5d}  {:5d}   {:}'.format(i1+s,i2+s,func))
+                        
+            
+            
+            lines.extend(['','[ exclusions ]',';ai   aj  '])
+            for c in chem['exclusions']:
+                func = ''
+                i1,i2 = globloc[c[0]], globloc[c[1]]
+                lines.append('{:5d}  {:5d}   {:}'.format(i1+s,i2+s,func))
+                
+            lines.append('')
+            for p in include_pairs:
+                pairs1,pairs2 = self.find_vector_ids(p)
+                lines.extend(['','[ pairs ]','; i  j '])
+                for p1,p2 in zip(pairs1,pairs2):
+                    lines.append('{:5d}   {:5d}    1'.format(p1+s,p2+s))
+            for e in include_exclusions:
+                pairs1,pairs2 = self.find_vector_ids(e)
+                lines.extend(['','[ exclusions ]','; i  j '])
+                for p1,p2 in zip(pairs1,pairs2):
+                    lines.append('{:5d}   {:5d}  '.format(p1+s,p2+s))
+            if hasattr(self.ff,'posres'):
+                data = getattr(self.ff,'posres')
+                for d in data:
+                    filt = getattr(self,d['by']) == d['val']
+                    fmol = self.mol_names == k
+                    f = np.logical_and(filt,fmol)
+                    if f.any():
+                        lines.extend(['','[ position_restraints ]','; i  j '])
+                        for atid in self.at_ids[f]:
+                            i = self.glob_id_to_loc[mol_id][atid]
+                            r = d['r']
+                            k = d['k']
+                            lines.append('{:d}  {:d}   {:8.5f}  {:8.5f}  {:8.5f}'.format(i+s,1,k,k,k))
+            
+            with open(fname,'w') as f:
+                for line in lines:
+                    f.write('{:s}\n'.format(line))
+                f.close()
+        return
+    
+    @property
+    def system_name(self):
+        name = []
+        for m in self.sorted_mol_names:
+            j = self.molecules[m]
+            name.append(m+'_'+str(j))
+            
+        return '-'.join(name)
+    @property
+    def sorted_mol_names(self):
+        sorted_names = []
+        for m in self.mol_names:
+            if m not in sorted_names:
+                sorted_names.append(m)
+        return sorted_names
+    def write_topfile(self,fname,nbfunc='1',combrule='2',
+                      genpairs='no',defaults=True,includes = [],
+                      opls_convection=True,include_pairs=[],include_exclusions=[]):
+        if opls_convection:
+            fudgeLJ='0.5'
+            fudgeQQ='0.5'
+            combrule='3'
+            genpairs='yes'
+        else:
+            fudgeLJ='1.0'
+            fudgeQQ='1.0'
+        if fname[-4:]!='.top': fname += '.top'
+        lines = ['; generated by md_analysis library','','']
+        
+        
+        lines.extend(['','','[ defaults ]',
+                      '; nbfunc       comb-rule      gen-pairs      fudgeLJ   fudgeQQ'])
+        lines.append('            '.join([str(nbfunc),str(combrule),str(genpairs),str(fudgeLJ),str(fudgeQQ)]))
+        
+
+        lines.extend(['','[ atomtypes ]'])
+        lines.append('; type   name    mass    charge  ptype   sig     eps')
+        def jt(k):
+            return '  '.join([str(i) for i in k])
+        
+        for k,v in self.ff.atomtypes.items():
+            lines.append('{:10s} {:5s}  {:9.6f}  {:9.6f}  {:5s}  {:9.6f} {:9.6f}'.format(
+                v[0],k,float(v[1]),float(v[2]),v[3],float(v[4]),float(v[5])))
+        
+        lines.extend(['','[ bondtypes ]',';  i     j   func    b0    kb'])
+        for k,v in self.ff.bondtypes.items():
+            try:
+                v[1]
+                v[2]
+                v[3]
+            except IndexError:
+                if not defaults:
+                    raise Exception('I dont know the force field parameters of bondtype {}'.format(k))
+            else:
+                
+                lines.append('{:5s}  {:5s}  {:1d}  {:9.6f}  {:9.6f}'.format(*k,int(v[1]),float(v[2]),float(v[3])))
+        lines.extend(['','[ angletypes ]','; i    j    k func       th0         cth'])
+        for k,v in self.ff.angletypes.items():
+            try:
+                v[1]
+                v[2]
+                v[3]
+            except IndexError:
+                if not defaults:
+                    raise Exception('I dont know the force field parameters of angletype {}'.format(k))
+            else:
+                lines.append('{:5s}  {:5s} {:5s} {:1d}  {:9.6f}  {:9.6f}'.format(*k,int(v[1]),float(v[2]),float(v[3])))
+        
+        lines.extend(['','[ dihedraltypes ]','; i   j  k   l'])
+        for k,v in self.ff.dihedraltypes.items():
+            try:
+                v[2]
+            except IndexError:
+                if not defaults:
+                    raise Exception('I dont know the force field parameters of dihedraltype {}'.format(k))
+            else:
+                l = '   '.join(v[1:])
+                lines.append('{:5s}  {:5s}  {:5s}  {:5s}  {:s}'.format(*k,l))
+        
+        lines.extend(['','',''])
+        
+        for k in includes:
+            k1 = k + '.itp' if k[-4:] !='.itp' else k
+            lines.append('#include "{:s}"'.format(k1))
+        
+        for k in self.molecules:
+            lines.append('#include "{:s}.itp"'.format(k))
+        if '/' in fname:
+            path = '/'.join(fname.split('/')[:-1])
+        else:
+            path = ''
+            
+        self.write_itp(path,Defaults=defaults,
+                       include_pairs=include_pairs,
+                       include_exclusions=include_exclusions)
+        
+        lines.extend(['','',''])
+
+        
+        lines.extend(['','[ system ]',self.system_name])
+        
+        lines.extend(['','[ molecules ]',';molecule name number'])
+        for k in self.sorted_mol_names:
+            v = self.molecules[k]
+            lines.append('   '.join([k,str(v)]) )
+  
+        with open(fname,'w') as f:
+            for line in lines:
+                f.write('{:s}\n'.format(line))
+            f.close()
+        return 
+    def clean_dihedrals_from_topol_based_on_ff(self):
+        nonex = self.nonexisting_types('dihedral')['in topol not in ff']
+        new_dihs = dict()
+        for k,v in self.dihedrals.items():
+            if v not in nonex:
+                new_dihs[k] = v
+        self.dihedrals=new_dihs
+        return
+    
+    def nonexisting_types(self,which):
+        listcheck = ['atom','bond','angle' ,'dihedral']
+        if which not in listcheck:
+            raise ValueError('give one of the following {}'.format(listcheck))
+            
+        attr = getattr(self.ff,which+'types')
+        data = getattr(self, which+'_types')
+        nonex_inff = [k for k in data if k not in attr]
+        nonex = [k for k in attr if k not in data]
+        
+        return {'in topol not in ff': nonex_inff,
+                'in ff not in topol':nonex}
+class Analysis(Topology):
+    '''
+    The mother class. It's for simple polymer systems not confined ones
+    '''
+    def __init__(self,
+                 topol_file, # gro/trr/ltop for now
+                 connectivity_info, #itp #ltop
+                 memory_demanding=False,
+                 **kwargs):
+        '''
+        'connectivity_file': itp or list of itps. From the bonds it finds angles and dihedrals
+        'gro_file': one frame gro file to read the topology (can be extended to other formats). It reads molecule name,molecule id, atom type
+        memory_demanding: If True each time we loop over frames, these are readen from the disk and are not stored in memory
+        types_from_itp: if different types excist in itp and gro then the itp ones are kept
+        '''
+        #t0 = perf_counter()
+        self.topol_file = topol_file
+        self.connectivity_info = connectivity_info
+        self.connectivity_file = connectivity_info
+        self.kwargs = kwargs
+        self.memory_demanding = memory_demanding
+        self.timeframes = dict()
+        if 'types_from_itp' in kwargs:
+            self.types_from_itp = kwargs['types_from_itp']
+        else:
+            self.types_from_itp = True
+
+        if 'fftop' in kwargs:
+            self.fftop = kwargs['fftop'] 
+
+        if 'key_method' not in kwargs:
+            self.key_method = 'get_timekey'
+        else:
+            self.key_method = 'get_' + kwargs['key_method'] + 'key'
+        
+        if 'round_dec' not in kwargs:
+            self.round_dec = 7
+        else:
+            self.round_dec = kwargs['round_dec']
+        False_defaults = ['refine_dihedrals','refine_angles','bytype']
+        for nm in False_defaults:
+            if nm not in kwargs:
+                setattr(self,nm,False)
+            else:
+                if type(kwargs[nm]) is not bool:
+                    raise ValueError('{:s} must be either True or False (Default)'.format(nm))
+                setattr(self,nm,kwargs[nm])
+        
+        self.read_topology()
+        self.topology_initialization()
+ 
+        self.timeframes = dict() # we will store the coordinates,box,step and time here
+        
+        #tf = perf_counter()-t0
+        #ass.print_time(tf,inspect.currentframe().f_code.co_name)
+        
+        return 
+    
+
+    
+    def topology_initialization(self,reinit=False):
+        '''
+        Finds some essential information for the system and stores it in self
+        like angles,dihedrals
+        Also makes some data manipulation that might be used later
+        '''
+        t0 = perf_counter()
+        ## We want masses into numpy array
+        if reinit:
+            self.connectivity = dict()
+            self.neibs = dict()
+            self.angles = dict()
+            self.dihedrals = dict()
+            self.find_locGlob()
+           
+
+        #Now we want to find the connectivity,angles and dihedrals
+        
+        self.find_neibs()
+        self.find_angles()
+        self.find_dihedrals()
+        #Find the ids (numpy compatible) of each type and store them
+        
+        
+
+        self.dict_to_sorted_numpy('connectivity') #necessary to unwrap the coords efficiently
+        
+        self.find_args_per_residue(np.ones(self.mol_ids.shape[0],dtype=bool),'molecule_args')
+        self.find_args_per_residue(np.ones(self.mol_ids.shape[0],dtype=bool),'chain_args')
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name)
+            
+        return
+ 
     
     def box_variance(self):
         t0 = perf_counter()
@@ -5815,7 +6897,7 @@ class Analysis():
     
     def calc_Sq_byInverseGr(self,dr,dmax,dq,qmax,
                             qmin=0,
-                            ids=None,direction=None):
+                            ids=None,direction=None,intra=False,inter=False):
         def Fourier3D(q,r,gr,rho):
             
             Sq = np.zeros(q.shape[0])
@@ -5835,9 +6917,7 @@ class Analysis():
                 Sq[i] = simpson((gr-1)*np.sin(q[i]*r)/(q[i]*r),r) 
             return 1+rho*Sq
         
-        res = self.calc_pair_distribution(dr,dmax,density='number',
-                            ids=ids,direction=direction,
-                            normalize=True) 
+        res = self.calc_pair_distribution(binl,dmax,None,None,intra,inter) 
         
         q =np.arange(qmin+dq,qmax+dq,dq)
         d = res['d']
@@ -5862,11 +6942,123 @@ class Analysis():
         dists_t =  {t:np.sum(v*v,axis=1)**0.5 for t,v in vect.items()}
         return dists_t,filt_t
     
-    def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,
-                               ids=None,direction=None,
-                               density='number',normalize=False,
-                               bulkMaxDiff=0.1,perc_bulk=0.75,
-                               **kwargs):
+    def calc_cluster_size_t(self,mol,dcut,method='com',mol2=None):
+        t0 = perf_counter()
+        available_methods = ['com','min']
+        if method not in available_methods:
+            raise ValueError('Uknown method {:s} --> choose from {:}'.format(method,available_methods))
+        ty_trick = self.at_types[self.mol_names == mol][0]
+        topol_vector = ' '.join([ty_trick,ty_trick])
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        
+        segmental_ids = self.find_segmental_ids(ids1, ids2,  ('A_TRICK_WHATEVER','BACD_TRICK_WHATEVER'))
+        distribution = dict()
+        args = (segmental_ids,dcut,distribution)
+
+        nframes = self.loop_trajectory('cluster_size'+'_'+method,args)
+        
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        
+        data = dict()
+        data['time'] = np.array(list(distribution.keys()))/1000 
+        data['mean'] = np.array([np.mean(v) for v in distribution.values()])
+        data['std'] = np.array([np.std(v) for v in distribution.values()])
+        data['maxsize'] = np.array([np.max(v) for v in distribution.values()])
+        sizes = []
+        for v in distribution.values():
+            sizes.extend(v)
+        sizes = np.array(sizes)
+        data['sizes'] = sizes
+        
+        maxsize = sizes.max()
+        
+        data['nc'] = np.arange(1,maxsize+1,1,dtype=int)
+        
+        counts = np.array([np.count_nonzero(sizes == j) for j in range(1,maxsize+1) ])
+        
+        data['counts'] = counts
+        data['counts/n'] = counts/len(segmental_ids)
+        data['probability'] = counts/np.sum(counts)
+        data['prob-time'] = dict()
+
+        for k,v in distribution.items():
+            data['prob-time'][k] = np.array([np.count_nonzero(np.array(v) == j) for j in range(1,maxsize+1) ])
+
+        return data
+    
+    def calc_segmental_pair_distribution(self,binl,dmax,topol_vector,segbond,far_region=0.8):
+        t0 = perf_counter()
+        
+        ids1,ids2 = self.find_vector_ids(topol_vector)
+        
+        segmental_ids = self.find_segmental_ids(ids1, ids2, segbond)
+        
+        bins = np.arange(0,dmax+binl,binl)
+        gofr = np.zeros(bins.shape[0]-1,dtype=float)
+        args = (bins,segmental_ids,gofr)
+        
+        nframes = self.loop_trajectory('gofr_segments', args)
+        
+        gofr/=nframes
+        
+        
+        
+        n1 = len(segmental_ids)/2 # because the segments are found with their selfs
+        n = int((len(segmental_ids)-1)*n1)
+        
+        pair_distribution = self.normalize_gofr(bins,gofr,n,n1,far_region,dmax) 
+        tf = perf_counter() - t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return pair_distribution 
+    
+    def get_ids_based_on_atomtype(self,ty):
+        if ty is None:
+            ids = self.at_ids.copy()
+        elif ass.iterable(ty):
+            f =  self.at_types == ty[0]
+            for i in range(1,len(ty)):
+                f = np.logical_or(f, self.at_types == ty[i])
+                ids = self.at_ids[f].copy()
+        elif type(ty) is str:
+            ids = self.at_ids[self.at_types==ty].copy()
+        else:
+            raise ValueError('uknown way to find ids')
+        return ids
+    
+    def find_gr_pairs(self,ty1,ty2,intra=False,inter=False):
+        if inter and intra:
+            raise ValueError('Cannot demand both intra and inter pairs at the same time')
+        
+        ids1 = self.get_ids_based_on_atomtype(ty1)
+        ids2 = self.get_ids_based_on_atomtype(ty2)
+        
+        pairs = [[i,j] for i in ids1 for j in ids2 if i!=j ]
+        npairs = len(pairs)
+        pairs = np.array(pairs)
+        
+        if intra:
+            filt = np.ones(npairs,dtype=bool)
+            for i,j in enumerate(pairs):
+                
+                if self.mol_ids[j[0]] == self.mol_ids[j[1]]:
+                    filt[i] = False
+            
+            pairs = pairs[filt]
+            
+        if inter:
+            filt = np.ones(npairs,dtype=bool)
+            for i,j in enumerate(pairs):
+                
+                if self.mol_ids[j[0]] != self.mol_ids[j[1]]:
+                    filt[i] = False
+            
+            pairs = pairs[filt]
+            
+        return pairs[:,0], pairs[:,1], len(ids1), pairs.shape[0]
+    
+    def calc_pair_distribution(self,binl,dmax,type1=None,type2=None,intra=False,inter=False,
+                               far_region=0.8):
         '''
         Used to calculate pair distribution functions between two atom types
         Could be the same type. If one type is None then the distribution is 
@@ -5905,342 +7097,57 @@ class Analysis():
 
         '''
         t0 = perf_counter()   
-        
-        pair_distribution = dict()
-        #if density not in ['number','probability','max']:
-            #raise NotImplementedError('density = {:s} is not Impmemented'.format(density))
             
         bins = np.arange(0,dmax+binl,binl)
         gofr = np.zeros(bins.shape[0]-1,dtype=float)
         
-        if type1 is None and type2 is None:
-            func = 'gofr'
-            args = ()
-            if ids is None:
-                nc1 = self.natoms
-            else:
-                nc1 =ids.shape[0]
-                func = 'gofr_ids'
-                args = (ids,direction)
-            nc2 = (nc1-1)/2
-        elif type1 is not None and type2 is None:
-            func = 'gofr_type_to_all'
-            fty1 = type1 == self.at_types
-            nc1 = np.count_nonzero(fty1)
-            nc2 = self.natoms
-            args = (fty1,)
-        elif type1 is None and type2 is not None:
-            func ='gofr_type_to_all'
-            fty2 = type2 == self.at_types
-            nc1 = self.natoms
-            nc2 = np.count_nonzero(fty2)
-            args =(fty2,)
-        elif type1==type2:
-            func= 'gofr_type'
-            fty = type1 == self.at_types
-            nc1 =  np.count_nonzero(fty)
-            nc2 =(nc1-1)/2
-            args = (fty,)
-        else:
-            func = 'gofr_type_to_type'
-            fty1,fty2 = type1 == self.at_types, type2 == self.at_types
-            nc1 = np.count_nonzero(fty1)
-            nc2 = np.count_nonzero(fty2)
-            args= (type1 == self.at_types, type2 == self.at_types)
+        ids1,ids2, n1 ,n = self.find_gr_pairs(type1,type2,intra,inter)
         
-        args = (*args,bins,gofr)
+        args = (ids1,ids2,bins,gofr)
         
-        nframes = self.loop_trajectory(func, args)
+        nframes = self.loop_trajectory('gofr_pairs', args)
         
 
         gofr/=nframes
-        cb = center_of_bins(bins)
-        if  density in ['number','pair_number']:
-            if direction is None or direction =='':
-                const = 4*np.pi/3
-                for i in range(0,bins.shape[0]-1):
-                    vshell = const*(bins[i+1]**3-bins[i]**3)
-                    gofr[i]/=vshell
-            elif direction =='xy':
-                const = np.pi*self.box_mean()[2]
-                for i in range(0,bins.shape[0]-1):
-                    surf_shell = const*(bins[i+1]**2-bins[i]**2)
-                    gofr[i]/=surf_shell
-            elif direction =='z':
-                b = self.box_mean()
-                const  = b[0]*b[1]
-                for i in range(0,bins.shape[0]-1):
-                    shell = const*2*(bins[i+1]-bins[i]) # bin is 2binl
-                    gofr[i]/=shell
-            
-            if 'pair_number' == density:
-                pass
-            else:
-                gofr/=nc2
-            
-            if normalize:
-                if 'bulk_region' in kwargs:
-                    bulk_region = kwargs['bulk_region']
-                else:
-                    bulk_region =(perc_bulk*dmax,dmax)
-                f = np.logical_and(bulk_region[0]<cb,cb<=bulk_region[1])
-                bulk_rho = gofr[f].mean()
-                mx = gofr[f].max()
-                mn = gofr[f].min()
-                if (mx-mn)/mx>bulkMaxDiff:
-                    raise Exception('The bulk region is very small compared to the maximum value\nTry increasing dmax')
-                pair_distribution['rho'] = bulk_rho
-                gofr/=bulk_rho
-        elif density =='probability':
-            gofr/=nc1*nc2
-            if normalize:
-                gofr/=gofr.sum()
-        elif density=='coordination':
-            gofr/=nc1
-        elif density=='':
-            if normalize:
-                gofr/=gofr.max()
-            
-        pair_distribution.update( {'d':cb, 'gr':gofr })
+
+        pair_distribution = self.normalize_gofr(bins,gofr,n,n1,far_region,dmax)
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
         return pair_distribution
     
-    
-    def get_coords(self,frame):
-        return self.timeframes[frame]['coords']
-    
-    def get_velocities(self,frame):
-        return self.timeframes[frame]['velocities']
-    
-    def get_forces(self,frame):
-        return self.timeframes[frame]['forces']
-    
-    def get_box(self,frame):
-        return self.timeframes[frame]['boxsize']
-    
-    def get_time(self,frame):
-        return self.timeframes[frame]['time']
-    
-   
-    def get_whole_coords(self,frame):
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
-        coords = self.unwrap_coords(coords, box)
-        return coords
-    
-    def ids_from_topology(self,topol_vector):
-        inter = len(topol_vector)
-        if inter == 2: 
-            ids = self.connectivity_per_type
-        elif inter == 3: 
-            ids = self.angles_per_type
-        elif inter == 4: 
-            ids = self.dihedrals_per_type
-        else:
-            raise Exception('Large topology vectors with size >= {} are not Implemented'.format(inter))
-        topol_vector = tuple(topol_vector)
-      
-        if topol_vector in ids: tp = topol_vector
-        elif topol_vector[::-1] in ids: tp = topol_vector[::-1]
-        else:
-            raise Exception('{} not in {}'.format(topol_vector,list(ids)))
+    @staticmethod
+    def normalize_gofr(bins,gofr,n,n1,far_region,dmax):
+        pair_distribution = dict()
+        cb = center_of_bins(bins)
+        pair_distribution['d'] = cb
+        npairs = gofr.copy()
+        pair_distribution['npairs'] = npairs
         
-        arr0 = ids[tp][:,0] ; arr1 = ids[tp][:,-1]
+        vshell = (4*np.pi/3)*(bins[1:]**3-bins[:-1]**3)
         
-        return arr0,arr1
-   
-    def ids_from_keyword(self,keyword,exclude=[]):
-        if keyword in ['4',4,'1-4']:
-            ids = self.dihedrals_per_type
-        if keyword in ['3',3,'1-3']:
-            ids = self.angles_per_type
-        if keyword in ['2',2,'1-2']:
-            ids = self.connectivity_per_type
-        ids1 = np.empty(0,dtype=int)
-        ids2 = np.empty(0,dtype=int)
-        for k,i in ids.items():
-            if k in exclude:
-                continue
-            ids1 = np.concatenate( (ids1,i[:,0]) )
-            ids2 = np.concatenate( (ids2,i[:,-1]) )
-        return ids1,ids2
-    
-
-    def ids_from_backbone(self,bonddist):
-        ids = self.polymer_ids
-        if hasattr(self,'backbone_dist_matrix'):
-            bd = self.backbone_dist_matrix
-        else:
-            bd = self.find_bond_distance_matrix(ids) 
-            self.backbone_dist_matrix = bd
+        pairdens = npairs/vshell
+        pair_distribution['v'] = (4*np.pi/3)*cb**3
+        pair_distribution['pair density'] = pairdens
         
-        b1,b2 = np.nonzero(bd == bonddist)
-        ids1 = ids[b1]
-        ids2 = ids[b2]
+        numdens = pairdens/n1
         
-        return ids1,ids2
-    
-    def find_vector_ids(self,topol_vector,exclude=[]):
-        '''
+        pair_distribution['number density'] = numdens
+        pair_distribution['probablilty number density'] = numdens/numdens.sum()
         
+        pair_distribution['coordination'] = npairs/n
 
-        Parameters
-        ----------
-        topol_vector : list of atom types, or int for e.g. 1-2,1-3,1-4 vectors
-            Used to find e.g. the segmental vector ids
-        exclude : TYPE, optional
-            DESCRIPTION. The default is [].
-
-        Returns
-        -------
-        ids1 : int array of atom ids
-        ids2 : int array of atom ids
-
-        '''
-        t0 = perf_counter()
-        ty = type(topol_vector)
-        if ty is list or ty is tuple:
-            ids1,ids2 = self.ids_from_topology(topol_vector)
-        if ty is str or ty is int:
-            if int(topol_vector)<=4:
-                ids1,ids2 = self.ids_from_keyword(topol_vector,exclude)
-            else:
-                ids1,ids2 = self.ids_from_backbone(int(topol_vector))
-        logger.info('time to find vector list --> {:.3e}'.format(perf_counter()-t0))
-        return ids1,ids2
-    
-    
-    def find_bond_distance_matrix(self,ids):
-        '''
-        takes an array of atom ids and finds how many bonds 
-        are between each atom id with the rest on the array
-
-        Parameters
-        ----------
-        ids : numpy array of int
-
-        Returns
-        -------
-        distmatrix : numpy array shape = (ids.shape[0],ids.shape[0])
+        b =(far_region*dmax,dmax)
+        f = np.logical_and(b[0]<cb,cb<=b[1])
+        far_rho = numdens[f].mean()
+        far_rho_std = numdens[f].std()
         
-        '''
+        pair_distribution['far_rho'] = far_rho
+        pair_distribution['far_rho_std'] = far_rho_std
         
-        t0 = perf_counter()
-        size = ids.shape[0]
-        distmatrix = np.zeros((size,size),dtype=int)
-        for j1,i1 in enumerate(ids):
-            nbonds = self.bond_distance_id_to_ids(i1,ids)
-            distmatrix[j1,:] = nbonds
-        tf = perf_counter() - t0
-        ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        return distmatrix
-    
-    def bond_distance_id_to_ids(self,i,ids):
-        '''
-        takes an atom id and find the number of bonds between it 
-        and the rest of ids. 
-        If it is not connected the returns a very
-        large number
+        norm_numdens= numdens/far_rho
         
-        Parameters
-        ----------
-        i : int
-        ids : array of int
-
-        Returns
-        -------
-        nbonds : int array of same shape as ids
-            number of bonds of atom i and atoms ids
-
-        '''
-        chunk = {i}
-        n = ids.shape[0]
-        nbonds = np.ones(n)*(-1)
-        incr_bonds = 0
-        new_neibs = np.array(list(chunk))
-        while new_neibs.shape[0]!=0:
-            f = np.zeros(ids.shape[0],dtype=bool)
-            numba_isin(ids,new_neibs,f)
-            nbonds[f] = incr_bonds
-            new_set = set()
-            for ii in new_neibs:
-                for neib in self.neibs[ii]:
-                    if neib not in chunk:
-                        new_set.add(neib)
-                        chunk.add(neib)
-            new_neibs = np.array(list(new_set))
-            incr_bonds+=1
-        return nbonds
-
-                
-    def ids_nbondsFrom_args(self,ids,args):
-        '''
-        This function finds the minimum number of bonds
-        that each atom id in ids has from args.
-        If an id is not connected in any way with any of the args then
-        a very large number is return within the nbonds array
-
-        Parameters
-        ----------
-        ids : int array
-        args : int array
-
-        Returns
-        -------
-        nbonds : int array of shape as ids
-
-        '''
-        n = ids.shape[0]
-        nbonds = np.ones(n)*10**10
-        
-        #old_chunk = set() ;
-        new_neibs = args.copy()
-        chunk = set(args)
-        incr_bonds=0
-        #same_set = False
-        fnotin_args = np.logical_not(np.isin(ids,args))
-
-        while  new_neibs.shape[0] !=0:
-            
-            #f = np.logical_and(np.isin(ids,new_neibs),fnotin_args)
-            f = np.zeros(ids.shape[0],dtype=bool)
-            numba_isin(ids,new_neibs,f)
-            f = np.logical_and(f,fnotin_args)
-            
-            
-            nbonds [ f ] = incr_bonds
-            new_set = set()
-            for ii in new_neibs:
-                for neib in self.neibs[ii]:                    
-                    if neib in chunk: continue        
-                    new_set.add(neib)
-                    chunk.add(neib)
-            
-            new_neibs = np.array(list(new_set)) 
-            incr_bonds += 1
-            
-        return nbonds
-    
-    def append_timeframes(self,object2):
-        '''
-        Used to append one trajectory to another
-        !It assumes that time of the second starts at the end of the first
-        Parameters
-        ----------
-        object2 : A second object of the class Analysis
-
-        Returns
-        -------
-        None.
-
-        '''
-        tlast = self.get_time(self.nframes-1)
-        nfr = self.nframes
-        for i,frame in enumerate(object2.timeframes):
-            self.timeframes[nfr+i] = object2.timeframes[frame]
-            self.timeframes[nfr+i]['time']+=tlast
-        return
+        pair_distribution['gr'] = norm_numdens
+        return pair_distribution
     
     def calc_size(self):
         size = np.zeros(3)
@@ -6425,10 +7332,9 @@ class Analysis():
     
     def set_partial_charge(self):
         if not hasattr(self,'partial_charge'):
-            self.charge_from_maps()
             charge = np.empty((self.at_types.shape[0],1),dtype=float)
             for i,ty in enumerate(self.at_types):
-                charge[i] = self.charge_map[ty]
+                charge[i] = maps.charge_map[ty]
             self.partial_charge = charge
         return
     
@@ -6437,7 +7343,18 @@ class Analysis():
         segch = {j : np.isin(seg0,chargs)
                  for j,chargs in self.chain_args.items()}           
         return segch
-    
+    @staticmethod
+    def id_neibs(id0,neibs):
+        '''
+        neibs should be a dictionary with integer keys and set values and id0 integer
+        '''
+        setids = neibs[id0]
+        setids_old = set()
+        while( len(setids) != len(setids_old) ):
+            setids_old = setids
+            for i in setids.copy():
+                setids = setids | neibs[i]
+        return np.array(list(setids))
     def find_segmental_ids(self,ids1,ids2,segbond):
         '''
         Used to find the segmental ids
@@ -6457,34 +7374,43 @@ class Analysis():
             an array with the ids of each segment
 
         '''
+        
         t0 = perf_counter()
-        conn_cleaned = {k:v for k,v in self.connectivity.items()
+        
+        if ass.iterable(segbond[0]):
+            conn_excluded = {k:v for k,v in self.connectivity.items()
+                        if v in segbond
+                            }
+        else:
+            conn_excluded = {k:v for k,v in self.connectivity.items()
                         if v != segbond
-                        }
+                            }
+            
+        neibs_excluded = dict()
+        for k,v in self.neibs.items():
+            s = v.copy()
+            for i in s.copy():
+                if not ( (k,i) in conn_excluded or (i,k) in conn_excluded):
+                    s.remove(i)
+            neibs_excluded[k] = s
         
-        bond_ids = np.array(list(conn_cleaned.keys()))
+        seg_ids = []
+        for j in ids1:
+            seg_ids.append( self.id_neibs(j,neibs_excluded) )
         
-        b0 = bond_ids[:,0]
-        b1 = bond_ids[:,1]
-        
-        seg_ids = {i : list(np.arange(i1,i2+1,dtype='i')) 
-                   for i,(i1,i2) in enumerate(zip (ids1,ids2))
-                  }
-        
-        for i,ids in seg_ids.copy().items():
-            f0 = np.isin(b0,ids)
-            f1 = np.isin(b1,ids)
-            seg_ids[i].extend(b1[f0])
-            seg_ids[i].extend(b0[f1])
-         
-        seg_args = {k:np.unique(v) for k,v in seg_ids.items()}
-        
-        
-        seg_ids_numpy = np.array(list(seg_args.values()))
-        self.segmental_args = seg_ids_numpy
+        useg_ids = []
+        for j, seg in enumerate(seg_ids):
+            inseg = False
+            for i, preseg in enumerate(seg_ids[:j]):
+                if (seg == preseg).all():
+                    inseg=True
+            if not inseg:
+                useg_ids.append(seg)
+        seg_ids = useg_ids
+        self.segmental_args = seg_ids
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
-        return  seg_ids_numpy
+        return  seg_ids
     
     def calc_chain_dipole_moment_t(self,filters=dict(),**kwargs,):
         '''
@@ -6508,7 +7434,7 @@ class Analysis():
         
         filters = {'chain_'+k : v for k,v in filters.items()}
         
-        self.set_partial_charge()
+        
         
         if 'option' in kwargs:
             option = kwargs['option']
@@ -6597,7 +7523,7 @@ class Analysis():
         '''
         t0 = perf_counter()
         
-        self.set_partial_charge()
+        #self.set_partial_charge()
             
         ids1,ids2 = self.find_vector_ids(topol_vector)
         
@@ -6746,9 +7672,12 @@ class Analysis():
         segcm : float array (nsegments,3)
 
         '''
-        n = segids.shape[0]
+        n = len(segids)
         segcm = np.empty((n,3),dtype=float)
-        numba_CM(coords,segids,self.atom_mass,segcm)
+        mass = self.atom_mass
+        for i,si in enumerate(segids):
+            segcm[i] = CM(coords[si],mass[si])
+        #numba_CM(coords,segids,self.atom_mass,segcm)
         return segcm
             
 
@@ -6829,7 +7758,28 @@ class Analysis():
         #return {t:v[tot_filt] for t,v in dihedrals_t.items()}
         return Ree_t, filt_per_t
     
-
+    def calc_Rg(self,option='__permol'):
+        t0 = perf_counter()
+        
+        if option=='':
+            Rg = {'Rg':0.0,'Rgstd':0.0}
+        elif 'permol' in option:
+            option = '__permol'
+            Rg = dict()
+            for m in self.molecules:
+                Rg.update({m+'_Rg':0.0,m+'_Rgstd':0.0})
+        else:
+            raise ValueError('option "{:s}" is not specified'.format(option))
+        
+        args = (Rg,)
+        
+        nframes = self.loop_trajectory('Rg'+option,args)
+    
+        Rg = {k1:v/nframes for k1,v in Rg.items()}
+        
+        tf= perf_counter() -t0
+        ass.print_time(tf,inspect.currentframe().f_code.co_name,nframes)
+        return Rg
     
     def calc_chainCM_t(self,filters=dict(),option=''):
         '''
@@ -8073,7 +9023,7 @@ class Analysis_Confined(Analysis):
         tf = perf_counter()-t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return distrib
-    
+
     def calc_chain_characteristics(self,binl,dmax,offset=0):
         '''
         Chain characteristics as a function of distance of chain center of mass
@@ -8652,19 +9602,20 @@ class coreFunctions():
     
     @staticmethod
     def segmental_dipole_moment(self,filters,ids1,ids2,
-                                segment_args,dipoles_t,filt_per_t):
+                                segmental_args,dipoles_t,filt_per_t):
         
         frame = self.current_frame
         coords = self.get_coords(frame)
         
         key = self.get_key()
         
-        n = segment_args.shape[0]
+        n = len(segmental_args)
         
         dipoles = np.empty((n,3),dtype=float)
-        pc = self.partial_charge
+        pc = self.atom_charge.reshape(self.natoms,1)
         
-        numba_dipoles(pc,coords,segment_args,dipoles)
+        for i,sa in enumerate(segmental_args):
+            dipoles[i] = np.sum(pc[sa]*coords[sa],axis=0)
         
         dipoles_t[key] = dipoles  
         
@@ -8687,7 +9638,7 @@ class coreFunctions():
         n = chain_cm.shape[0]
         
         dipoles = np.empty((n,3),dtype=float)
-        pc = self.partial_charge
+        pc = self.atom_charge.reshape(self.natoms,1)
         for i,(j, cargs) in enumerate(self.chain_args.items()):
             dipoles[i] = np.sum(pc[cargs]*coords[cargs],axis=0)
         
@@ -8714,7 +9665,7 @@ class coreFunctions():
         
         dipoles = np.empty((n,3),dtype=float)
         
-        pc = self.partial_charge
+        pc = self.atom_charge.reshape(self.natoms,1)
         for i,(j, cargs) in enumerate(self.chain_args.items()):
             c = coords[cargs]
             dipole = np.sum(pc[cargs]*c,axis=0)
@@ -8745,7 +9696,7 @@ class coreFunctions():
         
         dipoles = np.empty((n,3),dtype=float)
         
-        pc = self.partial_charge
+        pc = self.atom_charge.reshape(self.natoms,1)
         for i,(j, cargs) in enumerate(self.chain_args.items()):
             c = coords[cargs]
             dipole = np.sum(pc[cargs]*c,axis=0)
@@ -8774,7 +9725,7 @@ class coreFunctions():
         
         n = segmental_ids.shape[0]
         seg_dipoles = np.empty((n,3),dtype=float)
-        pc = self.partial_charge
+        pc = self.atom_charge.reshape(self.natoms,1)
         numba_dipoles(pc,coords,segmental_ids,seg_dipoles)
         
         v = coords[segmental_ids[:,2]] - coords[segmental_ids[:,1]]
@@ -9057,6 +10008,43 @@ class coreFunctions():
                 costh_unv[j][i].extend(costh[filt])
         return  
     @staticmethod
+    def Rg__permol(self,rgdict):
+        #Rg per molecule name
+        coords = self.get_coords(self.current_frame)
+        for m in self.molecules:
+            rgframe = []
+            for a in self.chain_args.values():
+                if m != self.mol_names[a[0]]:
+                    if (m == self.mol_names[a]).any():
+                        raise Exception('Something is wrong with the arguments. The names do not correspond to the right ids.')
+                    continue
+                c = coords[a]
+                mass = self.atom_mass[a]
+                cm = CM(c,mass)
+                r = c - cm
+                dsq = np.sum(r*r,axis=1)
+                rgframe.append( np.average(dsq,weights=mass))
+        
+            rgdict[m+'_Rg'] += np.mean(rgframe)
+            rgdict[m+'_Rgstd'] += np.std(rgframe)
+        return
+    @staticmethod
+    def Rg(self,rgdict):
+        coords = self.get_coords(self.current_frame)
+        rgframe = []
+        for a in self.chain_args.values():
+            c = coords[a]
+            mass = self.atom_mass[a]
+            cm = CM(c,mass)
+            r = c - cm
+            dsq = np.sum(r*r,axis=1)
+            rgframe.append( np.average(dsq,weights=mass))
+        
+        rgdict['Rg'] += np.mean(rgframe)
+        rgdict['Rgstd'] += np.std(rgframe)
+        return
+    
+    @staticmethod
     def chain_characteristics(self,chain_args,dlayers,chars):
         #1) translate the system
         frame = self.current_frame
@@ -9126,6 +10114,7 @@ class coreFunctions():
                                     ids,ids,coords)
         return
     
+
     @staticmethod
     def vects_t(self,ids1,ids2,filters,vec_t,filt_per_t):
         frame = self.current_frame
@@ -9268,95 +10257,126 @@ class coreFunctions():
                             ids1,ids2,coords)
         
         return 
-    
     @staticmethod
-    def gofr(self,bins,gofr):
-        frame = self.current_frame
-        coords = self.get_coords(frame)
-        box = self.get_box(frame)
+    def find_sizes_given_pair_distances(n,pd,dcut):
+        k=0
+        neibs = {i:set() for i in range(n)}
+        for i in range(n):
+            for j in range(i+1,n):
+                if pd[k]<=dcut:
+                    neibs[i].add(j)
+                    neibs[j].add(i)
+                k+=1
         
-        n = coords.shape[0]
-        pd = np.empty(int(n*(n-1)/2),dtype=float)
-
-        pair_dists(coords,box,pd)
-        pd = pd[pd<=bins.max()]
-        numba_bin_count(pd,bins,gofr)
+        args = set()
         
-        return
-    
-    @staticmethod
-    def gofr_ids(self,ids,direction,bins,gofr):
-        frame = self.current_frame
-        coords = self.get_coords(frame)[ids]
-        box = self.get_box(frame)
-        if direction is None or direction=='':
-            pass
-        elif direction=='xy':
-            coords = coords.copy()
-            coords[:,2] = 0
-        elif direction =='z':
-            coords = coords.copy()
-            coords[:,0:2] = 0
+        all_args = set([i for i in range(n)])
+        
+        sci = {0,}
+        sizes = []
+        while len(args) != n:
             
-        n = coords.shape[0]
-        pd = np.empty(int(n*(n-1)/2),dtype=float)
-
-        pair_dists(coords,box,pd)
-        pd = pd[pd<=bins.max()]
-        numba_bin_count(pd,bins,gofr)
-        
-        return
+            old_set = set()
+            while (len(sci) != len(old_set)):
+                old_set = sci.copy()
+                for i in old_set:
+                    sci = sci | neibs[i]
+            args = args | sci
+            
+            sizes.append(len(sci))
+            
+            jfind = list(all_args - args)
+            if len(jfind) ==0:
+                continue
+            sci = {jfind[0],}
+            
+        return sizes
     
     @staticmethod
-    def gofr_type(self,fty,bins,gofr):
-        frame = self.current_frame
-        coords = self.get_coords(frame)[fty]
-        box = self.get_box(frame)
+    def cluster_size_min(self,segmental_ids,dcut,distribution):
+        key = self.get_key()
+        distribution[key] = dict()     
         
-        n = coords.shape[0]
-        pd = np.empty(int(n*(n-1)/2),dtype=float)
- 
-        pair_dists(coords,box,pd)
-        pd = pd[pd<=bins.max()]
-        numba_bin_count(pd,bins,gofr)
-        return
-    
-    @staticmethod
-    def gofr_type_to_all(self,fty,bins,gofr):
         frame = self.current_frame
         coords = self.get_coords(frame)
-        
-        coords_ty = coords[fty]
         box = self.get_box(frame)
         
-        n = coords.shape[0]
-        nty = coords_ty.shape[0]
-        pd = np.empty(int(n*nty),dtype=float)
+        n = len(segmental_ids)
         
-        pair_dists_general(coords,coords_ty,box,pd)
-        pd = pd[pd<=bins.max()]
-        numba_bin_count(pd,bins,gofr)
+        pd = np.empty(int(n*(n-1)/2),dtype=float)
+        
+        k=0
+        for i in range(n):
+            ci = coords[segmental_ids[i]]
+            for j in range(i+1,n):
+                cj = coords[segmental_ids[j]]
+                mic = minimum_image_relative_coords(ci-cj,box)
+                d = np.sum(mic*mic,axis=1)**0.5
+                pd[k] = d.min()
+                k+=1
 
-        return
+        sizes = coreFunctions.find_sizes_given_pair_distances(n,pd,dcut)
+        
+        distribution[key] = sizes
+        return 
     
     @staticmethod
-    def gofr_type_to_type(self,fty1,fty2,bins,gofr):
+    def cluster_size_com(self,segmental_ids,dcut,distribution):
+        key = self.get_key()
+        distribution[key] = dict()     
+        
         frame = self.current_frame
         coords = self.get_coords(frame)
+        box = self.get_box(frame)
+        seg_cm = self.segs_CM(coords,segmental_ids)
+        n = len(segmental_ids)
         
-        coords_ty1 = coords[fty1]
-        coords_ty2 = coords[fty2]
+        pd = np.empty(int(n*(n-1)/2),dtype=float)
+
+        pair_dists(seg_cm,box,pd)
+        
+        sizes = coreFunctions.find_sizes_given_pair_distances(n,pd,dcut)
+            
+        distribution[key] = sizes
+        return 
+    
+    @staticmethod
+    def gofr_segments(self,bins,segment_ids,gofr):
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+        box = self.get_box(frame)
+        seg_cm = self.segs_CM(coords,segment_ids)
+        n = len(seg_cm)
+        
+        pd = np.empty(int(n*(n-1)/2),dtype=float)
+
+        pair_dists(seg_cm,box,pd)
+        
+        pd = pd[pd<=bins.max()]
+        
+        numba_bin_count(pd,bins,gofr)
+        
+        return
+
+    @staticmethod
+    def gofr_pairs(self,ids1,ids2,bins,gofr):
+        frame = self.current_frame
+        coords = self.get_coords(frame)
+       
+        c1 = coords[ids1]
+        c2 = coords[ids2]
         box = self.get_box(frame)
         
-        nty1 = coords_ty1.shape[0]
-        nty2 = coords_ty2.shape[0]
-        pd = np.empty(int(nty1*nty2),dtype=float)
         
-        pair_dists_general(coords_ty1,coords_ty2,box,pd)
+        relc = minimum_image_relative_coords(c2-c1,box)
+        pd =np.sum(relc*relc,axis=1)**0.5
+        
         pd = pd[pd<=bins.max()]
+        
         numba_bin_count(pd,bins,gofr)
 
         return
+
 
 @jit(nopython=True,fastmath=True)
 def fill_property(prop,nv,i,j,value,mi,block_average):
@@ -9954,7 +10974,7 @@ def binning(x,bins):
 
 
 @jit(nopython=True,fastmath=True)
-def minimum_image(relative_coords,box):
+def minimum_image_relative_coords(relative_coords,box):
     imaged_rel_coords = relative_coords.copy()
     for i in range(relative_coords.shape[0]):
         for j in range(3):
@@ -9965,6 +10985,49 @@ def minimum_image(relative_coords,box):
     return imaged_rel_coords
 
 
+@jit(nopython=True,fastmath=True,parallel=True)
+def minimum_image_distance(coords,cref,box):
+        r = coords - cref
+       
+        for j in range(3):
+            b = box[j]
+            b2 = b/2
+            fm = r[:,j] < - b2
+            fp = r[:,j] >   b2
+            r[:,j][fm] += b
+            r[:,j][fp] -= b
+        d = np.zeros(r.shape[0],dtype=float)
+        for i in prange(r.shape[0]):
+            for j in range(3):
+                x = r[i,j]
+                d[i] += x*x
+            d[i] = np.sqrt(d[i])
+        
+        return d
+
+@jit(nopython=True,fastmath=True,parallel=True)
+def minimum_image_distance_coords(coords,cref,box):
+        r = coords - cref
+        imag_coords = coords.copy()
+        for j in range(3):
+            b = box[j]
+            b2 = b/2
+            fm = r[:,j] < - b2
+            fp = r[:,j] >   b2
+                        
+            r[:,j][fm] += b
+            imag_coords[:,j][fm] +=b
+            
+            r[:,j][fp] -= b
+            imag_coords[:,j][fp] -= b
+        d = np.zeros(r.shape[0],dtype=float)
+        for i in prange(r.shape[0]):
+            for j in range(3):
+                x = r[i,j]
+                d[i] += x*x
+            d[i] = np.sqrt(d[i])
+        
+        return d,imag_coords
 
 @jit(nopython=True,fastmath=True,parallel=True)
 def numba_Sq2(nc,v,q,Sq):
@@ -9988,7 +11051,7 @@ def pair_vects(coords,box,v):
     coords = implement_pbc(coords,box)
     for i in prange(n):
         rel_coords = coords[i] - coords[i+1:]
-        rc = minimum_image(rel_coords,box)
+        rc = minimum_image_relative_coords(rel_coords,box)
         idx_i = i*n
         for k in range(0,i+1):
             idx_i-=k
@@ -9997,12 +11060,13 @@ def pair_vects(coords,box,v):
     return
 
 
+
 @jit(nopython=True,fastmath=True,parallel=True)
 def pair_dists(coords,box,dists):
     n = coords.shape[0]
     for i in prange(n):
         rel_coords = coords[i] - coords[i+1:]
-        rc = minimum_image(rel_coords,box)
+        rc = minimum_image_relative_coords(rel_coords,box)
         dist = np.sum(rc*rc,axis=1)**0.5
         idx_i = i*n
         for k in range(0,i+1):
@@ -10017,7 +11081,7 @@ def numba_coordination(coords1,coords2,box,maxdist,coordination):
     n2 = coords2.shape[0] 
     for i in prange(n1):
         rel_coords = coords1[i] - coords2
-        rc = minimum_image(rel_coords,box)
+        rc = minimum_image_relative_coords(rel_coords,box)
         dist = np.sqrt(np.sum(rc*rc,axis=1))
         for j in range(n2):
             if dist[j]<maxdist:
@@ -10031,10 +11095,11 @@ def pair_dists_general(coords1,coords2,box,dists):
     n2 = coords2.shape[0] 
     for i in prange(n1):
         rel_coords = coords1[i] - coords2
-        rc = minimum_image(rel_coords,box)
-        dist = np.sum(rc*rc,axis=1)**0.5
-        for j in range(n2):
-            dists[i*n2+j] = dist[j]
+        #rc=rel_coords
+        rc = minimum_image_relative_coords(rel_coords,box)
+        dists[i*n2:(i+1)*n2] = np.sum(rc*rc,axis=1)**0.5
+        #for j in range(n2):
+         #   dists[i*n2+j] = dist[j]
     return
 
 @jit(nopython=True,fastmath=True)
