@@ -4512,7 +4512,8 @@ class Topology:
                 for line in lines[n:]:
                     if '[' in line or ']' in line:
                         break
-                    if ';' in line:
+                    
+                    if ';' in line or 'include' in line:
                         continue
                     l = line.strip().split()
                     if len(l)==0:
@@ -4533,7 +4534,7 @@ class Topology:
         
         return
     def read_topfile_ff(self,file):
-        print('HERE')
+        
         with open(file,'r') as f:
             lines = f.readlines()
             f.closed
@@ -4556,7 +4557,7 @@ class Topology:
                 for line in lines[n:]:
                     if '[' in line or ']' in line:
                         break
-                    if ';' in line:
+                    if ';' in line or 'include' in line or '#' in line:
                         continue
                     l = line.strip().split()
                     if len(l)==0:
@@ -4572,7 +4573,7 @@ class Topology:
                             ty=l[0]
                             value = (ty,*l[jd:])
                     attr[ty] = value
-                    print(ty,value)
+                
                 setattr(self.ff,name,attr)
         return
  
@@ -4835,7 +4836,7 @@ class Topology:
             self.atomscode_map.update( atomscode_map)
 
 
-        jd = {'bonds':2,'angles':3,'dihedrals':4,'pairs':2,'exlcusions':2}
+        jd = {'bonds':2,'angles':3,'dihedrals':4,'pairs':2,'exclusions':2}
         topol =  {'bonds':[],'angles':[],'dihedrals':[],'pairs':[],'exclusions':[]}
 
             
@@ -4923,7 +4924,7 @@ class Topology:
             i1 = np.where(at_ids == e[1])[0][0]
             assert res_name[i0] == res_name[i1], 'Exclusion {:d} - {:d} is between two different residues'.format(i0,i1)   
             res_nm = res_name[i0]
-            pairs_per_resname[res_nm].append(e)
+            exclusions_per_resname[res_nm].append(e)
             
         for c in ['connectivity','angles','dihedrals','pairs','exclusions']:
             name = c+'_per_resname'
@@ -4934,9 +4935,9 @@ class Topology:
                 attr = getattr(self,name)
                 #updating
                 for t,bad in var.items():
+                    
                     attr[t] = bad
                 setattr(self,name,attr)
-        
         tf = perf_counter() - t0
         ass.print_time(tf,inspect.currentframe().f_code.co_name)
         return 
@@ -5637,34 +5638,50 @@ class Topology:
      
         return
         
-    def merge_ff(self,obj):
+    def merge_ff(self,obj,add=''):
+        a = self.add_tuple
         names = ['atomtypes','bondtypes','angletypes','dihedraltypes']
+        def mod0(t):
+            t = list(t)
+            t[0] = ' '.join([b +add for b in t[0].split(' ')  ])
+            return tuple(t)
+        def mod01(t):
+            t = list(t)
+            t[0] = t[0] + add
+            t[1] = t[1] + add
+            return tuple(t)
         for name in names:
             ffdata = getattr(self.ff,name)
             medata = getattr(obj.ff,name)
-            ffdata.update(medata)
-        
-    def update_topology(self,n,obj):
-        self.connectivity.update( {(n+c[0],n+c[1]):t for c,t in obj.connectivity.items()} )
-        self.pairs.update( {(n+c[0],n+c[1]):t for c,t in obj.pairs.items()} )
-        self.exclusions.update( {(n+c[0],n+c[1]):t for c,t in obj.exclusions.items()} )
+            if name =='atomtypes':
+                ffdata.update({k+add:mod01(v) for k,v in medata.items() })
+            else:
+                ffdata.update({a(k,add):mod0(v) for k,v in medata.items() })
+    @staticmethod
+    def add_tuple(t,add=''):
+        return tuple(y+add for y in list(t))
+    def update_topology(self,n,obj,add=''):
+        a = self.add_tuple
+        self.connectivity.update( {(n+c[0],n+c[1]) : a(t,add) for c,t in obj.connectivity.items()} )
+        self.pairs.update( {(n+c[0],n+c[1]):a(t,add) for c,t in obj.pairs.items()} )
+        self.exclusions.update( {(n+c[0],n+c[1]):a(t,add) for c,t in obj.exclusions.items()} )
         #self.find_neibs()
         self.neibs.update({n+aid: {n+a for a in neibs} for aid,neibs in obj.neibs.items()} )
-        self.angles.update( {(n+c[0],n+c[1],n+c[2]):t for c,t in obj.angles.items()} )
-        self.dihedrals.update( {(n+c[0],n+c[1],n+c[2],n+c[3]):t for c,t in obj.dihedrals.items()} )
+        self.angles.update( {(n+c[0],n+c[1],n+c[2]):a(t,add) for c,t in obj.angles.items()} )
+        self.dihedrals.update( {(n+c[0],n+c[1],n+c[2],n+c[3]):a(t,add) for c,t in obj.dihedrals.items()} )
         return 
-    def merge_system(self,obj):
+    def merge_system(self,obj,add=''):
         n = self.natoms
 
-        self.update_topology(n,obj)
+        self.update_topology(n,obj,add)
        
         self.at_ids = np.concatenate((self.at_ids,obj.at_ids))
-        self.at_types = np.concatenate((self.at_types,obj.at_types))
+        self.at_types = np.concatenate((self.at_types,obj.at_types +add))
         self.mol_ids = np.concatenate((self.mol_ids,obj.mol_ids))
         self.mol_names = np.concatenate((self.mol_names,obj.mol_names))
         self.atom_mass = np.concatenate((self.atom_mass,obj.atom_mass))
         self.atom_charge = np.concatenate((self.atom_charge,obj.atom_charge))
-        self.atom_code = np.concatenate((self.atom_code,obj.atom_code))
+        self.atom_code = np.concatenate((self.atom_code,obj.atom_code+add))
         for frame in self.timeframes:
             c1 = self.get_coords(frame)
             c2 = obj.get_coords(frame)
@@ -5675,7 +5692,9 @@ class Topology:
         self.renumber_residues()
         self.find_locGlob()
         
-        self.merge_ff(obj)
+        self.merge_ff(obj,add)
+        
+        self.exclusions_map.update(obj.exclusions_map)
 
         return
     
@@ -6478,6 +6497,7 @@ class Topology:
                 lines.extend(['','[ exclusions ]','; i  j '])
                 for p1,p2 in zip(pairs1,pairs2):
                     lines.append('{:5d}   {:5d}  '.format(p1+s,p2+s))
+                    
             if hasattr(self.ff,'posres'):
                 data = getattr(self.ff,'posres')
                 for d in data:
@@ -6488,7 +6508,7 @@ class Topology:
                         lines.extend(['','[ position_restraints ]','; i  j '])
                         for atid in self.at_ids[f]:
                             i = self.glob_id_to_loc[mol_id][atid]
-                            r = d['r']
+                            #r = d['r']
                             k = d['k']
                             lines.append('{:d}  {:d}   {:8.5f}  {:8.5f}  {:8.5f}'.format(i+s,1,k,k,k))
             
@@ -6539,8 +6559,9 @@ class Topology:
             return '  '.join([str(i) for i in k])
         
         for k,v in self.ff.atomtypes.items():
+            vv = v[-5:]
             lines.append('{:10s} {:5s}  {:9.6f}  {:9.6f}  {:5s}  {:9.6f} {:9.6f}'.format(
-                v[0],k,float(v[1]),float(v[2]),v[3],float(v[4]),float(v[5])))
+                v[0],k,float(vv[0]),float(vv[1]),vv[2],float(vv[3]),float(vv[4])))
         
         lines.extend(['','[ bondtypes ]',';  i     j   func    b0    kb'])
         for k,v in self.ff.bondtypes.items():
